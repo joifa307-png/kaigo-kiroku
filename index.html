@@ -105,7 +105,7 @@ input,select,textarea{font-family:inherit;font-size:30px;}
   -webkit-overflow-scrolling:touch;
 }
 .tab{
-  padding:11px 16px;font-size:32px;font-weight:600;white-space:nowrap;
+  padding:10px 16px;font-size:20px;font-weight:600;white-space:nowrap;
   color:var(--text3);border-bottom:3px solid transparent;
   cursor:pointer;flex-shrink:0;margin-bottom:-2px;
 }
@@ -118,31 +118,31 @@ input,select,textarea{font-family:inherit;font-size:30px;}
   margin-bottom:12px;box-shadow:0 1px 4px rgba(0,0,0,.07);
 }
 .panel-sec h3{
-  font-size:28px;color:var(--text2);margin-bottom:10px;
+  font-size:22px;color:var(--text2);margin-bottom:10px;
   padding-bottom:6px;border-bottom:1px solid var(--border2);
 }
 .panel-sec h3 .sec-btn{float:right;}
 
 /* ===== フォームグループ ===== */
 .fg{margin-bottom:12px;}
-.fg label{display:block;font-size:26px;color:var(--text2);margin-bottom:4px;font-weight:600;}
+.fg label{display:block;font-size:20px;color:var(--text2);margin-bottom:4px;font-weight:600;}
 .fg input,.fg select,.fg textarea{
-  width:100%;padding:18px 14px;border:1px solid var(--border2);
-  border-radius:var(--r1);background:var(--white);font-size:30px;
+  width:100%;padding:12px 12px;border:1px solid var(--border2);
+  border-radius:var(--r1);background:var(--white);font-size:20px;
 }
 .fg input:focus,.fg select:focus,.fg textarea:focus{
   outline:none;border-color:var(--orange);box-shadow:0 0 0 2px rgba(232,119,34,.15);
 }
-.fg textarea{min-height:120px;resize:vertical;}
+.fg textarea{min-height:100px;resize:vertical;}
 .fg-row{display:flex;gap:10px;}
 .fg-row .fg{flex:1;}
-.fg-hint{font-size:12px;color:var(--text3);margin-top:3px;}
+.fg-hint{font-size:14px;color:var(--text3);margin-top:3px;}
 
 /* ===== チップ ===== */
 .chip{
-  display:inline-block;padding:10px 24px;border-radius:20px;
+  display:inline-block;padding:8px 18px;border-radius:20px;
   border:1px solid var(--border2);background:var(--white);
-  font-size:26px;cursor:pointer;user-select:none;margin:3px;
+  font-size:20px;cursor:pointer;user-select:none;margin:3px;
 }
 .chip.on,.chip.pc-on{background:var(--orange);color:#fff;border-color:var(--orange);}
 .chip.selected{background:var(--orange);color:#fff;border-color:var(--orange);}
@@ -150,30 +150,30 @@ input,select,textarea{font-family:inherit;font-size:30px;}
 /* ===== ボタン ===== */
 .btn{
   display:inline-block;padding:10px 20px;border-radius:var(--r2);
-  border:none;font-size:30px;font-weight:600;cursor:pointer;
+  border:none;font-size:20px;font-weight:600;cursor:pointer;
   user-select:none;text-align:center;
 }
 .btn-primary{background:var(--orange);color:#fff;}
 .btn-primary:active{opacity:.8;}
 .btn-danger{background:var(--red);color:#fff;}
 .btn-gray{background:var(--border2);color:var(--text2);}
-.btn-sm{padding:6px 14px;font-size:26px;}
+.btn-sm{padding:6px 12px;font-size:18px;}
 .btn-block{display:block;width:100%;}
 
 /* ===== 履歴リスト ===== */
 .hist-list{margin-bottom:14px;}
 .hist-item{
   display:flex;align-items:flex-start;gap:8px;
-  padding:10px 0;border-bottom:1px solid var(--border2);font-size:15px;
+  padding:10px 0;border-bottom:1px solid var(--border2);
 }
 .hist-item:last-child{border-bottom:none;}
-.hist-time{color:var(--orange2);font-weight:700;white-space:nowrap;min-width:90px;font-size:28px;}
-.hist-content{flex:1;color:var(--text1);font-size:30px;line-height:1.5;}
-.hist-del{color:var(--red);font-size:26px;padding:4px 10px;border:1px solid var(--red);
+.hist-time{color:var(--orange2);font-weight:700;white-space:nowrap;min-width:80px;font-size:20px;}
+.hist-content{flex:1;color:var(--text1);font-size:20px;line-height:1.5;}
+.hist-del{color:var(--red);font-size:18px;padding:4px 10px;border:1px solid var(--red);
   border-radius:var(--r1);background:none;cursor:pointer;white-space:nowrap;}
-.hist-edit{color:var(--blue);font-size:26px;padding:4px 10px;border:1px solid var(--blue);
+.hist-edit{color:var(--blue);font-size:18px;padding:4px 10px;border:1px solid var(--blue);
   border-radius:var(--r1);background:none;cursor:pointer;white-space:nowrap;margin-right:2px;}
-.hist-day{font-size:11px;color:var(--orange2);font-weight:600;margin:6px 0 2px;}
+.hist-day{font-size:14px;color:var(--orange2);font-weight:600;margin:6px 0 2px;}
 
 /* ===== オーバーレイ ===== */
 .ov-back{
@@ -1494,16 +1494,27 @@ function openBulkMed(){
   const timingOpts=MED_TIMINGS.map(t=>`<div class="chip" style="font-size:20px;" onclick="this.classList.toggle('selected')">${t.label}</div>`).join('');
   const resChips=todayRes.map(r=>`<div class="chip" style="font-size:20px;" onclick="this.classList.toggle('selected')" data-name="${r.name}">${r.name}</div>`).join('');
   openBulkMedOv(`
-    <div class="ov-title" style="font-size:20px;font-weight:700;margin-bottom:14px;padding-bottom:10px;border-bottom:1px solid var(--border2);">服薬一括入力</div>
-    <div class="fg"><label>服薬区分</label><div style="display:flex;flex-wrap:wrap;gap:4px;" id="bulkTimings">${timingOpts}</div></div>
-    <div class="fg"><label>担当者</label><select id="bulkStaff">${buildStaffOpts('')}</select></div>
-    <div class="fg"><label>時刻</label><input type="time" id="bulkTime" value="${nowTime()}"></div>
-    <div class="fg">
-      <label>対象者 <button type="button" class="btn btn-sm" style="font-size:18px;margin-left:8px;background:#d4edda;color:#155724;border:1px solid #b8dacc;" onclick="document.querySelectorAll('#bulkRes .chip').forEach(c=>c.classList.add('selected'))">全員選択</button></label>
-      <div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:6px;" id="bulkRes">${resChips}</div>
+    <div style="font-size:22px;font-weight:700;margin-bottom:18px;padding-bottom:12px;border-bottom:2px solid var(--border2);">服薬一括入力</div>
+    <div style="display:flex;gap:16px;align-items:flex-start;margin-bottom:16px;">
+      <div style="flex:1;">
+        <label style="display:block;font-size:20px;color:var(--text2);font-weight:600;margin-bottom:8px;">服薬区分</label>
+        <div style="display:flex;flex-wrap:wrap;gap:6px;" id="bulkTimings">${timingOpts}</div>
+      </div>
+      <div style="flex:0 0 140px;">
+        <label style="display:block;font-size:20px;color:var(--text2);font-weight:600;margin-bottom:8px;">時刻</label>
+        <input type="time" id="bulkTime" value="${nowTime()}" style="width:100%;padding:10px 10px;border:1px solid var(--border2);border-radius:var(--r1);font-size:20px;">
+      </div>
     </div>
-    <button class="btn btn-primary btn-block mt12" onclick="saveBulkMed()">一括保存</button>
-    <button class="btn btn-gray btn-block mt8" onclick="closeMainOv()">閉じる</button>
+    <div style="margin-bottom:16px;">
+      <label style="display:block;font-size:20px;color:var(--text2);font-weight:600;margin-bottom:8px;">担当者</label>
+      <select id="bulkStaff" style="width:100%;padding:10px;border:1px solid var(--border2);border-radius:var(--r1);font-size:20px;">${buildStaffOpts('')}</select>
+    </div>
+    <div style="margin-bottom:20px;">
+      <label style="display:block;font-size:20px;color:var(--text2);font-weight:600;margin-bottom:8px;">対象者 <button type="button" class="btn btn-sm" style="font-size:18px;margin-left:10px;background:#d4edda;color:#155724;border:1px solid #b8dacc;" onclick="document.querySelectorAll('#bulkRes .chip').forEach(c=>c.classList.add('selected'))">全員選択</button></label>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;" id="bulkRes">${resChips}</div>
+    </div>
+    <button class="btn btn-primary btn-block" style="font-size:20px;padding:14px;" onclick="saveBulkMed()">一括保存</button>
+    <button class="btn btn-gray btn-block" style="font-size:20px;padding:12px;margin-top:10px;" onclick="closeMainOv()">閉じる</button>
   `);
 }
 function saveBulkMed(){
