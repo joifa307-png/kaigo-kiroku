@@ -41,10 +41,10 @@ input,select,textarea{font-family:inherit;font-size:30px;}
 }
 .hdr-btn:active{opacity:.7;}
 .hdr-btn.primary{background:var(--orange);color:#fff;border-color:var(--orange);}
-.hdr-btn.nav{padding:6px 10px;font-size:30px;}
-.hdr-center{display:flex;align-items:center;gap:6px;}
+.hdr-btn.nav{padding:4px 8px;font-size:20px;}
+.hdr-center{display:flex;align-items:center;gap:4px;}
 .hdr-date{
-  font-size:30px;font-weight:700;padding:6px 12px;
+  font-size:20px;font-weight:700;padding:4px 8px;
   border-radius:var(--r2);border:1px solid var(--border2);
   background:var(--white);cursor:pointer;white-space:nowrap;
 }
@@ -127,7 +127,7 @@ input,select,textarea{font-family:inherit;font-size:30px;}
 .fg{margin-bottom:12px;}
 .fg label{display:block;font-size:20px;color:var(--text2);margin-bottom:4px;font-weight:600;}
 .fg input,.fg select,.fg textarea{
-  width:100%;padding:12px 12px;border:1px solid var(--border2);
+  width:100%;padding:8px 10px;border:1px solid var(--border2);
   border-radius:var(--r1);background:var(--white);font-size:20px;
 }
 .fg input:focus,.fg select:focus,.fg textarea:focus{
@@ -197,11 +197,11 @@ input,select,textarea{font-family:inherit;font-size:30px;}
 
 /* ===== カレンダー ===== */
 .cal-grid{
-  display:grid;grid-template-columns:repeat(7,1fr);gap:2px;margin-top:10px;
+  display:grid;grid-template-columns:repeat(7,1fr);gap:2px;margin-top:6px;
 }
-.cal-lbl{text-align:center;font-size:11px;color:var(--text3);padding:4px 0;font-weight:600;}
+.cal-lbl{text-align:center;font-size:10px;color:var(--text3);padding:3px 0;font-weight:600;}
 .cal-day{
-  text-align:center;padding:8px 2px;font-size:14px;border-radius:var(--r1);
+  text-align:center;padding:5px 2px;font-size:12px;border-radius:var(--r1);
   cursor:pointer;position:relative;
 }
 .cal-day:active{background:var(--blue2);}
@@ -209,11 +209,11 @@ input,select,textarea{font-family:inherit;font-size:30px;}
 .cal-day.sel{background:var(--orange);color:#fff;font-weight:700;}
 .cal-day.has::after{
   content:'';position:absolute;bottom:2px;left:50%;transform:translateX(-50%);
-  width:4px;height:4px;border-radius:50%;background:var(--green);
+  width:3px;height:3px;border-radius:50%;background:var(--green);
 }
 .cal-day.today.has::after,.cal-day.sel.has::after{background:#fff;}
 .cal-nav{display:flex;justify-content:space-between;align-items:center;}
-.cal-nav-title{font-weight:700;font-size:16px;}
+.cal-nav-title{font-weight:700;font-size:13px;}
 
 /* ===== 服薬チップ ===== */
 .med-chip{
@@ -1129,9 +1129,6 @@ function buildVitalPanel(){
 
   const lv=rec.vital.length?rec.vital[rec.vital.length-1]:null;
   return `<div class="panel">
-    <div style="padding:4px 0 8px 0;">
-      <button class="back-btn" onclick="goBack()" style="font-size:22px;padding:8px 16px;">◂ メイン</button>
-    </div>
     <div class="panel-sec">
       <h3>48時間の記録</h3>
       <div class="hist-list">${histHtml}</div>
@@ -1229,9 +1226,6 @@ function buildExPanel(){
   const stoolOpts=(S.exStoolOptions||[]).map(o=>`<option>${o}</option>`).join('');
 
   return `<div class="panel">
-    <div style="padding:4px 0 8px 0;">
-      <button class="back-btn" onclick="goBack()" style="font-size:22px;padding:8px 16px;">◂ メイン</button>
-    </div>
     <div class="panel-sec">
       <h3>
         最終排便：<span style="color:var(--red);font-weight:600;">${lastStool}</span>
@@ -1314,9 +1308,6 @@ function buildBathPanel(){
   </div>`).join(''):'<div class="text-gray" style="font-size:14px;padding:8px 0;">記録なし</div>';
 
   return `<div class="panel">
-    <div style="padding:4px 0 8px 0;">
-      <button class="back-btn" onclick="goBack()" style="font-size:22px;padding:8px 16px;">◂ メイン</button>
-    </div>
     <div class="panel-sec"><h3>48時間の記録</h3><div class="hist-list">${histHtml}</div></div>
     <div class="panel-sec" id="bathForm">
       <h3 id="bathFormTitle">入浴入力</h3>
@@ -1371,9 +1362,6 @@ function buildCarePanel(){
   </div>`).join(''):'<div class="text-gray" style="font-size:14px;padding:8px 0;">記録なし</div>';
 
   return `<div class="panel">
-    <div style="padding:4px 0 8px 0;">
-      <button class="back-btn" onclick="goBack()" style="font-size:22px;padding:8px 16px;">◂ メイン</button>
-    </div>
     <div class="panel-sec"><h3>48時間の記録</h3><div class="hist-list">${histHtml}</div></div>
     <div class="panel-sec">
       <h3>ケア記録入力</h3>
@@ -1453,9 +1441,6 @@ function buildMedPanel(){
   }).join('');
 
   return `<div class="panel">
-    <div style="padding:4px 0 8px 0;">
-      <button class="back-btn" onclick="goBack()" style="font-size:22px;padding:8px 16px;">◂ メイン</button>
-    </div>
     <div class="panel-sec"><h3>服薬履歴</h3><div class="hist-list">${histHtml}</div></div>
     ${inputSecs}
   </div>`;
@@ -1566,9 +1551,6 @@ function buildMealPanel(){
     </div>
   </div>`).join(''):'<div class="text-gray" style="font-size:14px;padding:8px 0;">記録なし</div>';
   return `<div class="panel">
-    <div style="padding:4px 0 8px 0;">
-      <button class="back-btn" onclick="goBack()" style="font-size:22px;padding:8px 16px;">◂ メイン</button>
-    </div>
     <div class="panel-sec"><h3>直近の食事記録</h3><div class="hist-list">${mealHistHtml}</div></div>
     <div class="panel-sec">
       <h3>朝食</h3>
@@ -1655,9 +1637,6 @@ function buildRecPanel(){
   }).join(''):'<div class="text-gray" style="font-size:14px;padding:8px 0;">記録なし</div>';
 
   return `<div class="panel">
-    <div style="padding:4px 0 8px 0;">
-      <button class="back-btn" onclick="goBack()" style="font-size:22px;padding:8px 16px;">◂ メイン</button>
-    </div>
     <div class="panel-sec"><h3>最近のレク記録</h3><div class="hist-list">${histHtml}</div></div>
     <div class="panel-sec">
       <h3>レク入力（本日）</h3>
@@ -1699,9 +1678,6 @@ function buildNotesPanel(){
   </div>`).join(''):'<div class="text-gray" style="font-size:13px;padding:8px 0;">記録なし</div>';
 
   return `<div class="panel">
-    <div style="padding:4px 0 8px 0;">
-      <button class="back-btn" onclick="goBack()" style="font-size:22px;padding:8px 16px;">◂ メイン</button>
-    </div>
     <div class="panel-sec"><h3>48時間の申送り</h3><div class="hist-list">${histHtml}</div></div>
     <div class="panel-sec">
       <h3>申送り入力</h3>
@@ -1748,9 +1724,6 @@ function buildDayPanel(){
     <div class="hist-content">${h.text}</div>
   </div>`).join(''):'<div class="text-gray" style="font-size:14px;padding:8px 0;">記録なし</div>';
   return `<div class="panel">
-    <div style="padding:4px 0 8px 0;">
-      <button class="back-btn" onclick="goBack()" style="font-size:22px;padding:8px 16px;">◂ メイン</button>
-    </div>
     <div class="panel-sec"><h3>直近の記録（3回分）</h3><div class="hist-list">${dayHistHtml}</div></div>
     <div class="panel-sec">
       <h3>1日の様子</h3>
