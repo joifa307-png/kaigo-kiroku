@@ -60,7 +60,7 @@ input,select,textarea{font-family:inherit;font-size:30px;}
 .res-table{width:100%;border-collapse:collapse;min-width:700px;}
 .res-table th{
   background:var(--orange);color:#fff;padding:8px 6px;
-  font-size:13px;white-space:nowrap;text-align:center;
+  font-size:26px;white-space:nowrap;text-align:center;
 }
 .res-table td{
   padding:10px 6px;border-bottom:1px solid var(--border1);
@@ -71,13 +71,15 @@ input,select,textarea{font-family:inherit;font-size:30px;}
 .res-table tr:nth-child(even) td{background:#F7F6F2;}
 .res-table tr:active td{background:var(--blue2)!important;}
 .name-cell{text-align:left !important;padding-left:8px !important;cursor:default;}
-.name-txt{font-size:34px;font-weight:500;}
-.name-sub{font-size:24px;color:var(--text3);}
-.cell-val{font-size:32px;line-height:1.4;}
-.cell-empty{color:var(--text3);font-size:32px;}
-.cell-ok{color:var(--green);font-size:34px;font-weight:700;}
-.cell-warn{color:var(--red);font-size:30px;font-weight:700;}
-.cell-red{color:var(--red);font-size:34px;font-weight:700;}
+.name-txt{font-size:22px;font-weight:500;}
+.name-sub{font-size:16px;color:var(--text3);}
+.cell-val{font-size:21px;line-height:1.4;}
+.cell-empty{color:var(--text3);font-size:21px;}
+.cell-ok{color:var(--green);font-size:22px;font-weight:700;}
+.cell-warn{color:var(--red);font-size:20px;font-weight:700;}
+.cell-red{color:var(--red);font-size:22px;font-weight:700;}
+/* 排泄列専用 */
+.cell-ex{font-size:48px;line-height:1.4;}
 .badge-ok{color:var(--green);font-weight:700;}
 .badge-ng{color:var(--orange2);font-weight:700;}
 
@@ -902,10 +904,19 @@ function renderMain(){
   }
   tbody.innerHTML=todayRes.map(r=>{
     const rec=db.records[dk()]&&db.records[dk()][r.name]||{};
-    // 申送（48時間以内のメモ）
+    // 申送（48時間以内のメモ：複数日チェック）
     const now=Date.now();
-    const h48=(rec.notes||[]).some(n=>(now-new Date(n.ts||0).getTime())<48*3600000);
-    const nc=h48?'<span class="cell-red">●</span>':'<span class="cell-empty">—</span>';
+    const _h48chk=()=>{
+      for(let d=0;d<=2;d++){
+        const dt=new Date(curDate); dt.setDate(dt.getDate()-d);
+        const k=dk(dt);
+        const rr=db.records[k]&&db.records[k][r.name]||{};
+        if((rr.notes||[]).some(n=>(now-new Date(n.ts||0).getTime())<48*3600000)) return true;
+      }
+      return false;
+    };
+    const h48=_h48chk();
+    const nc=h48?'<span class="cell-red" style="font-size:40px;">●</span>':'<span class="cell-empty">—</span>';
     // バイタル（体温/血圧/脈拍/SpO2）
     const lv=(rec.vital||[]).length?(rec.vital[rec.vital.length-1]):null;
     const tc=lv?`<span class="${parseFloat(lv.temp)>=37.0?'cell-warn':'cell-val'}">${lv.temp}℃</span>`:'<span class="cell-empty">—</span>';
@@ -921,12 +932,12 @@ function renderMain(){
       const _leWater=le.stool&&le.stool.startsWith('水様便');
       if(le.urine&&le.urine!=='なし') lines.push(`<span style="color:#0F6E56;font-weight:600;">尿 ${le.urine}</span>`);
       if(le.pad&&le.pad!=='なし') lines.push(`パット ${le.pad}`);
-      if(le.padChange) lines.push('〔パ交換〕');
-      if(le.rehaChange) lines.push('〔リハパン交換〕');
-      if(le.diaperChange) lines.push('〔オムツ交換〕');
+      if(le.padChange) lines.push('<span style="color:var(--blue);font-weight:600;">パ交換</span>');
+      if(le.rehaChange) lines.push('<span style="color:var(--blue);font-weight:600;">リハパン交換</span>');
+      if(le.diaperChange) lines.push('<span style="color:var(--blue);font-weight:600;">オムツ交換</span>');
       if(le.stool&&le.stool!=='なし') lines.push(_leWater?`<span style="color:var(--red);font-weight:600;">${le.stool}</span>`:`<span style="color:#8B4513;">${le.stool}</span>`);
       if(lines.length===0) lines.push('空振り');
-      ec=`<span class="cell-val" style="font-size:14px;line-height:1.4;">${le.time}<br>${lines.join('<br>')}</span>`;
+      ec=`<span class="cell-ex">${le.time}<br>${lines.join('<br>')}</span>`;
     }
     // 最終排便
     const _ls=getLastStool(r.name);
