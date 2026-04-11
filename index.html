@@ -250,10 +250,17 @@ input,select,textarea{font-family:inherit;font-size:30px;}
 }
 
 /* ===== 印刷 ===== */
+#printArea{display:none;}
 @media print{
   .no-print{display:none !important;}
-  .screen{display:block !important;}
-  body{background:#fff;}
+  .screen{display:none !important;}
+  #printArea{display:block !important;}
+  body{background:#fff;font-size:11px;}
+  .print-title{font-size:14px;font-weight:700;margin-bottom:8px;border-bottom:2px solid #333;padding-bottom:4px;}
+  .print-table{border-collapse:collapse;width:100%;margin-bottom:12px;}
+  .print-table th{background:#f0f0f0;border:1px solid #555;padding:4px 6px;font-size:11px;white-space:nowrap;}
+  .print-table td{border:1px solid #999;padding:3px 6px;font-size:11px;vertical-align:top;}
+  .print-subtitle{font-size:12px;font-weight:600;margin:10px 0 4px;color:#333;}
 }
 
 /* ===== ユーティリティ ===== */
@@ -305,6 +312,8 @@ input,select,textarea{font-family:inherit;font-size:30px;}
       <span class="sync-dot" id="syncDot">●</span>
       <span id="syncLabel">--</span>
     </div>
+    <button class="hdr-btn no-print" onclick="openPrint()" style="background:#E1F5EE;color:#0F6E56;border-color:#0F6E56;font-weight:700;">連絡帳</button>
+    <button class="hdr-btn no-print" onclick="saveMonthlyBackup()" style="background:var(--blue2);color:var(--blue);border-color:var(--blue);font-weight:700;">月次保存</button>
     <button class="hdr-btn no-print" onclick="syncNow()">🔄</button>
     <button class="hdr-btn no-print" onclick="openSettings()">⚙️</button>
   </div>
@@ -387,12 +396,10 @@ input,select,textarea{font-family:inherit;font-size:30px;}
 <!-- ========== 8日集計オーバーレイ ========== -->
 <div class="ov-back" id="ovSummary" onclick="if(event.target===this)closeOv('ovSummary')">
   <div class="ov show" style="height:100vh;max-height:100vh;border-radius:0;display:flex;flex-direction:column;padding:0;bottom:0;top:0;">
-    <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid var(--border2);flex-shrink:0;background:var(--white);">
-      <div id="sumResName" style="font-size:18px;font-weight:700;color:var(--text1);"></div>
-      <div style="display:flex;gap:8px;align-items:center;">
-        <span style="font-size:12px;color:var(--text3);">8日間集計</span>
-        <button onclick="closeOv('ovSummary')" style="background:none;border:none;font-size:24px;cursor:pointer;color:var(--text3);line-height:1;padding:0 4px;">✕</button>
-      </div>
+    <div style="display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid var(--border2);flex-shrink:0;background:var(--white);">
+      <button class="back-btn" onclick="closeOv('ovSummary')">◀ メイン</button>
+      <div id="sumResName" style="font-size:18px;font-weight:700;color:var(--text1);flex:1;"></div>
+      <span style="font-size:12px;color:var(--text3);">8日間集計</span>
     </div>
     <div style="overflow:auto;-webkit-overflow-scrolling:touch;flex:1;background:#f5f5f5;padding:8px;">
       <table id="sumTable" style="border-collapse:collapse;min-width:600px;"></table>
@@ -402,6 +409,36 @@ input,select,textarea{font-family:inherit;font-size:30px;}
     </div>
   </div>
 </div>
+
+<!-- ========== スケジュール編集オーバーレイ ========== -->
+<div class="ov-back" id="ovSched">
+  <div class="ov show" style="padding:16px;">
+    <div class="ov-title" style="font-size:18px;">
+      <span id="ovSchedTitle">通所スケジュール編集</span>
+      <button class="ov-close" onclick="closeOv('ovSched')">✕</button>
+    </div>
+    <p style="font-size:14px;color:var(--text2);margin-bottom:10px;">出席する日付をタップして選択してください</p>
+    <div id="ovSchedBody"></div>
+  </div>
+</div>
+
+<!-- ========== 連絡帳印刷オーバーレイ ========== -->
+<div class="ov-back" id="ovPrint" onclick="if(event.target===this)closeOv('ovPrint')">
+  <div class="ov show" style="padding:20px;max-width:500px;width:94vw;">
+    <div style="display:flex;align-items:center;gap:12px;padding-bottom:12px;border-bottom:1px solid var(--bdr);margin-bottom:16px;">
+      <button class="back-btn" onclick="closeOv('ovPrint')">◀ メイン</button>
+      <span style="font-size:20px;font-weight:700;">連絡帳を印刷</span>
+    </div>
+    <div class="fg"><label>日付</label><input type="date" id="pDate" style="font-size:18px;padding:8px 10px;"></div>
+    <div class="fg" style="margin-top:12px;"><label>利用者を選択</label><div id="pResidents" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:6px;"></div></div>
+    <div style="display:flex;gap:10px;margin-top:18px;justify-content:flex-end;">
+      <button class="btn btn-primary" onclick="doPrint()" style="font-size:20px;padding:10px 28px;">🖨 印刷・PDF</button>
+    </div>
+  </div>
+</div>
+
+<!-- ========== 印刷エリア ========== -->
+<div id="printArea"></div>
 
 <script>
 'use strict';
@@ -1415,51 +1452,78 @@ function buildMedPanel(){
     <button class="hist-del" onclick="delMed('${m._dk}','${m._timing}')">削除</button>
   </div>`).join(''):'<div class="text-gray" style="font-size:13px;padding:8px 0;">記録なし</div>';
 
-  const inputSecs=MED_TIMINGS.map(t=>{
-    const m=rec.med[t.id]||{time:'',staff:'',items:[]};
-    const hasItems=m.items&&m.items.length>0;
-    const isNone=hasItems&&m.items.every(i=>i==='服薬なし');
-    const isDone=hasItems&&!isNone;
-    const statusBadge=isDone?'<span class="text-green">✔ 済</span>':isNone?'<span class="text-gray">— なし</span>':'';
-    return `<div class="panel-sec" id="medSec_${t.id}">
-      <h3>${t.label} ${statusBadge}</h3>
-      <div class="fg-row">
-        <div class="fg"><label>時刻</label><input type="time" id="med_${t.id}_time" value="${m.time||''}"></div>
-        <div class="fg"><label>担当者</label><select id="med_${t.id}_staff">${buildStaffOpts(m.staff)}</select></div>
-      </div>
-      <div class="fg">
-        <div style="display:flex;flex-wrap:wrap;gap:6px;" id="medChips_${t.id}">
-          ${['処方薬','漢方薬','解熱鎮痛薬','点眼薬'].map(item=>
-            `<div class="med-chip${m.items&&m.items.includes(item)?' on':''}" onclick="toggleMedChip(this,'${item}','${t.id}')">${item}</div>`
-          ).join('')}
-          <div class="med-chip${m.items&&m.items.includes('服薬なし')?' none-on':''}" onclick="toggleMedChip(this,'服薬なし','${t.id}')">服薬なし</div>
-        </div>
-      </div>
-      <div class="fg"><label>その他（自由記入）</label><input type="text" id="medOther_${t.id}" placeholder="その他の薬を入力" value="${m.items?m.items.filter(i=>!['処方薬','漢方薬','解熱鎮痛薬','点眼薬','服薬なし'].includes(i)).join('、'):''}"></div>
-      <button class="btn btn-primary btn-sm" onclick="saveMed('${t.id}')">記録</button>
-    </div>`;
+  const defTiming='morning';
+  const defM=rec.med[defTiming]||{time:'',staff:'',items:[]};
+  const medChipItems=['処方薬','漢方薬','解熱鎮痛薬','点眼薬','服薬なし'];
+  const medChipsHtml=medChipItems.map(item=>{
+    const cls=item==='服薬なし'?(defM.items&&defM.items.includes(item)?'none-on':''):(defM.items&&defM.items.includes(item)?'on':'');
+    return `<div class="med-chip${cls?' '+cls:''}" data-item="${item}" onclick="toggleMedChipForm(this,'${item}')">${item}</div>`;
+  }).join('');
+  const defOther=(defM.items||[]).filter(i=>!medChipItems.includes(i)).join('、');
+  const timingChipsHtml=MED_TIMINGS.map(t=>{
+    const tm=rec.med[t.id]||{};
+    const done=tm.items&&tm.items.some(i=>i!=='服薬なし');
+    const none=tm.items&&tm.items.every(i=>i==='服薬なし')&&tm.items.length>0;
+    const badge=done?'✔':none?'－':'';
+    return `<div class="chip med-timing-chip${t.id===defTiming?' selected':''}" data-timing="${t.id}" onclick="selectMedTimingChip('${t.id}')">${t.label}${badge?` <small>${badge}</small>`:''}</div>`;
   }).join('');
 
   return `<div class="panel">
     <div class="panel-sec"><h3>服薬履歴</h3><div class="hist-list">${histHtml}</div></div>
-    ${inputSecs}
+    <div class="panel-sec">
+      <h3>服薬入力</h3>
+      <div class="fg">
+        <label>区分</label>
+        <div style="display:flex;flex-wrap:wrap;gap:6px;" id="medTimingChips">${timingChipsHtml}</div>
+      </div>
+      <input type="hidden" id="medFormTiming" value="${defTiming}">
+      <div class="fg-row">
+        <div class="fg"><label>時刻</label><input type="time" id="medFormTime" value="${defM.time||''}"></div>
+        <div class="fg"><label>担当者</label><select id="medFormStaff">${buildStaffOpts(defM.staff)}</select></div>
+      </div>
+      <div class="fg">
+        <div style="display:flex;flex-wrap:wrap;gap:6px;" id="medFormChips">${medChipsHtml}</div>
+      </div>
+      <div class="fg"><label>その他（自由記入）</label><input type="text" id="medFormOther" placeholder="その他の薬を入力" value="${defOther}"></div>
+      <button class="btn btn-primary btn-block mt8" onclick="saveMed()">記録</button>
+    </div>
   </div>`;
 }
-function toggleMedChip(el,item,timing){
+function selectMedTimingChip(timing){
+  document.querySelectorAll('.med-timing-chip').forEach(c=>c.classList.remove('selected'));
+  document.querySelector(`.med-timing-chip[data-timing="${timing}"]`).classList.add('selected');
+  document.getElementById('medFormTiming').value=timing;
+  const m=getRec(curRes).med[timing]||{time:'',staff:'',items:[]};
+  document.getElementById('medFormTime').value=m.time||'';
+  document.getElementById('medFormStaff').value=m.staff||'';
+  const medChipItems=['処方薬','漢方薬','解熱鎮痛薬','点眼薬','服薬なし'];
+  document.querySelectorAll('#medFormChips .med-chip').forEach(el=>{
+    const item=el.dataset.item;
+    el.classList.remove('on','none-on');
+    if(m.items&&m.items.includes(item)){
+      el.classList.add(item==='服薬なし'?'none-on':'on');
+    }
+  });
+  const other=(m.items||[]).filter(i=>!medChipItems.includes(i)).join('、');
+  document.getElementById('medFormOther').value=other;
+}
+function toggleMedChipForm(el,item){
   if(item==='服薬なし'){
-    document.querySelectorAll(`#medChips_${timing} .med-chip`).forEach(e=>e.classList.remove('on'));
+    document.querySelectorAll('#medFormChips .med-chip').forEach(e=>e.classList.remove('on'));
     el.classList.toggle('none-on');
   } else {
-    document.querySelectorAll(`#medChips_${timing} .med-chip.none-on`).forEach(e=>e.classList.remove('none-on'));
+    document.querySelectorAll('#medFormChips .med-chip.none-on').forEach(e=>e.classList.remove('none-on'));
     el.classList.toggle('on');
   }
 }
-function saveMed(timing){
-  const time=document.getElementById(`med_${timing}_time`).value;
-  const staff=document.getElementById(`med_${timing}_staff`).value;
-  const chipped=[...document.querySelectorAll(`#medChips_${timing} .med-chip.on, #medChips_${timing} .med-chip.none-on`)]
-    .map(e=>e.textContent.trim());
-  const other=(document.getElementById(`medOther_${timing}`)?.value||'').trim();
+function saveMed(){
+  const timing=document.getElementById('medFormTiming')?.value;
+  if(!timing) return;
+  const time=document.getElementById('medFormTime').value;
+  const staff=document.getElementById('medFormStaff').value;
+  const chipped=[...document.querySelectorAll('#medFormChips .med-chip.on, #medFormChips .med-chip.none-on')]
+    .map(e=>e.dataset.item||e.textContent.trim());
+  const other=(document.getElementById('medFormOther')?.value||'').trim();
   const items=[...chipped,...(other?other.split('、').map(s=>s.trim()).filter(Boolean):[])];
   const r=getRec(curRes);
   r.med[timing]={time,staff,items};
@@ -1550,64 +1614,75 @@ function buildMealPanel(){
       <br>夕: 主食${ml.dMain||0}% 副食${ml.dSide||0}% ${ml.dWater?`水分${ml.dWater}ml`:''}
     </div>
   </div>`).join(''):'<div class="text-gray" style="font-size:14px;padding:8px 0;">記録なし</div>';
+  const nowH=new Date().getHours();
+  const defSec=nowH<10?'breakfast':nowH<14?'lunch':'dinner';
+  const defData={
+    breakfast:{time:m.bTime||'07:30',main:m.bMain||0,side:m.bSide||0,menu:'',water:m.bWater||'',snack:''},
+    lunch:    {time:m.time||'11:50', main:m.main||0, side:m.side||0, menu:m.menu||'',water:m.water||'',snack:m.snack||''},
+    dinner:   {time:m.dTime||'17:30',main:m.dMain||0,side:m.dSide||0,menu:'',water:m.dWater||'',snack:''}
+  };
+  const d0=defData[defSec];
   return `<div class="panel">
     <div class="panel-sec"><h3>直近の食事記録</h3><div class="hist-list">${mealHistHtml}</div></div>
     <div class="panel-sec">
-      <h3>朝食</h3>
-      <div class="fg-row">
-        <div class="fg"><label>時刻</label><input type="time" id="bTime" value="${m.bTime||'07:30'}"></div>
-        <div class="fg"><label>主食 %</label><select id="bMain">${pctSel(m.bMain)}</select></div>
-        <div class="fg"><label>副食 %</label><select id="bSide">${pctSel(m.bSide)}</select></div>
+      <h3>食事入力</h3>
+      <div class="fg">
+        <label>区分</label>
+        <div style="display:flex;gap:6px;">
+          <div class="chip meal-chip-btn${defSec==='breakfast'?' selected':''}" data-section="breakfast" onclick="selectMealChip('breakfast')">朝食</div>
+          <div class="chip meal-chip-btn${defSec==='lunch'?' selected':''}" data-section="lunch" onclick="selectMealChip('lunch')">昼食</div>
+          <div class="chip meal-chip-btn${defSec==='dinner'?' selected':''}" data-section="dinner" onclick="selectMealChip('dinner')">夕食</div>
+        </div>
       </div>
-      <div class="fg"><label>水分 (ml)</label><select id="bWater">${waterSel(m.bWater)}</select></div>
-      <button class="btn btn-primary btn-block mt8" onclick="saveMealSection('breakfast')">朝食を記録</button>
-    </div>
-    <div class="panel-sec">
-      <h3>昼食</h3>
+      <input type="hidden" id="mealSection" value="${defSec}">
       <div class="fg-row">
-        <div class="fg"><label>時刻</label><input type="time" id="mTime" value="${m.time||'11:50'}"></div>
-        <div class="fg"><label>主食 %</label><select id="mMain">${pctSel(m.main)}</select></div>
-        <div class="fg"><label>副食 %</label><select id="mSide">${pctSel(m.side)}</select></div>
+        <div class="fg"><label>時刻</label><input type="time" id="mealTime" value="${d0.time}"></div>
+        <div class="fg"><label>主食 %</label><select id="mealMain">${pctSel(d0.main)}</select></div>
+        <div class="fg"><label>副食 %</label><select id="mealSide">${pctSel(d0.side)}</select></div>
       </div>
       <div class="fg-row">
-        <div class="fg"><label>メニュー</label><input type="text" id="mMenu" value="${m.menu||''}"></div>
-        <div class="fg"><label>水分 (ml)</label><select id="mWater">${waterSel(m.water)}</select></div>
+        <div class="fg"><label>メニュー</label><input type="text" id="mealMenu" value="${d0.menu}"></div>
+        <div class="fg"><label>水分 (ml)</label><select id="mealWater">${waterSel(d0.water)}</select></div>
       </div>
-      <div class="fg"><label>おやつ</label><input type="text" id="mSnack" value="${m.snack||''}"></div>
-      <button class="btn btn-primary btn-block mt8" onclick="saveMealSection('lunch')">昼食を記録</button>
-    </div>
-    <div class="panel-sec">
-      <h3>夕食</h3>
-      <div class="fg-row">
-        <div class="fg"><label>時刻</label><input type="time" id="dTime" value="${m.dTime||'17:30'}"></div>
-        <div class="fg"><label>主食 %</label><select id="dMain">${pctSel(m.dMain)}</select></div>
-        <div class="fg"><label>副食 %</label><select id="dSide">${pctSel(m.dSide)}</select></div>
-      </div>
-      <div class="fg"><label>水分 (ml)</label><select id="dWater">${waterSel(m.dWater)}</select></div>
-      <button class="btn btn-primary btn-block mt8" onclick="saveMealSection('dinner')">夕食を記録</button>
+      <div class="fg"><label>おやつ</label><input type="text" id="mealSnack" value="${d0.snack}"></div>
+      <button class="btn btn-primary btn-block mt8" onclick="saveMealSection()">記録</button>
     </div>
   </div>`;
 }
-function saveMealSection(section){
+function selectMealChip(section){
+  document.querySelectorAll('.meal-chip-btn').forEach(c=>c.classList.remove('selected'));
+  document.querySelector(`.meal-chip-btn[data-section="${section}"]`).classList.add('selected');
+  document.getElementById('mealSection').value=section;
+  const m=getRec(curRes).meal||{};
+  const data={
+    breakfast:{time:m.bTime||'07:30',main:m.bMain||0,side:m.bSide||0,menu:'',water:m.bWater||'',snack:''},
+    lunch:    {time:m.time||'11:50', main:m.main||0, side:m.side||0, menu:m.menu||'',water:m.water||'',snack:m.snack||''},
+    dinner:   {time:m.dTime||'17:30',main:m.dMain||0,side:m.dSide||0,menu:'',water:m.dWater||'',snack:''}
+  }[section];
+  document.getElementById('mealTime').value=data.time;
+  document.getElementById('mealMain').value=String(data.main);
+  document.getElementById('mealSide').value=String(data.side);
+  document.getElementById('mealMenu').value=data.menu;
+  document.getElementById('mealWater').value=String(data.water);
+  document.getElementById('mealSnack').value=data.snack;
+}
+function saveMealSection(){
+  const section=document.getElementById('mealSection')?.value;
+  if(!section){alert('区分を選んでください');return;}
   const r=getRec(curRes);
   const m=r.meal;
+  const time=document.getElementById('mealTime').value;
+  const main=parseInt(document.getElementById('mealMain').value)||0;
+  const side=parseInt(document.getElementById('mealSide').value)||0;
+  const menu=document.getElementById('mealMenu').value;
+  const water=document.getElementById('mealWater').value;
+  const snack=document.getElementById('mealSnack').value;
   if(section==='breakfast'){
-    m.bTime=document.getElementById('bTime').value;
-    m.bMain=parseInt(document.getElementById('bMain').value)||0;
-    m.bSide=parseInt(document.getElementById('bSide').value)||0;
-    m.bWater=document.getElementById('bWater').value;
+    m.bTime=time; m.bMain=main; m.bSide=side; m.bWater=water;
   } else if(section==='lunch'){
-    m.time=document.getElementById('mTime').value;
-    m.main=parseInt(document.getElementById('mMain').value)||0;
-    m.side=parseInt(document.getElementById('mSide').value)||0;
-    m.menu=document.getElementById('mMenu').value;
-    m.water=document.getElementById('mWater').value;
-    m.snack=document.getElementById('mSnack').value;
+    m.time=time; m.main=main; m.side=side; m.menu=menu; m.water=water; m.snack=snack;
   } else {
-    m.dTime=document.getElementById('dTime').value;
-    m.dMain=parseInt(document.getElementById('dMain').value)||0;
-    m.dSide=parseInt(document.getElementById('dSide').value)||0;
-    m.dWater=document.getElementById('dWater').value;
+    m.dTime=time; m.dMain=main; m.dSide=side; m.dWater=water;
   }
   saveDB(); showSavedToast(); goBack();
 }
@@ -1782,6 +1857,8 @@ const SETTINGS_TABS=[
   {id:'rec_opts',  label:'レク項目'},
   {id:'care_opts', label:'ケア記録項目'},
   {id:'day_opts',  label:'1日の様子'},
+  {id:'data',      label:'データ管理'},
+  {id:'print',     label:'印刷'},
 ];
 let curSettingsTab='facility';
 
@@ -1815,6 +1892,8 @@ function renderSettingsPanel(id){
     case 'rec_opts':  el.innerHTML=buildSingleListSettings('レク項目','recItems'); break;
     case 'care_opts': el.innerHTML=buildSingleListSettings('ケア記録項目','careItems'); break;
     case 'day_opts':  el.innerHTML=buildSingleListSettings('1日の様子項目','dayItems'); break;
+    case 'data':      el.innerHTML=buildDataSettings(); break;
+    case 'print':     el.innerHTML=buildPrintSettings(); break;
   }
 }
 
@@ -1859,10 +1938,15 @@ function clearLogo(){
 
 function buildResidentSettings(){
   const list=db.residents;
-  const items=list.map((r,i)=>`<div class="settings-list-item">
-    <div class="item-name">${r.name} <span class="text-gray" style="font-size:12px;">${r.care||''}</span></div>
-    <button class="item-del" onclick="delResident(${i})">削除</button>
-  </div>`).join('');
+  const items=list.map((r,i)=>{
+    const onDays=(r.sched||[]).filter(v=>v===1).length;
+    return `<div class="settings-list-item">
+      <div class="item-name">${r.name} <span class="text-gray" style="font-size:12px;">${r.care||''}</span>
+        <span style="font-size:12px;color:var(--blue);margin-left:6px;">(月${onDays}日)</span></div>
+      <button style="font-size:12px;padding:3px 8px;border:1px solid var(--blue);border-radius:var(--r1);background:none;color:var(--blue);cursor:pointer;margin-right:4px;" onclick="openSchedEditor(${i})">予定</button>
+      <button class="item-del" onclick="delResident(${i})">削除</button>
+    </div>`;
+  }).join('');
   return `<div class="settings-panel active">
     <div class="panel-sec">
       <h3>利用者一覧</h3>
@@ -2007,6 +2091,304 @@ function delListItem(key,idx){
   if(!confirm('削除しますか？')) return;
   db.settings[key].splice(idx,1);
   saveDB(); renderSettingsPanel(curSettingsTab);
+}
+
+// ========== 通所スケジュール編集 ==========
+let _schedIdx=null;
+function openSchedEditor(idx){
+  _schedIdx=idx;
+  const r=db.residents[idx];
+  document.getElementById('ovSchedTitle').textContent=r.name+' — 通所スケジュール';
+  const sched=r.sched||Array(31).fill(0);
+  let chips='<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:6px;margin-bottom:16px;">';
+  for(let d=0;d<31;d++){
+    chips+=`<div class="chip${sched[d]===1?' selected':''}" id="schedDay_${d}" style="text-align:center;padding:10px 4px;font-size:18px;" onclick="this.classList.toggle('selected')">${d+1}</div>`;
+  }
+  chips+='</div>';
+  chips+=`<div style="display:flex;gap:8px;margin-bottom:12px;">
+    <button class="btn btn-gray btn-sm" onclick="setAllSched(1)">全日選択</button>
+    <button class="btn btn-gray btn-sm" onclick="setAllSched(0)">全日解除</button>
+  </div>`;
+  chips+=`<button class="btn btn-primary btn-block" onclick="saveResidentSched()">保存</button>`;
+  document.getElementById('ovSchedBody').innerHTML=chips;
+  openOv('ovSched');
+}
+function setAllSched(v){
+  for(let d=0;d<31;d++){
+    const el=document.getElementById('schedDay_'+d);
+    if(el){ if(v) el.classList.add('selected'); else el.classList.remove('selected'); }
+  }
+}
+function saveResidentSched(){
+  const r=db.residents[_schedIdx];
+  if(!r) return;
+  r.sched=Array.from({length:31},(_,d)=>
+    document.getElementById('schedDay_'+d)?.classList.contains('selected')?1:0
+  );
+  saveDB(); closeOv('ovSched'); renderSettingsPanel('residents');
+  showSavedToast();
+}
+
+// ========== データ管理 ==========
+function buildDataSettings(){
+  const today=new Date().toISOString().slice(0,10);
+  return `<div class="settings-panel active">
+    <div class="panel-sec">
+      <h3>📤 データエクスポート</h3>
+      <p style="font-size:14px;color:var(--text2);margin-bottom:12px;">全データをJSONファイルとして保存します（バックアップ用）。</p>
+      <button class="btn btn-primary btn-sm" onclick="exportDB()">JSONダウンロード</button>
+    </div>
+    <div class="panel-sec">
+      <h3>📥 データインポート</h3>
+      <p style="font-size:14px;color:var(--text2);margin-bottom:8px;">バックアップJSONを読み込んでデータを復元します。</p>
+      <p style="font-size:13px;color:var(--red);margin-bottom:10px;">⚠ 現在のデータは上書きされます</p>
+      <label class="btn btn-gray btn-sm" style="cursor:pointer;">
+        ファイルを選択
+        <input type="file" accept=".json" style="display:none;" onchange="importDB(this)">
+      </label>
+    </div>
+  </div>`;
+}
+function exportDB(){
+  const today=new Date().toISOString().slice(0,10).replace(/-/g,'');
+  const blob=new Blob([JSON.stringify(db,null,2)],{type:'application/json'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url; a.download=`kaigo_${FAC.name}_${today}.json`;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+function importDB(input){
+  const file=input.files[0]; if(!file) return;
+  if(!confirm('現在のデータを上書きしますか？\nこの操作は元に戻せません。')){ input.value=''; return; }
+  const reader=new FileReader();
+  reader.onload=e=>{
+    try{
+      db=JSON.parse(e.target.result);
+      saveDB(); alert('インポート完了しました'); startApp();
+    }catch(err){ alert('読み込みエラー: '+err.message); }
+  };
+  reader.readAsText(file);
+}
+
+// ========== 印刷機能 ==========
+function buildPrintSettings(){
+  const resOpts=db.residents.map(r=>`<option value="${r.name}">${r.name}</option>`).join('');
+  const today=new Date().toISOString().slice(0,10);
+  const monthFirst=today.slice(0,8)+'01';
+  return `<div class="settings-panel active">
+    <div class="panel-sec">
+      <h3>📋 バイタル期間印刷</h3>
+      <div class="fg-row">
+        <div class="fg"><label>開始日</label><input type="date" id="printVitalFrom" value="${monthFirst}"></div>
+        <div class="fg"><label>終了日</label><input type="date" id="printVitalTo" value="${today}"></div>
+      </div>
+      <div class="fg">
+        <label>対象者</label>
+        <select id="printVitalRes" style="font-size:18px;padding:6px;">
+          <option value="__all__">全員</option>${resOpts}
+        </select>
+      </div>
+      <button class="btn btn-primary btn-sm" onclick="printVitalRange()">印刷プレビュー</button>
+    </div>
+    <div class="panel-sec">
+      <h3>📋 ケア記録サマリー印刷</h3>
+      <div class="fg-row">
+        <div class="fg"><label>開始日</label><input type="date" id="printCareFrom" value="${monthFirst}"></div>
+        <div class="fg"><label>終了日</label><input type="date" id="printCareTo" value="${today}"></div>
+      </div>
+      <button class="btn btn-primary btn-sm" onclick="printCareRange()">印刷プレビュー</button>
+    </div>
+  </div>`;
+}
+
+function getDatesInRange(from,to){
+  const dates=[]; let d=new Date(from);
+  const end=new Date(to);
+  while(d<=end){ dates.push(d.toISOString().slice(0,10)); d.setDate(d.getDate()+1); }
+  return dates;
+}
+
+function printVitalRange(){
+  const from=document.getElementById('printVitalFrom').value;
+  const to=document.getElementById('printVitalTo').value;
+  const resName=document.getElementById('printVitalRes').value;
+  if(!from||!to){ alert('期間を入力してください'); return; }
+  const dates=getDatesInRange(from,to);
+  const targets=resName==='__all__'?db.residents:db.residents.filter(r=>r.name===resName);
+  let rows='';
+  targets.forEach(res=>{
+    dates.forEach(dk=>{
+      const rec=db.records[dk]&&db.records[dk][res.name];
+      if(!rec) return;
+      (rec.vital||[]).forEach(v=>{
+        rows+=`<tr>
+          <td>${dk}</td><td>${res.name}</td>
+          <td>${v.time||''}</td><td>${v.temp||''}</td>
+          <td>${v.sbp||''}/${v.dbp||''}</td><td>${v.pulse||''}</td>
+          <td>${v.spo2||''}</td><td>${v.staff||''}</td>
+        </tr>`;
+      });
+    });
+  });
+  const html=`
+    <div class="print-title">${FAC.name} バイタル記録 ${from} ～ ${to}</div>
+    <table class="print-table">
+      <thead><tr><th>日付</th><th>氏名</th><th>時刻</th><th>体温(℃)</th><th>血圧</th><th>脈拍</th><th>SpO2(%)</th><th>担当</th></tr></thead>
+      <tbody>${rows||'<tr><td colspan="8" style="text-align:center;">記録なし</td></tr>'}</tbody>
+    </table>`;
+  document.getElementById('printArea').innerHTML=html;
+  window.print();
+}
+
+function printCareRange(){
+  const from=document.getElementById('printCareFrom').value;
+  const to=document.getElementById('printCareTo').value;
+  if(!from||!to){ alert('期間を入力してください'); return; }
+  const dates=getDatesInRange(from,to);
+  let html=`<div class="print-title">${FAC.name} ケア記録サマリー ${from} ～ ${to}</div>`;
+  db.residents.forEach(res=>{
+    const rows=[];
+    dates.forEach(dk=>{
+      const rec=db.records[dk]&&db.records[dk][res.name];
+      if(!rec) return;
+      if((rec.care||[]).length>0){
+        rec.care.forEach(c=>{
+          rows.push(`<tr><td>${dk}</td><td>${c.time||''}</td><td>${(c.chips||[]).join('、')}</td><td>${c.content||''}</td><td>${c.staff||''}</td></tr>`);
+        });
+      }
+    });
+    if(rows.length>0){
+      html+=`<div class="print-subtitle">${res.name}</div>
+      <table class="print-table">
+        <thead><tr><th>日付</th><th>時刻</th><th>ケア内容</th><th>メモ</th><th>担当</th></tr></thead>
+        <tbody>${rows.join('')}</tbody>
+      </table>`;
+    }
+  });
+  document.getElementById('printArea').innerHTML=html;
+  window.print();
+}
+
+// ========== 連絡帳印刷 ==========
+function openPrint(){
+  document.getElementById('pDate').value=dk();
+  const day=curDate.getDate()-1;
+  const resList=db.residents.filter(r=>r.sched&&r.sched[day]===1);
+  const cont=document.getElementById('pResidents');
+  cont.innerHTML=resList.map(r=>`<button class="chip" style="border:2px solid var(--bdr);" onclick="this.classList.toggle('selected')">${r.name}</button>`).join('');
+  openOv('ovPrint');
+}
+
+function buildPrintPages(sel, date){
+  const d=new Date(date+'T00:00:00');
+  const days=['日','月','火','水','木','金','土'];
+  const dateLabel=d.getFullYear()+'年'+(d.getMonth()+1)+'月'+d.getDate()+'日（'+days[d.getDay()]+'）';
+  let pages='';
+  sel.forEach((name,pidx)=>{
+    const rec=getRec(name,date);
+    const rows=[];
+    // バイタル
+    rec.vital.forEach(v=>rows.push({t:v.time,cat:'バイタル',body:'体温：'+v.temp+'℃、血圧：'+v.sbp+'/'+v.dbp+'、脈拍：'+v.pulse+'/分'+(v.spo2&&v.spo2!=='—'?'、SpO2：'+v.spo2+'%':'')}));
+    // 排泄
+    rec.excretion.forEach(e=>rows.push({t:e.time,cat:'排泄',body:'排尿:'+e.urine+(e.pad&&e.pad!=='なし'?'、パット:'+e.pad:'')+'、排便:'+e.stool}));
+    // 入浴
+    rec.bath.forEach(b=>rows.push({t:b.time,cat:'入浴',body:b.type}));
+    // 食事（常に3食表示）
+    const ml=rec.meal||{};
+    rows.push({t:ml.bTime||'07:30',cat:'朝食',body:'主食：'+(ml.bMain||0)+'%、副食：'+(ml.bSide||0)+'%'+(ml.bWater?'、水分：'+ml.bWater+'ml':'')});
+    rows.push({t:ml.time||'11:50',cat:'昼食',body:'主食：'+(ml.main||0)+'%、副食：'+(ml.side||0)+'%'+(ml.water?'、水分：'+ml.water+'ml':'')+(ml.menu?'　メニュー：'+ml.menu:'')});
+    rows.push({t:ml.dTime||'17:30',cat:'夕食',body:'主食：'+(ml.dMain||0)+'%、副食：'+(ml.dSide||0)+'%'+(ml.dWater?'、水分：'+ml.dWater+'ml':'')});
+    // レク
+    if(rec.rec&&rec.rec.content) rows.push({t:'',cat:'レク',body:rec.rec.content});
+    rows.sort((a,b)=>a.t&&b.t?a.t.localeCompare(b.t):a.t?-1:1);
+    const trs=rows.map(rr=>'<tr><td>'+rr.t+'</td><td>'+rr.cat+'</td><td>'+rr.body+'</td></tr>').join('')
+      ||'<tr><td colspan="3" style="text-align:center;color:#999;">記録なし</td></tr>';
+    const dayText=rec.day||'';
+    let nxt='—';
+    const rr=db.residents.find(x=>x.name===name);
+    if(rr){const dNum=d.getDate();for(let dd=dNum;dd<(rr.sched||[]).length;dd++){if(rr.sched[dd]===1){const nd=new Date(d.getFullYear(),d.getMonth(),dd+1);nxt=(nd.getMonth()+1)+'月'+nd.getDate()+'日（'+days[nd.getDay()]+'）';break;}}}
+    const isLast=pidx===sel.length-1;
+    pages+='<div class="page'+(isLast?' last':'')+'">'
+      +'<h1>介護記録（連絡帳）</h1>'
+      +'<div class="meta"><span class="meta-name">利用者名　<strong>'+name+'</strong>　様</span><span class="meta-date">'+dateLabel+'</span></div>'
+      +'<table><thead><tr><th class="col-time">時間</th><th class="col-cat">項目</th><th class="col-body">内容</th></tr></thead><tbody>'+trs+'</tbody></table>'
+      +'<div class="biko"><div class="biko-label">1日の様子</div><div class="biko-body">'+dayText+'</div></div>'
+      +'<div class="next">次回利用予定日　'+nxt+'</div>'
+      +'</div>';
+  });
+  return pages;
+}
+
+function buildPrintHtml(pages){
+  return '<!DOCTYPE html><html><head><meta charset="UTF-8">'
+    +'<title>介護記録（連絡帳）</title>'
+    +'<style>'
+    +'*{box-sizing:border-box;margin:0;padding:0;}'
+    +'body{font-family:\'Hiragino Sans\',\'Yu Gothic\',\'Meiryo\',sans-serif;font-size:10.5pt;line-height:1.4;}'
+    +'h1{font-size:13pt;font-weight:bold;text-align:center;margin-bottom:6pt;letter-spacing:1pt;}'
+    +'.meta{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6pt;font-size:9.5pt;}'
+    +'.meta span{white-space:nowrap;}'
+    +'.meta-name strong{font-size:11pt;border-bottom:1px solid #000;padding-right:20pt;}'
+    +'table{width:100%;border-collapse:collapse;table-layout:fixed;margin-bottom:6pt;}'
+    +'.col-time{width:44pt;}.col-cat{width:60pt;}'
+    +'th,td{padding:2pt 4pt;border:1px solid #bbb;word-break:break-all;overflow-wrap:break-word;white-space:pre-wrap;font-size:9.5pt;line-height:1.35;vertical-align:top;}'
+    +'th{background:#f0f0f0;font-weight:bold;}'
+    +'.biko{margin-bottom:6pt;}'
+    +'.biko-label{font-weight:bold;font-size:9.5pt;margin-bottom:2pt;}'
+    +'.biko-body{border:1px solid #bbb;padding:4pt;font-size:9.5pt;line-height:1.6;min-height:24pt;white-space:pre-wrap;}'
+    +'.next{text-align:right;font-size:9pt;}'
+    +'.noprint{padding:8px;background:#f5f5f5;display:flex;gap:8px;justify-content:center;align-items:center;flex-wrap:wrap;}'
+    +'@media screen{.page{width:148mm;min-height:210mm;margin:10px auto;padding:10mm;background:#fff;border:1px solid #ddd;}}'
+    +'@media print{'
+    +'@page{size:A5 portrait;margin:8mm;}'
+    +'html,body{margin:0;padding:0;}'
+    +'body{font-size:10.5pt;line-height:1.4;-webkit-print-color-adjust:exact;print-color-adjust:exact;}'
+    +'.page{width:100%;margin:0;padding:0;page-break-after:always;break-after:page;}'
+    +'.page.last{page-break-after:auto;break-after:auto;}'
+    +'.noprint{display:none;}'
+    +'}'
+    +'</style>'
+    +'</head><body>'
+    +'<div class="noprint">'
+    +'<button onclick="window.close()" style="padding:8px 16px;font-size:14px;background:#888;color:#fff;border:none;border-radius:6px;cursor:pointer;">✕ 閉じる</button>'
+    +'<button id="sb" onclick="var a=this.dataset.m!==\'a4\';var ss=document.getElementsByTagName(\'style\')[0];ss.textContent=ss.textContent.replace(a?\'A5 portrait\':\'A4 portrait\',a?\'A4 portrait\':\'A5 portrait\').replace(a?\'width:148mm\':\'width:210mm\',a?\'width:210mm\':\'width:148mm\').replace(a?\'margin:8mm\':\'margin:10mm\',a?\'margin:10mm\':\'margin:8mm\');this.dataset.m=a?\'a4\':\'\';this.textContent=a?\'A5に切替\':\'A4に切替\';" style="padding:8px 16px;font-size:14px;background:#185FA5;color:#fff;border:none;border-radius:6px;cursor:pointer;">A4に切替</button>'
+    +'<button onclick="window.print()" style="padding:8px 18px;font-size:14px;background:#E87722;color:#fff;border:none;border-radius:6px;cursor:pointer;">🖨 印刷/PDF</button>'
+    +'</div>'
+    +pages
+    +'</body></html>';
+}
+
+function doPrint(){
+  const date=document.getElementById('pDate').value;
+  const sel=[...document.querySelectorAll('#pResidents .chip.selected')].map(b=>b.textContent);
+  if(!sel.length){alert('利用者を選択してください');return;}
+  closeOv('ovPrint');
+  const pages=buildPrintPages(sel,date);
+  const html=buildPrintHtml(pages);
+  const w=window.open('','_blank','width=800,height=700');
+  if(!w){alert('ポップアップを許可してください');return;}
+  w.document.write(html);
+  w.document.close();
+}
+
+// ========== 月次バックアップ ==========
+function saveMonthlyBackup(){
+  const now=new Date();
+  const ym=`${now.getFullYear()}${pad(now.getMonth()+1)}`;
+  const fname=`kaigo_${FAC.name}_${ym}.json`;
+  const json=JSON.stringify(db,null,2);
+  const blob=new Blob([json],{type:'application/json'});
+  const file=new File([blob],fname,{type:'application/json'});
+  if(navigator.canShare&&navigator.canShare({files:[file]})){
+    navigator.share({files:[file],title:fname})
+      .catch(e=>{if(e.name!=='AbortError')alert('保存エラー: '+e.message);});
+  } else {
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');
+    a.href=url; a.download=fname; a.click();
+    URL.revokeObjectURL(url);
+  }
 }
 
 // ========== トースト通知 ==========
