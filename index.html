@@ -73,13 +73,13 @@ input,select,textarea{font-family:inherit;font-size:30px;}
 .name-cell{text-align:left !important;padding-left:8px !important;cursor:default;}
 .name-txt{font-size:22px;font-weight:500;}
 .name-sub{font-size:16px;color:var(--text3);}
-.cell-val{font-size:21px;line-height:1.4;}
-.cell-empty{color:var(--text3);font-size:21px;}
+.cell-val{font-size:18px;line-height:1.4;}
+.cell-empty{color:var(--text3);font-size:18px;}
 .cell-ok{color:var(--green);font-size:22px;font-weight:700;}
-.cell-warn{color:var(--red);font-size:20px;font-weight:700;}
+.cell-warn{color:var(--red);font-size:18px;font-weight:700;}
 .cell-red{color:var(--red);font-size:22px;font-weight:700;}
 /* 排泄列専用 */
-.cell-ex{font-size:20px;line-height:1.4;}
+.cell-ex{font-size:18px;line-height:1.4;}
 .badge-ok{color:var(--green);font-weight:700;}
 .badge-ng{color:var(--orange2);font-weight:700;}
 
@@ -916,7 +916,7 @@ function renderMain(){
       return false;
     };
     const h48=_h48chk();
-    const nc=h48?'<span class="cell-red" style="font-size:40px;">●</span>':'<span class="cell-empty">—</span>';
+    const nc=h48?'<span class="cell-red">●</span>':'<span class="cell-empty">—</span>';
     // バイタル（体温/血圧/脈拍/SpO2）
     const lv=(rec.vital||[]).length?(rec.vital[rec.vital.length-1]):null;
     const tc=lv?`<span class="${parseFloat(lv.temp)>=37.0?'cell-warn':'cell-val'}">${lv.temp}℃</span>`:'<span class="cell-empty">—</span>';
@@ -1491,14 +1491,17 @@ function openBulkMed(){
   if(dk()!==today){ alert('服薬一括入力は本日のみ対応しています'); return; }
   const day=curDate.getDate()-1;
   const todayRes=db.residents.filter(r=>r.sched&&r.sched[day]===1);
-  const timingOpts=MED_TIMINGS.map(t=>`<div class="chip${t.id==='morning'?' selected':''}" onclick="this.classList.toggle('selected')">${t.label}</div>`).join('');
-  const resChips=todayRes.map(r=>`<div class="chip selected" onclick="this.classList.toggle('selected')" data-name="${r.name}">${r.name}</div>`).join('');
+  const timingOpts=MED_TIMINGS.map(t=>`<div class="chip" style="font-size:20px;" onclick="this.classList.toggle('selected')">${t.label}</div>`).join('');
+  const resChips=todayRes.map(r=>`<div class="chip" style="font-size:20px;" onclick="this.classList.toggle('selected')" data-name="${r.name}">${r.name}</div>`).join('');
   openBulkMedOv(`
     <div class="ov-title" style="font-size:20px;font-weight:700;margin-bottom:14px;padding-bottom:10px;border-bottom:1px solid var(--border2);">服薬一括入力</div>
     <div class="fg"><label>服薬区分</label><div style="display:flex;flex-wrap:wrap;gap:4px;" id="bulkTimings">${timingOpts}</div></div>
     <div class="fg"><label>担当者</label><select id="bulkStaff">${buildStaffOpts('')}</select></div>
     <div class="fg"><label>時刻</label><input type="time" id="bulkTime" value="${nowTime()}"></div>
-    <div class="fg"><label>対象者</label><div style="display:flex;flex-wrap:wrap;gap:4px;" id="bulkRes">${resChips}</div></div>
+    <div class="fg">
+      <label>対象者 <button type="button" class="btn btn-gray btn-sm" style="font-size:18px;margin-left:8px;" onclick="document.querySelectorAll('#bulkRes .chip').forEach(c=>c.classList.add('selected'))">〔全員選択〕</button></label>
+      <div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:6px;" id="bulkRes">${resChips}</div>
+    </div>
     <button class="btn btn-primary btn-block mt12" onclick="saveBulkMed()">一括保存</button>
     <button class="btn btn-gray btn-block mt8" onclick="closeMainOv()">閉じる</button>
   `);
