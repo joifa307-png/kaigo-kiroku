@@ -79,7 +79,7 @@ input,select,textarea{font-family:inherit;font-size:30px;}
 .cell-warn{color:var(--red);font-size:20px;font-weight:700;}
 .cell-red{color:var(--red);font-size:22px;font-weight:700;}
 /* 排泄列専用 */
-.cell-ex{font-size:48px;line-height:1.4;}
+.cell-ex{font-size:20px;line-height:1.4;}
 .badge-ok{color:var(--green);font-weight:700;}
 .badge-ng{color:var(--orange2);font-weight:700;}
 
@@ -1705,7 +1705,7 @@ function saveNote(){
   const writer=document.getElementById('ntWriter').value;
   const content=document.getElementById('ntContent').value.trim();
   if(!content){ alert('内容を入力してください'); return; }
-  getRec(curRes).notes.push({id:genId('n'),time,writer,content});
+  getRec(curRes).notes.push({id:genId('n'),time,writer,content,ts:new Date().toISOString()});
   saveDB(); showSavedToast(); refreshPanel('notes');
 }
 function delNote(dkStr,idx){
