@@ -36,15 +36,15 @@ input,select,textarea{font-family:inherit;font-size:30px;}
 .hdr-facility{font-size:12px;color:var(--text3);margin-left:4px;}
 .hdr-btn{
   padding:7px 12px;border-radius:var(--r2);border:1px solid var(--border2);
-  background:var(--white);color:var(--text2);font-size:28px;
+  background:var(--white);color:var(--text2);font-size:14px;
   cursor:pointer;white-space:nowrap;user-select:none;
 }
 .hdr-btn:active{opacity:.7;}
 .hdr-btn.primary{background:var(--orange);color:#fff;border-color:var(--orange);}
-.hdr-btn.nav{padding:4px 8px;font-size:20px;}
+.hdr-btn.nav{padding:6px 10px;font-size:18px;}
 .hdr-center{display:flex;align-items:center;gap:4px;}
 .hdr-date{
-  font-size:20px;font-weight:700;padding:4px 8px;
+  font-size:17px;font-weight:600;padding:6px 10px;
   border-radius:var(--r2);border:1px solid var(--border2);
   background:var(--white);cursor:pointer;white-space:nowrap;
 }
@@ -395,7 +395,7 @@ input,select,textarea{font-family:inherit;font-size:30px;}
 
 <!-- ========== 8日集計オーバーレイ ========== -->
 <div class="ov-back" id="ovSummary" onclick="if(event.target===this)closeOv('ovSummary')">
-  <div class="ov show" style="height:100vh;max-height:100vh;border-radius:0;display:flex;flex-direction:column;padding:0;bottom:0;top:0;">
+  <div class="ov show" style="height:100vh;max-height:100vh;width:100%;border-radius:0;display:flex;flex-direction:column;padding:0;bottom:0;top:0;left:0;right:0;overflow:hidden;">
     <div style="display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid var(--border2);flex-shrink:0;background:var(--white);">
       <button class="back-btn" onclick="closeOv('ovSummary')">◀ メイン</button>
       <div id="sumResName" style="font-size:18px;font-weight:700;color:var(--text1);flex:1;"></div>
@@ -695,6 +695,23 @@ function mergeDb(base, target){
     }
   });
 
+  // ── residents：ローカル(base)を優先してユニオンマージ ──
+  // 同じIDがあればbase(ローカル)で上書き。baseにしかないIDは追加。
+  if(!result.residents) result.residents = [];
+  if(base.residents&&base.residents.length){
+    const idxMap = {};
+    result.residents.forEach((r,i)=>{ if(r.id) idxMap[r.id]=i; });
+    base.residents.forEach(r=>{
+      if(!r.id) return;
+      if(idxMap[r.id]!==undefined){
+        result.residents[idxMap[r.id]] = r; // ローカルで上書き
+      } else {
+        result.residents.push(r); // 新規追加
+      }
+    });
+    // cloudにあってbaseにない居住者はそのまま保持
+  }
+
   // ── supplies：ユニオンマージ ──
   if(!result.supplies) result.supplies = [];
   if(base.supplies&&base.supplies.length){
@@ -868,13 +885,13 @@ function openSummary(name){
   }
   const DOW=['日','月','火','水','木','金','土'];
   let html='<thead><tr>';
-  html+=`<th style="padding:10px 8px;background:#e8e8e8;border:1px solid #ccc;text-align:left;font-size:13px;min-width:80px;position:sticky;left:0;z-index:2;"></th>`;
+  html+=`<th style="padding:10px 8px;background:#e8e8e8;border:1px solid #ccc;text-align:left;font-size:18px;min-width:100px;position:sticky;left:0;z-index:2;"></th>`;
   days.forEach(d=>{
     const dow=d.dt.getDay();
     const color=dow===0?'color:#e53935;':dow===6?'color:#1565c0;':'';
     const bg=d.isToday?'background:#fff3e0;':'background:#e8e8e8;';
     const fw=d.isToday?'font-weight:700;':'font-weight:500;';
-    html+=`<th style="padding:8px 4px;border:1px solid #ccc;text-align:center;font-size:13px;white-space:nowrap;min-width:52px;${bg}${color}${fw}">`;
+    html+=`<th style="padding:8px 6px;border:1px solid #ccc;text-align:center;font-size:18px;white-space:nowrap;min-width:66px;${bg}${color}${fw}">`;
     html+=`${d.dt.getMonth()+1}/${d.dt.getDate()}<br>（${DOW[dow]}）`;
     if(d.isToday) html+=`<br><span style="font-size:10px;color:var(--orange2);font-weight:700;">TODAY</span>`;
     html+='</th>';
@@ -896,12 +913,12 @@ function openSummary(name){
   ];
   rowDefs.forEach((row,ri)=>{
     const bg=ri%2===0?'#ffffff':'#f5f5f5';
-    html+=`<tr><td style="padding:10px 8px;border:1px solid #ccc;font-weight:600;font-size:13px;white-space:nowrap;background:${bg};position:sticky;left:0;z-index:1;">${row.label}</td>`;
+    html+=`<tr><td style="padding:10px 8px;border:1px solid #ccc;font-weight:600;font-size:18px;white-space:nowrap;background:${bg};position:sticky;left:0;z-index:1;">${row.label}</td>`;
     days.forEach(d=>{
       const dd=db.records[d.k]&&db.records[d.k][name];
       const r=dd||{vital:[],excretion:[],bath:[],notes:[],rec:{content:'',part:''},med:{}};
       const bg2=d.isToday?'background:#fffbf5;':'background:'+bg+';';
-      html+=`<td style="padding:10px 4px;text-align:center;border:1px solid #ccc;font-size:13px;${bg2}">${row.fn(r)}</td>`;
+      html+=`<td style="padding:10px 6px;text-align:center;border:1px solid #ccc;font-size:18px;${bg2}">${row.fn(r)}</td>`;
     });
     html+='</tr>';
   });
