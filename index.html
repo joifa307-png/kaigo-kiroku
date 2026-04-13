@@ -35,7 +35,7 @@ input,select,textarea{font-family:inherit;font-size:30px;}
   padding:5px 10px;display:flex;align-items:center;gap:6px;
   position:sticky;top:0;z-index:100;box-shadow:var(--shadow);
 }
-.hdr-logo{height:50px;max-width:200px;object-fit:contain;}
+.hdr-logo{height:75px;max-width:200px;object-fit:contain;}
 .hdr-title{font-weight:700;font-size:16px;color:var(--orange2);}
 .hdr-facility{font-size:12px;color:var(--text3);margin-left:4px;}
 .hdr-btn{
@@ -1343,7 +1343,7 @@ function buildVitalPanel(){
   const histHtml=hist.length?hist.map(v=>`<div class="hist-item">
     <div class="hist-time">${recDayLabel(v._dk)} ${v.time}</div>
     <div class="hist-content">
-      BP: ${v.sbp||''}/${v.dbp||''} mmHg　脈: ${v.pulse||''}　体温: ${v.temp||''}℃　SpO2: ${v.spo2||''}%
+      BP: ${v.sbp||''}/${v.dbp||''} mmHg　脈: ${v.pulse||''}　体温: ${v.temp||''}℃　SpO2: ${v.spo2||''}%${v.weight?`　体重: ${v.weight}kg`:''}
       ${v.staff?`<br><span class="text-gray">${v.staff}</span>`:''}
     </div>
     <button class="hist-edit" onclick="editVital('${v._dk}',${v._i})">編集</button>
@@ -1359,17 +1359,18 @@ function buildVitalPanel(){
     <div class="panel-sec" id="vitalForm">
       <h3 id="vitalFormTitle">バイタル入力</h3>
       <div class="fg-row">
-        <div class="fg"><label>時刻</label><input type="time" id="vTime" value="${nowTime()}"></div>
+        <div class="fg" style="flex:0 0 130px;"><label>時刻</label><input type="time" id="vTime" value="${nowTime()}"></div>
         <div class="fg"><label>担当者</label><select id="vStaff">${buildStaffOpts(lv?lv.staff:'')}</select></div>
       </div>
       <div class="fg-row">
-        <div class="fg"><label>収縮期血圧</label><input type="number" id="vSbp" placeholder="120"></div>
-        <div class="fg"><label>拡張期血圧</label><input type="number" id="vDbp" placeholder="80"></div>
+        <div class="fg"><label>体温</label><input type="text" id="vTemp" placeholder="36.5" oninput="convTemp(this)" inputmode="decimal"></div>
+        <div class="fg"><label>収縮期</label><input type="number" id="vSbp" placeholder="120"></div>
+        <div class="fg"><label>拡張期</label><input type="number" id="vDbp" placeholder="80"></div>
       </div>
       <div class="fg-row">
         <div class="fg"><label>脈拍</label><input type="number" id="vPulse" placeholder="70"></div>
-        <div class="fg"><label>体温</label><input type="text" id="vTemp" placeholder="36.5" oninput="convTemp(this)" inputmode="decimal"></div>
         <div class="fg"><label>SpO2%</label><input type="number" id="vSpo2" placeholder="98"></div>
+        <div class="fg"><label>体重(kg)</label><input type="text" id="vWeight" placeholder="50.0" inputmode="decimal"></div>
       </div>
       <button class="btn btn-primary btn-block" onclick="saveVital()">記録</button>
     </div>
@@ -1383,6 +1384,7 @@ function editVital(dkStr,idx){
   document.getElementById('vPulse').value=v.pulse||'';
   document.getElementById('vTemp').value=v.temp||'';
   document.getElementById('vSpo2').value=v.spo2||'';
+  document.getElementById('vWeight').value=v.weight||'';
   buildStaffSelect('vStaff',v.staff);
   _editVital={dkStr,idx};
   document.getElementById('vitalFormTitle').textContent='バイタル編集';
@@ -1395,13 +1397,14 @@ function saveVital(){
   const pulse=document.getElementById('vPulse').value;
   const temp=document.getElementById('vTemp').value;
   const spo2=document.getElementById('vSpo2').value;
+  const weight=document.getElementById('vWeight').value;
   const staff=document.getElementById('vStaff').value;
   if(_editVital){
     const r=getRec(curRes,_editVital.dkStr);
-    r.vital[_editVital.idx]={...r.vital[_editVital.idx],time,sbp,dbp,pulse,temp,spo2,staff};
+    r.vital[_editVital.idx]={...r.vital[_editVital.idx],time,sbp,dbp,pulse,temp,spo2,weight,staff};
     _editVital=null;
   } else {
-    getRec(curRes).vital.push({id:genId('v'),time,sbp,dbp,pulse,temp,spo2,staff});
+    getRec(curRes).vital.push({id:genId('v'),time,sbp,dbp,pulse,temp,spo2,weight,staff});
   }
   saveDB(); showSavedToast(); goBack();
 }
