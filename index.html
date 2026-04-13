@@ -35,7 +35,7 @@ input,select,textarea{font-family:inherit;font-size:30px;}
   padding:5px 10px;display:flex;align-items:center;gap:6px;
   position:sticky;top:0;z-index:100;box-shadow:var(--shadow);
 }
-.hdr-logo{height:75px;min-height:75px;max-width:220px;object-fit:contain;flex-shrink:0;}
+.hdr-logo{height:75px;width:auto;display:block;}
 .hdr-title{font-weight:700;font-size:16px;color:var(--orange2);}
 .hdr-facility{font-size:12px;color:var(--text3);margin-left:4px;}
 .hdr-btn{
@@ -159,8 +159,8 @@ input,select,textarea{font-family:inherit;font-size:30px;}
   outline:none;border-color:var(--orange);box-shadow:0 0 0 2px rgba(232,119,34,.15);
 }
 .fg textarea{min-height:100px;resize:vertical;}
-.fg-row{display:flex;gap:10px;}
-.fg-row .fg{flex:1;min-width:0;}
+.fg-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(0,1fr));gap:10px;}
+.fg-row .fg{min-width:0;}
 .fg-hint{font-size:14px;color:var(--text3);margin-top:3px;}
 
 /* ===== チップ ===== */
@@ -1219,8 +1219,8 @@ function renderFacilityHeader(){
   if(el) el.textContent = S.facilityName || FAC.name;
   const logo=document.getElementById('mainLogo');
   if(logo){
-    if(S.logoB64){ logo.src='data:image/png;base64,'+S.logoB64; logo.style.display=''; logo.style.height='75px'; }
-    else { logo.style.display='none'; logo.style.height=''; }
+    if(S.logoB64){ logo.src='data:image/png;base64,'+S.logoB64; logo.style.cssText='display:block;height:75px;width:auto;'; }
+    else { logo.style.cssText='display:none;'; }
   }
   document.title = S.facilityName||FAC.name;
 }
