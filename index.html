@@ -83,6 +83,18 @@ input,select,textarea{font-family:inherit;font-size:30px;}
 .res-del-btn:active{color:var(--red);}
 .res-add-row td{background:var(--white)!important;text-align:center;padding:6px!important;}
 .res-add-btn{border:1px dashed var(--border2);background:none;color:var(--text2);font-size:16px;padding:6px 20px;border-radius:var(--r2);cursor:pointer;}
+/* 卸記録 */
+.sup-tab-btn{padding:6px 14px;border:1px solid var(--border2);border-radius:var(--r2);background:var(--white);color:var(--text2);font-size:14px;cursor:pointer;}
+.sup-tab-btn.active{background:var(--orange);color:#fff;border-color:var(--orange);font-weight:700;}
+.sup-item{display:flex;align-items:center;gap:8px;padding:10px 0;border-bottom:1px solid var(--border1);font-size:16px;}
+.sup-item-info{flex:1;line-height:1.5;}
+.sup-item-date{font-size:13px;color:var(--text3);}
+.sup-sum-table{width:100%;border-collapse:collapse;font-size:15px;margin-top:4px;}
+.sup-sum-table th{background:var(--orange);color:#fff;padding:8px 6px;text-align:center;font-size:14px;white-space:nowrap;}
+.sup-sum-table td{padding:8px 6px;border-bottom:1px solid var(--border1);vertical-align:top;}
+.sup-sum-table tr:nth-child(even) td{background:#F7F6F2;}
+.sup-sum-name{font-size:16px;font-weight:600;white-space:nowrap;}
+.sup-sum-detail{font-size:13px;color:var(--text3);margin-top:2px;}
 .cell-val{font-size:18px;line-height:1.4;}
 .cell-empty{color:var(--text3);font-size:18px;}
 .cell-ok{color:var(--green);font-size:22px;font-weight:700;}
@@ -450,6 +462,46 @@ input,select,textarea{font-family:inherit;font-size:30px;}
     <p style="font-size:12px;color:var(--text3);margin-top:10px;">
       ⚠ 読み込むと今月の利用者予定が上書きされ、全端末に同期されます
     </p>
+  </div>
+</div>
+
+<!-- ========== パット等卸記録オーバーレイ ========== -->
+<div class="ov-back" id="ovSupply" onclick="if(event.target===this)closeOv('ovSupply')">
+  <div class="ov show" style="width:100%;max-width:640px;padding:0;display:flex;flex-direction:column;max-height:92vh;">
+    <!-- ヘッダー -->
+    <div style="display:flex;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid var(--border2);flex-shrink:0;background:var(--white);border-radius:var(--r3) var(--r3) 0 0;">
+      <span style="font-size:18px;font-weight:700;">📦 パット等 卸記録</span>
+      <div style="margin-left:auto;display:flex;gap:6px;">
+        <button class="sup-tab-btn active" id="supTabRec" onclick="switchSupTab('rec')">記録</button>
+        <button class="sup-tab-btn" id="supTabSum" onclick="switchSupTab('sum')">集計</button>
+        <button onclick="closeOv('ovSupply')" style="border:none;background:none;font-size:26px;cursor:pointer;color:var(--text3);padding:0 4px;">×</button>
+      </div>
+    </div>
+    <!-- 記録タブ -->
+    <div id="supPaneRec" style="overflow-y:auto;padding:16px;flex:1;">
+      <!-- 入力フォーム -->
+      <div style="background:#F8F7F4;border-radius:var(--r2);padding:14px;margin-bottom:16px;">
+        <div class="fg-row" style="margin-bottom:10px;">
+          <div class="fg"><label>日付</label><input type="date" id="supDate" style="font-size:16px;"></div>
+          <div class="fg"><label>利用者</label><select id="supRes" style="font-size:16px;"></select></div>
+        </div>
+        <div class="fg-row" style="margin-bottom:12px;">
+          <div class="fg"><label>品目</label><select id="supProduct" style="font-size:16px;"></select></div>
+          <div class="fg" style="max-width:100px;"><label>個数</label><input type="number" id="supQty" min="1" max="200" value="1" style="font-size:18px;font-weight:700;text-align:center;"></div>
+        </div>
+        <button class="btn btn-primary" style="width:100%;font-size:17px;" onclick="addSupply()">記録する</button>
+      </div>
+      <!-- 今月の記録一覧 -->
+      <div id="supRecList"></div>
+    </div>
+    <!-- 集計タブ -->
+    <div id="supPaneSum" style="display:none;overflow-y:auto;padding:16px;flex:1;">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">
+        <label style="font-size:15px;font-weight:600;">対象月</label>
+        <input type="month" id="supSumMonth" style="font-size:16px;" onchange="renderSupplySummary()">
+      </div>
+      <div id="supSummary"></div>
+    </div>
   </div>
 </div>
 
@@ -1968,12 +2020,140 @@ function openVitalPrint(){
   `);
 }
 
-// ========== パット等卸記録（スタブ） ==========
+// ========== パット等卸記録 ==========
 function openSupplyRecord(){
-  openMainOv(`
-    <div class="ov-title">パット等卸記録<button class="ov-close" onclick="closeMainOv()">✕</button></div>
-    <div style="padding:20px;color:var(--text3);text-align:center;">（今後実装）</div>
-  `);
+  // 初期値セット
+  document.getElementById('supDate').value = dk();
+  // 利用者セレクト
+  const resOpts = db.residents.map(r=>`<option value="${r.name}">${r.name}</option>`).join('');
+  document.getElementById('supRes').innerHTML = resOpts;
+  // 品目セレクト
+  const products = (db.settings.supplyProducts||[]);
+  document.getElementById('supProduct').innerHTML = products.map(p=>`<option>${p}</option>`).join('');
+  // 集計月を今月に
+  const now = new Date();
+  document.getElementById('supSumMonth').value = `${now.getFullYear()}-${pad(now.getMonth()+1)}`;
+  // 記録タブ表示
+  switchSupTab('rec');
+  openOv('ovSupply');
+}
+
+function switchSupTab(tab){
+  document.getElementById('supPaneRec').style.display = tab==='rec'?'block':'none';
+  document.getElementById('supPaneSum').style.display = tab==='sum'?'block':'none';
+  document.getElementById('supTabRec').classList.toggle('active', tab==='rec');
+  document.getElementById('supTabSum').classList.toggle('active', tab==='sum');
+  if(tab==='rec') renderSupplyList();
+  if(tab==='sum') renderSupplySummary();
+}
+
+function renderSupplyList(){
+  // 今月の記録を新しい順に表示
+  const now = new Date();
+  const ym = `${now.getFullYear()}-${pad(now.getMonth()+1)}`;
+  const items = (db.supplies||[]).filter(s=>s.date&&s.date.startsWith(ym))
+    .sort((a,b)=>b.date.localeCompare(a.date));
+  const el = document.getElementById('supRecList');
+  if(!items.length){
+    el.innerHTML='<div style="color:var(--text3);font-size:14px;text-align:center;padding:16px;">今月の記録はありません</div>';
+    return;
+  }
+  // 日付表示用
+  const dayNames=['日','月','火','水','木','金','土'];
+  el.innerHTML = `<div style="font-size:13px;font-weight:600;color:var(--text3);margin-bottom:6px;">${now.getMonth()+1}月の記録（${items.length}件）</div>`
+    + items.map(s=>{
+      const dt=new Date(s.date+'T00:00:00');
+      const dateLabel=`${dt.getMonth()+1}/${dt.getDate()}（${dayNames[dt.getDay()]}）`;
+      return `<div class="sup-item">
+        <div class="sup-item-info">
+          <span class="sup-item-date">${dateLabel}</span>
+          <span style="font-weight:600;">${s.resName}</span>　${s.product}
+          <span style="color:var(--orange2);font-weight:700;">${s.qty}個</span>
+        </div>
+        <button onclick="delSupply('${s.id}')" style="border:none;background:none;color:var(--text3);font-size:18px;cursor:pointer;padding:4px 8px;">×</button>
+      </div>`;
+    }).join('');
+}
+
+function renderSupplySummary(){
+  const ym = document.getElementById('supSumMonth').value;
+  if(!ym) return;
+  const [y,m] = ym.split('-');
+  const label = `${parseInt(y)}年${parseInt(m)}月`;
+  const items = (db.supplies||[]).filter(s=>s.date&&s.date.startsWith(ym));
+  const el = document.getElementById('supSummary');
+  if(!items.length){
+    el.innerHTML=`<div style="color:var(--text3);font-size:14px;text-align:center;padding:20px;">${label}の記録はありません</div>`;
+    return;
+  }
+  // 利用者別・品目別に集計
+  const byRes = {}; // {resName: {product: [{date,qty}]}}
+  items.forEach(s=>{
+    if(!byRes[s.resName]) byRes[s.resName]={};
+    if(!byRes[s.resName][s.product]) byRes[s.resName][s.product]=[];
+    byRes[s.resName][s.product].push({date:s.date, qty:s.qty});
+  });
+  const resNames = Object.keys(byRes).sort();
+  // 全品目一覧
+  const allProducts = [...new Set(items.map(s=>s.product))].sort();
+  const dayNames=['日','月','火','水','木','金','土'];
+
+  let html = `<div style="font-size:14px;font-weight:600;color:var(--text2);margin-bottom:10px;">${label}の集計</div>`;
+  html += `<table class="sup-sum-table"><thead><tr>
+    <th style="text-align:left;padding-left:8px;">利用者</th>
+    ${allProducts.map(p=>`<th>${p}</th>`).join('')}
+    <th>合計</th>
+  </tr></thead><tbody>`;
+
+  let colTotals = {};
+  resNames.forEach(name=>{
+    const prods = byRes[name];
+    let rowTotal = 0;
+    const cells = allProducts.map(p=>{
+      const entries = prods[p]||[];
+      const total = entries.reduce((s,e)=>s+e.qty,0);
+      if(!total) return `<td style="color:var(--text3);text-align:center;">—</td>`;
+      colTotals[p]=(colTotals[p]||0)+total;
+      rowTotal+=total;
+      // 日付詳細
+      const detail = entries.sort((a,b)=>a.date.localeCompare(b.date)).map(e=>{
+        const dt=new Date(e.date+'T00:00:00');
+        return `${dt.getDate()}日×${e.qty}`;
+      }).join('、');
+      return `<td style="text-align:center;"><span style="font-weight:700;font-size:17px;">${total}</span><div class="sup-sum-detail">${detail}</div></td>`;
+    });
+    colTotals['__total']=(colTotals['__total']||0)+rowTotal;
+    html+=`<tr><td><div class="sup-sum-name">${name}</div></td>${cells.join('')}<td style="text-align:center;font-weight:700;font-size:17px;color:var(--orange2);">${rowTotal}</td></tr>`;
+  });
+  // 合計行
+  html+=`<tr style="background:#FFF3E8!important;"><td style="font-weight:700;padding-left:8px;">合計</td>
+    ${allProducts.map(p=>`<td style="text-align:center;font-weight:700;">${colTotals[p]||0}</td>`).join('')}
+    <td style="text-align:center;font-weight:700;color:var(--orange2);">${colTotals['__total']||0}</td>
+  </tr>`;
+  html+=`</tbody></table>`;
+  el.innerHTML=html;
+}
+
+function addSupply(){
+  const date = document.getElementById('supDate').value;
+  const resName = document.getElementById('supRes').value;
+  const product = document.getElementById('supProduct').value;
+  const qty = parseInt(document.getElementById('supQty').value)||0;
+  if(!date||!resName||!product){ alert('日付・利用者・品目を入力してください'); return; }
+  if(qty<=0){ alert('個数を1以上で入力してください'); return; }
+  if(!db.supplies) db.supplies=[];
+  db.supplies.push({id:genId('sup'),date,resName,product,qty});
+  db.supplies.sort((a,b)=>a.date.localeCompare(b.date));
+  saveDB();
+  document.getElementById('supQty').value='1';
+  renderSupplyList();
+}
+
+function delSupply(id){
+  if(!confirm('この記録を削除しますか？')) return;
+  db.supplies=(db.supplies||[]).filter(s=>s.id!==id);
+  saveDB();
+  renderSupplyList();
 }
 
 // ========== 設定画面 ==========
