@@ -83,6 +83,9 @@ input,select,textarea{font-family:inherit;font-size:30px;}
 .res-del-btn:active{color:var(--red);}
 .res-add-row td{background:var(--white)!important;text-align:center;padding:6px!important;}
 .res-add-btn{border:1px dashed var(--border2);background:none;color:var(--text2);font-size:16px;padding:6px 20px;border-radius:var(--r2);cursor:pointer;}
+/* オーバーレイ中央配置（卸記録など） */
+.ov-back.ov-center.show{display:flex;align-items:center;justify-content:center;}
+.ov-back.ov-center .ov{position:relative;bottom:auto;left:auto;right:auto;transform:none;border-radius:var(--r3);}
 /* 卸記録 */
 .sup-tab-btn{padding:6px 14px;border:1px solid var(--border2);border-radius:var(--r2);background:var(--white);color:var(--text2);font-size:14px;cursor:pointer;}
 .sup-tab-btn.active{background:var(--orange);color:#fff;border-color:var(--orange);font-weight:700;}
@@ -466,8 +469,8 @@ input,select,textarea{font-family:inherit;font-size:30px;}
 </div>
 
 <!-- ========== パット等卸記録オーバーレイ ========== -->
-<div class="ov-back" id="ovSupply" onclick="if(event.target===this)closeOv('ovSupply')">
-  <div class="ov show" style="width:100%;max-width:640px;padding:0;display:flex;flex-direction:column;max-height:92vh;">
+<div class="ov-back ov-center" id="ovSupply" onclick="if(event.target===this)closeOv('ovSupply')">
+  <div class="ov show" style="width:92vw;max-width:560px;padding:0;display:flex;flex-direction:column;max-height:88vh;">
     <!-- ヘッダー -->
     <div style="display:flex;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid var(--border2);flex-shrink:0;background:var(--white);border-radius:var(--r3) var(--r3) 0 0;">
       <span style="font-size:18px;font-weight:700;">📦 パット等 卸記録</span>
@@ -481,15 +484,17 @@ input,select,textarea{font-family:inherit;font-size:30px;}
     <div id="supPaneRec" style="overflow-y:auto;padding:16px;flex:1;">
       <!-- 入力フォーム -->
       <div style="background:#F8F7F4;border-radius:var(--r2);padding:14px;margin-bottom:16px;">
-        <div class="fg-row" style="margin-bottom:10px;">
-          <div class="fg"><label>日付</label><input type="date" id="supDate" style="font-size:16px;"></div>
-          <div class="fg"><label>利用者</label><select id="supRes" style="font-size:16px;"></select></div>
+        <!-- 行1：日付（狭め）＋利用者 -->
+        <div style="display:flex;gap:10px;margin-bottom:10px;align-items:flex-end;">
+          <div class="fg" style="flex:0 0 148px;"><label>日付</label><input type="date" id="supDate" style="font-size:18px;width:100%;"></div>
+          <div class="fg" style="flex:1;"><label>利用者</label><select id="supRes" style="font-size:18px;width:100%;"></select></div>
         </div>
-        <div class="fg-row" style="margin-bottom:12px;">
-          <div class="fg"><label>品目</label><select id="supProduct" style="font-size:16px;"></select></div>
-          <div class="fg" style="max-width:100px;"><label>個数</label><input type="number" id="supQty" min="1" max="200" value="1" style="font-size:18px;font-weight:700;text-align:center;"></div>
+        <!-- 行2：品目＋個数 -->
+        <div style="display:flex;gap:10px;margin-bottom:12px;align-items:flex-end;">
+          <div class="fg" style="flex:1;"><label>品目</label><select id="supProduct" style="font-size:18px;width:100%;"></select></div>
+          <div class="fg" style="flex:0 0 90px;"><label>個数</label><input type="number" id="supQty" min="1" max="200" value="1" style="font-size:20px;font-weight:700;text-align:center;width:100%;"></div>
         </div>
-        <button class="btn btn-primary" style="width:100%;font-size:17px;" onclick="addSupply()">記録する</button>
+        <button class="btn btn-primary" style="width:100%;font-size:18px;" onclick="addSupply()">記録する</button>
       </div>
       <!-- 今月の記録一覧 -->
       <div id="supRecList"></div>
@@ -1447,7 +1452,7 @@ function buildExPanel(){
     <div class="panel-sec">
       <h3>
         最終排便：<span style="color:var(--red);font-weight:600;">${lastStool}</span>
-        <span class="sec-btn"><button class="btn btn-gray btn-sm" onclick="openSupplyRecord()">パット等卸記録</button></span>
+        <span class="sec-btn"><button class="btn btn-gray btn-sm" onclick="openSupplyRecord(curRes)">パット等卸記録</button></span>
       </h3>
       <div class="hist-list">${histHtml}</div>
     </div>
@@ -2021,12 +2026,16 @@ function openVitalPrint(){
 }
 
 // ========== パット等卸記録 ==========
-function openSupplyRecord(){
-  // 初期値セット
+function openSupplyRecord(initResName){
+  // 日付
   document.getElementById('supDate').value = dk();
-  // 利用者セレクト
+  // 利用者セレクト（全利用者）
   const resOpts = db.residents.map(r=>`<option value="${r.name}">${r.name}</option>`).join('');
   document.getElementById('supRes').innerHTML = resOpts;
+  // 呼び出し元の利用者名があれば初期選択
+  if(initResName){
+    document.getElementById('supRes').value = initResName;
+  }
   // 品目セレクト
   const products = (db.settings.supplyProducts||[]);
   document.getElementById('supProduct').innerHTML = products.map(p=>`<option>${p}</option>`).join('');
