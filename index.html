@@ -35,7 +35,7 @@ input,select,textarea{font-family:inherit;font-size:30px;}
   padding:5px 10px;display:flex;align-items:center;gap:6px;
   position:sticky;top:0;z-index:100;box-shadow:var(--shadow);
 }
-.hdr-logo{height:75px;max-width:200px;object-fit:contain;}
+.hdr-logo{height:75px;min-height:75px;max-width:220px;object-fit:contain;flex-shrink:0;}
 .hdr-title{font-weight:700;font-size:16px;color:var(--orange2);}
 .hdr-facility{font-size:12px;color:var(--text3);margin-left:4px;}
 .hdr-btn{
@@ -1359,7 +1359,7 @@ function buildVitalPanel(){
     <div class="panel-sec" id="vitalForm">
       <h3 id="vitalFormTitle">バイタル入力</h3>
       <div class="fg-row">
-        <div class="fg" style="flex:0 0 130px;"><label>時刻</label><input type="time" id="vTime" value="${nowTime()}"></div>
+        <div class="fg"><label>時刻</label><input type="time" id="vTime" value="${nowTime()}"></div>
         <div class="fg"><label>担当者</label><select id="vStaff">${buildStaffOpts(lv?lv.staff:'')}</select></div>
       </div>
       <div class="fg-row">
@@ -1442,9 +1442,7 @@ function buildExPanel(){
 
   return `<div class="panel">
     <div class="panel-sec">
-      <h3>排泄記録
-        <span class="sec-btn"><button class="btn btn-gray btn-sm" onclick="openSupplyRecord(curRes)">パット等卸記録</button></span>
-      </h3>
+      <h3>排泄記録</h3>
       <div class="hist-list">${histHtml}</div>
     </div>
     <div class="panel-sec" id="exForm">
@@ -1458,10 +1456,11 @@ function buildExPanel(){
         <div class="fg"><label>パッド汚染量</label><select id="exPad">${padOpts}</select></div>
       </div>
       <div class="fg"><label>排便</label><select id="exStool">${stoolOpts}</select></div>
-      <div class="fg" style="display:flex;gap:8px;flex-wrap:wrap;">
+      <div class="fg" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
         <button type="button" class="chip" id="btnPadChange" onclick="this.classList.toggle('pc-on')">パット交換</button>
         <button type="button" class="chip" id="btnRehaChange" onclick="this.classList.toggle('pc-on')">リハパン交換</button>
         <button type="button" class="chip" id="btnDiaperChange" onclick="this.classList.toggle('pc-on')">オムツ交換</button>
+        <button type="button" class="btn btn-gray btn-sm" style="margin-left:auto;" onclick="openSupplyRecord(curRes)">📦卸記録</button>
       </div>
       <button class="btn btn-primary btn-block mt8" onclick="saveEx()">記録</button>
     </div>
