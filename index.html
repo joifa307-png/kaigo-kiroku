@@ -160,7 +160,7 @@ input,select,textarea{font-family:inherit;font-size:30px;}
 }
 .fg textarea{min-height:100px;resize:vertical;}
 .fg-row{display:flex;gap:10px;}
-.fg-row .fg{flex:1;}
+.fg-row .fg{flex:1;min-width:0;}
 .fg-hint{font-size:14px;color:var(--text3);margin-top:3px;}
 
 /* ===== チップ ===== */
@@ -1219,8 +1219,8 @@ function renderFacilityHeader(){
   if(el) el.textContent = S.facilityName || FAC.name;
   const logo=document.getElementById('mainLogo');
   if(logo){
-    if(S.logoB64){ logo.src='data:image/png;base64,'+S.logoB64; logo.style.display=''; }
-    else logo.style.display='none';
+    if(S.logoB64){ logo.src='data:image/png;base64,'+S.logoB64; logo.style.display=''; logo.style.height='75px'; }
+    else { logo.style.display='none'; logo.style.height=''; }
   }
   document.title = S.facilityName||FAC.name;
 }
