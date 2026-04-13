@@ -679,23 +679,39 @@ function syncFrom(){
 function mergeDb(base, target){
   const result = JSON.parse(JSON.stringify(target)); // targetをベースにコピー
 
-  // ── settings：ローカル（base）を優先して保護 ──
-  // 旧クラウドデータには settings がないため、常にローカルの settings を使う
-  if(base.settings && Object.keys(base.settings).length){
-    result.settings = JSON.parse(JSON.stringify(base.settings));
-  }
+  // ── settings：スマートマージ ──
+  // 方針：ローカル(base)優先だが、ローカルが空の項目はクラウド(target)で補完。
+  // これにより「新端末やキャッシュクリア後でもJSONBinからスタッフ名等を復元できる」
   if(!result.settings) result.settings = {};
-  // DEFAULT_SETTINGS のキーで抜けているものを補完
+  const bs = base.settings || {};
+  const cloudSt = JSON.parse(JSON.stringify(result.settings)); // クラウド設定を退避
+
+  // まずローカル設定で上書き
+  if(bs && Object.keys(bs).length){
+    result.settings = JSON.parse(JSON.stringify(bs));
+  }
+
+  // 各キーをスマート補完
   Object.keys(DEFAULT_SETTINGS).forEach(k=>{
-    const cur = result.settings[k];
-    const def = DEFAULT_SETTINGS[k];
+    const cur = result.settings[k];   // ローカル値
+    const cloud = cloudSt[k];         // クラウド値
+    const def = DEFAULT_SETTINGS[k];  // デフォルト値
+
     if(cur === undefined || cur === null){
-      result.settings[k] = JSON.parse(JSON.stringify(def));
-    } else if(Array.isArray(def) && def.length > 0 && Array.isArray(cur) && cur.length === 0){
-      if(!['staffList','supplyProducts'].includes(k)){
+      // ローカルに値なし → クラウド優先、なければデフォルト
+      result.settings[k] = (cloud !== undefined && cloud !== null)
+        ? JSON.parse(JSON.stringify(cloud))
+        : JSON.parse(JSON.stringify(def));
+    } else if(Array.isArray(cur) && cur.length === 0){
+      // ローカルが空配列 → クラウドに値があれば使う（スタッフ名・消耗品を含む）
+      if(Array.isArray(cloud) && cloud.length > 0){
+        result.settings[k] = JSON.parse(JSON.stringify(cloud));
+      } else if(Array.isArray(def) && def.length > 0 && !['staffList','supplyProducts'].includes(k)){
+        // ローカルもクラウドも空でデフォルトがある → デフォルト補完（staffListは補完しない）
         result.settings[k] = JSON.parse(JSON.stringify(def));
       }
     }
+    // それ以外（ローカルに値あり）: ローカルの値をそのまま使う
   });
 
   // ── residents：ローカル(base)を優先してユニオンマージ ──
