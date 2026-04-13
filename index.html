@@ -917,18 +917,16 @@ function openSummary(name){
   });
   html+='</tr></thead><tbody>';
   const rowDefs=[
-    {label:'体温',fn:(r)=>{const lv=r.vital&&r.vital.length?r.vital[r.vital.length-1]:null;if(!lv)return '—';const w=parseFloat(lv.temp)>=37.0;return `<span style="${w?'color:#e53935;font-weight:700;':''}">${lv.temp}℃</span>`;}},
-    {label:'血圧',fn:(r)=>{const lv=r.vital&&r.vital.length?r.vital[r.vital.length-1]:null;if(!lv)return '—';const w=parseInt(lv.sbp)>=160;return `<span style="${w?'color:#e53935;font-weight:700;':''}">${lv.sbp}/${lv.dbp}</span>`;}},
-    {label:'脈拍',fn:(r)=>{const lv=r.vital&&r.vital.length?r.vital[r.vital.length-1]:null;return lv?String(lv.pulse):'—';}},
-    {label:'SpO2',fn:(r)=>{const lv=r.vital&&r.vital.length?r.vital[r.vital.length-1]:null;return lv&&lv.spo2?lv.spo2+'%':'—';}},
-    {label:'排便',fn:(r)=>{if(!r.excretion)return '—';const ex=r.excretion.filter(e=>e.stool&&e.stool!=='なし');return ex.length?`<span style="color:#8B4513;">${ex[ex.length-1].stool}</span>`:'—';}},
-    {label:'パット交換',fn:(r)=>{if(!r.excretion)return '—';const ex=r.excretion.filter(e=>e.padChange);return ex.length?'<span style="color:#1a7fd4;font-weight:700;">交換</span>':'—';}},
-    {label:'入浴',fn:(r)=>{return r.bath&&r.bath.length?`<span style="color:var(--green);font-weight:700;">${r.bath[r.bath.length-1].type||'○'}</span>`:'—';}},
-    {label:'服薬朝',fn:(r)=>{const m=r.med&&r.med.morning;return m&&m.items&&m.items.length?'<span style="color:var(--blue);font-weight:700;">✔</span>':'—';}},
-    {label:'服薬昼',fn:(r)=>{const m=r.med&&r.med.lunch;return m&&m.items&&m.items.length?'<span style="color:var(--blue);font-weight:700;">✔</span>':'—';}},
-    {label:'服薬夕',fn:(r)=>{const m=r.med&&r.med.dinner;return m&&m.items&&m.items.length?'<span style="color:var(--blue);font-weight:700;">✔</span>':'—';}},
-    {label:'服薬就寝',fn:(r)=>{const m=r.med&&r.med.bedtime;return m&&m.items&&m.items.length?'<span style="color:var(--blue);font-weight:700;">✔</span>':'—';}},
-    {label:'レク',fn:(r)=>{return (r.rec&&(r.rec.content||( r.rec.chips&&r.rec.chips.length)))?'<span style="color:var(--green);font-weight:700;">✔</span>':'—';}},
+    {label:'体温',   fn:(r)=>{const lv=r.vital&&r.vital.length?r.vital[r.vital.length-1]:null;if(!lv)return '—';const w=parseFloat(lv.temp)>=37.0;return `<span style="${w?'color:#e53935;font-weight:700;':''}">${lv.temp}℃</span>`;}},
+    {label:'血圧',   fn:(r)=>{const lv=r.vital&&r.vital.length?r.vital[r.vital.length-1]:null;if(!lv)return '—';const w=parseInt(lv.sbp)>=160;return `<span style="${w?'color:#e53935;font-weight:700;':''}">${lv.sbp}/${lv.dbp}</span>`;}},
+    {label:'脈拍',   fn:(r)=>{const lv=r.vital&&r.vital.length?r.vital[r.vital.length-1]:null;return lv?String(lv.pulse):'—';}},
+    {label:'SpO2',   fn:(r)=>{const lv=r.vital&&r.vital.length?r.vital[r.vital.length-1]:null;return lv&&lv.spo2?lv.spo2+'%':'—';}},
+    {label:'排便',   fn:(r)=>{if(!r.excretion)return '—';const ex=r.excretion.filter(e=>e.stool&&e.stool!=='なし');return ex.length?`<span style="color:#8B4513;">${ex[ex.length-1].stool}</span>`:'—';}},
+    {label:'パット交換', fn:(r)=>{if(!r.excretion)return '—';return r.excretion.some(e=>e.padChange)?'<span style="color:#1a7fd4;font-weight:700;">交換</span>':'—';}},
+    {label:'リハパン',   fn:(r)=>{if(!r.excretion)return '—';return r.excretion.some(e=>e.rehaChange)?'<span style="color:#1a7fd4;font-weight:700;">交換</span>':'—';}},
+    {label:'おむつ',   fn:(r)=>{if(!r.excretion)return '—';return r.excretion.some(e=>e.diaperChange)?'<span style="color:#1a7fd4;font-weight:700;">交換</span>':'—';}},
+    {label:'入浴',   fn:(r)=>{return r.bath&&r.bath.length?`<span style="color:var(--green);font-weight:700;">${r.bath[r.bath.length-1].type||'○'}</span>`:'—';}},
+    {label:'レク',   fn:(r)=>{return (r.rec&&(r.rec.content||(r.rec.chips&&r.rec.chips.length)))?'<span style="color:var(--green);font-weight:700;">✔</span>':'—';}},
   ];
   rowDefs.forEach((row,ri)=>{
     const bg=ri%2===0?'#ffffff':'#f5f5f5';
@@ -941,9 +939,32 @@ function openSummary(name){
     });
     html+='</tr>';
   });
+  // ── 申送り行（最終行）──
+  const notesBg='#fff0f0';
+  html+=`<tr><td style="padding:10px 8px;border:1px solid #ccc;font-weight:600;font-size:18px;white-space:nowrap;background:${notesBg};position:sticky;left:0;z-index:1;">申送り</td>`;
+  days.forEach(d=>{
+    const dd=db.records[d.k]&&db.records[d.k][name];
+    const hasNote=dd&&dd.notes&&dd.notes.length>0;
+    const bg2=d.isToday?'background:#fffbf5;':`background:${notesBg};`;
+    const cell=hasNote
+      ? `<span style="color:#e53935;font-size:22px;font-weight:700;cursor:pointer;line-height:1;" onclick="jumpToSummaryNotes('${d.k}')">●</span>`
+      : '—';
+    html+=`<td style="padding:10px 6px;text-align:center;border:1px solid #ccc;font-size:18px;${bg2}">${cell}</td>`;
+  });
+  html+='</tr>';
   html+='</tbody>';
   document.getElementById('sumTable').innerHTML=html;
   openOv('ovSummary');
+}
+
+// 8日集計オーバーレイ内の申送り●タップ → 該当日の申送りタブへジャンプ
+function jumpToSummaryNotes(dateKey){
+  const dt=new Date(dateKey+'T00:00:00');
+  curDate=dt; curDate.setHours(0,0,0,0);
+  closeOv('ovSummary');
+  renderDate();
+  const name=document.getElementById('sumResName').textContent;
+  openDetail(name,'notes');
 }
 
 // ========== メイン画面描画 ==========
@@ -2167,8 +2188,14 @@ function saveResidentSched(){
 
 // ========== データ管理 ==========
 function buildDataSettings(){
-  const today=new Date().toISOString().slice(0,10);
+  const hasOldData = !!localStorage.getItem('kaigo3');
   return `<div class="settings-panel active">
+    <div class="panel-sec" style="${hasOldData?'border:2px solid var(--green);border-radius:10px;padding:14px;background:var(--green2);':'display:none;'}">
+      <h3 style="color:var(--green);">🔄 旧アプリからデータ移行</h3>
+      <p style="font-size:14px;color:var(--text2);margin-bottom:4px;">旧アプリの記録・利用者・スタッフが見つかりました。</p>
+      <p style="font-size:13px;color:var(--text3);margin-bottom:12px;">現在のデータに追加（上書きなし）されます。</p>
+      <button class="btn btn-sm" style="background:var(--green);color:#fff;border-color:var(--green);font-size:16px;" onclick="migrateFromOldApp()">移行を実行</button>
+    </div>
     <div class="panel-sec">
       <h3>📤 データエクスポート</h3>
       <p style="font-size:14px;color:var(--text2);margin-bottom:12px;">全データをJSONファイルとして保存します（バックアップ用）。</p>
@@ -2205,6 +2232,112 @@ function importDB(input){
     }catch(err){ alert('読み込みエラー: '+err.message); }
   };
   reader.readAsText(file);
+}
+
+// ========== 旧アプリからのデータ移行 ==========
+function migrateFromOldApp(){
+  const oldRaw = localStorage.getItem('kaigo3');
+  if(!oldRaw){
+    alert('旧アプリのデータが見つかりません。\n旧アプリと同じURLで開いている場合のみ移行できます。');
+    return;
+  }
+  if(!confirm('旧アプリ（介護記録）のデータを移行します。\n\n・利用者・記録データを追加（重複除外）\n・スタッフ名・施設名を引き継ぎ\n・現在のデータは保持されます\n\n実行しますか？')) return;
+
+  try{
+    const old = JSON.parse(oldRaw);
+    let addedRes=0, addedDays=0, addedStaff=0;
+
+    // ── 利用者をマージ ──
+    if(old.residents && old.residents.length){
+      const existIds = new Set(db.residents.map(r=>r.id));
+      old.residents.forEach(r=>{
+        if(!existIds.has(r.id)){ db.residents.push(r); addedRes++; }
+        else{
+          // 既存利用者のスケジュールを旧データで上書き
+          const idx=db.residents.findIndex(x=>x.id===r.id);
+          if(idx>=0) db.residents[idx]=Object.assign({},r,{id:r.id});
+        }
+      });
+    }
+
+    // ── 記録をマージ ──
+    if(old.records){
+      Object.entries(old.records).forEach(([dateK, dayData])=>{
+        if(!db.records[dateK]){ db.records[dateK]=dayData; addedDays++; return; }
+        Object.entries(dayData).forEach(([name, rec])=>{
+          if(!db.records[dateK][name]){ db.records[dateK][name]=rec; return; }
+          const tr=db.records[dateK][name];
+          ['vital','excretion','bath','care','notes'].forEach(field=>{
+            if(!rec[field]||!rec[field].length) return;
+            if(!tr[field]||!tr[field].length){ tr[field]=rec[field]; return; }
+            const keys=new Set(tr[field].map(e=>e.id||e.time||JSON.stringify(e)));
+            rec[field].forEach(e=>{
+              const k=e.id||e.time||JSON.stringify(e);
+              if(!keys.has(k)) tr[field].push(e);
+            });
+            tr[field].sort((a,b)=>(a.time||'').localeCompare(b.time||''));
+          });
+          // meal: 旧データが初期値100のままでなければ上書き
+          if(rec.meal && (rec.meal.bMain!==100||rec.meal.main!==100||rec.meal.dMain!==100||rec.meal.menu)){
+            if(tr.meal.bMain===100&&tr.meal.main===100&&tr.meal.dMain===100&&!tr.meal.menu){
+              tr.meal=rec.meal;
+            }
+          }
+          if(rec.day && !tr.day) tr.day=rec.day;
+          if(rec.rec && rec.rec.content && !tr.rec.content) tr.rec=rec.rec;
+        });
+      });
+    }
+
+    // ── スタッフリストをマージ ──
+    try{
+      const oldStaff=JSON.parse(localStorage.getItem('staffList')||'[]');
+      if(Array.isArray(oldStaff) && oldStaff.length){
+        if(!db.settings.staffList) db.settings.staffList=[];
+        const existing=new Set(db.settings.staffList);
+        oldStaff.forEach(s=>{ if(s&&!existing.has(s)){ db.settings.staffList.push(s); addedStaff++; }});
+      }
+    }catch(e){}
+
+    // ── 施設名（未設定の場合のみ）──
+    try{
+      const oldFac=localStorage.getItem('facilityName');
+      if(oldFac && !db.settings.facilityName) db.settings.facilityName=oldFac;
+    }catch(e){}
+
+    // ── 1日の様子フレーズをdayItemsにマージ ──
+    try{
+      const oldDay=JSON.parse(localStorage.getItem('dayPhrases')||'[]');
+      if(oldDay.length){
+        const ex=new Set(db.settings.dayItems||[]);
+        oldDay.forEach(p=>{ if(p&&!ex.has(p)) db.settings.dayItems.push(p); });
+      }
+    }catch(e){}
+
+    // ── ケアフレーズをcareItemsにマージ ──
+    try{
+      const oldCare=JSON.parse(localStorage.getItem('carePhrases')||'[]');
+      if(oldCare.length){
+        const ex=new Set(db.settings.careItems||[]);
+        oldCare.forEach(p=>{ if(p&&!ex.has(p)) db.settings.careItems.push(p); });
+      }
+    }catch(e){}
+
+    saveDB();
+    const msg=[
+      '✅ 移行が完了しました！',
+      '',
+      '利用者: '+(addedRes>0?addedRes+'人を追加':'変更なし（既存データ優先）'),
+      '記録日数: '+Object.keys(db.records).length+'日分',
+      'スタッフ: '+(addedStaff>0?addedStaff+'名を追加':'変更なし'),
+    ].join('\n');
+    alert(msg);
+    renderSettingsPanel('data');
+    renderMain();
+  }catch(err){
+    console.error('Migration error:',err);
+    alert('移行中にエラーが発生しました:\n'+err.message);
+  }
 }
 
 // ========== 印刷機能 ==========
