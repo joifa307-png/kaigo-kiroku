@@ -32,10 +32,10 @@ input,select,textarea{font-family:inherit;font-size:30px;}
 .hdr{
   background:linear-gradient(135deg,#fff 0%,#FEF6F0 100%);
   border-bottom:1px solid var(--border1);
-  padding:5px 10px;display:flex;align-items:center;gap:6px;
+  padding:4px 10px;display:flex;align-items:center;gap:6px;
   position:sticky;top:0;z-index:100;box-shadow:var(--shadow);
 }
-.hdr-logo{height:75px;width:auto;display:block;}
+.hdr-logo{height:60px;width:auto;display:block;}
 .hdr-title{font-weight:700;font-size:16px;color:var(--orange2);}
 .hdr-facility{font-size:12px;color:var(--text3);margin-left:4px;}
 .hdr-btn{
@@ -112,7 +112,8 @@ input,select,textarea{font-family:inherit;font-size:30px;}
 .detail-hdr{
   background:linear-gradient(135deg,#fff 0%,#FEF6F0 100%);
   border-bottom:1px solid var(--border1);
-  padding:8px 12px;display:flex;align-items:center;gap:8px;
+  padding:6px 12px;
+  display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:8px;
   position:sticky;top:0;z-index:100;box-shadow:var(--shadow);
 }
 .detail-name{font-size:18px;font-weight:600;color:var(--text1);}
@@ -126,7 +127,7 @@ input,select,textarea{font-family:inherit;font-size:30px;}
 .tabs{
   display:flex;overflow-x:auto;background:var(--white);
   border-bottom:2px solid var(--border2);
-  position:sticky;top:57px;z-index:99;
+  position:sticky;top:50px;z-index:99;
   -webkit-overflow-scrolling:touch;
 }
 .tab{
@@ -369,17 +370,22 @@ input,select,textarea{font-family:inherit;font-size:30px;}
 <!-- ========== 詳細画面 ========== -->
 <div id="detailScreen" class="screen">
   <div class="detail-hdr no-print">
-    <button class="back-btn" onclick="goBack()">◀ メイン</button>
-    <div style="flex:1;">
-      <div class="detail-name" id="detName"></div>
-      <div class="hdr-center" style="margin-top:4px;">
-        <button class="hdr-btn nav" onclick="moveDayDet(-1)">◀</button>
-        <div class="hdr-date" id="detDate" onclick="openCal()"></div>
-        <button class="hdr-btn nav" onclick="moveDayDet(1)">▶</button>
-      </div>
+    <!-- 左: 戻るボタン + 名前 -->
+    <div style="display:flex;align-items:center;gap:8px;overflow:hidden;">
+      <button class="back-btn" onclick="goBack()">◀ メイン</button>
+      <div class="detail-name" id="detName" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></div>
     </div>
-    <button class="hdr-btn no-print" onclick="openCareSummary()" style="font-size:13px;padding:6px 10px;">📋 サマリー</button>
-    <button class="hdr-btn no-print" onclick="openVitalPrint()" style="font-size:13px;padding:6px 10px;">📅 期間印刷</button>
+    <!-- 中央: 日付ナビ -->
+    <div class="hdr-center">
+      <button class="hdr-btn nav" onclick="moveDayDet(-1)">◀</button>
+      <div class="hdr-date" id="detDate" onclick="openCal()"></div>
+      <button class="hdr-btn nav" onclick="moveDayDet(1)">▶</button>
+    </div>
+    <!-- 右: サマリー・期間印刷 -->
+    <div style="display:flex;align-items:center;gap:6px;justify-content:flex-end;">
+      <button class="hdr-btn no-print" onclick="openCareSummary()" style="font-size:13px;padding:6px 10px;">📋</button>
+      <button class="hdr-btn no-print" onclick="openVitalPrint()" style="font-size:13px;padding:6px 10px;">📅</button>
+    </div>
   </div>
   <div class="tabs no-print" id="detTabs"></div>
   <div id="detPanel"></div>
@@ -1219,7 +1225,7 @@ function renderFacilityHeader(){
   if(el) el.textContent = S.facilityName || FAC.name;
   const logo=document.getElementById('mainLogo');
   if(logo){
-    if(S.logoB64){ logo.src='data:image/png;base64,'+S.logoB64; logo.style.cssText='display:block;height:75px;width:auto;'; }
+    if(S.logoB64){ logo.src='data:image/png;base64,'+S.logoB64; logo.style.cssText='display:block;height:60px;width:auto;'; }
     else { logo.style.cssText='display:none;'; }
   }
   document.title = S.facilityName||FAC.name;
@@ -1967,12 +1973,12 @@ function buildDayPanel(){
     const dt=new Date(curDate); dt.setDate(dt.getDate()-d);
     const k=dk(dt);
     const dayData=db.records[k]&&db.records[k][curRes];
-    if(dayData&&dayData.day){ dayHist.push({text:dayData.day,_dk:k}); }
+    if(dayData&&dayData.day){ dayHist.push({text:dayData.day,writer:dayData.dayWriter||'',_dk:k}); }
     if(dayHist.length>=3) break;
   }
   const dayHistHtml=dayHist.length?dayHist.map(h=>`<div class="hist-item">
     <div class="hist-time">${recDayLabel(h._dk)}</div>
-    <div class="hist-content">${h.text}</div>
+    <div class="hist-content">${h.text}${h.writer?`<br><span class="text-gray">${h.writer}</span>`:''}</div>
   </div>`).join(''):'<div class="text-gray" style="font-size:14px;padding:8px 0;">記録なし</div>';
   return `<div class="panel">
     <div class="panel-sec"><h3>直近の記録（3回分）</h3><div class="hist-list">${dayHistHtml}</div></div>
@@ -1980,6 +1986,7 @@ function buildDayPanel(){
       <h3>1日の様子</h3>
       <div class="fg"><label>選択（複数可）</label><div id="dayChips" style="display:flex;flex-wrap:wrap;gap:4px;">${dayChips}</div></div>
       <div class="fg"><label>自由記入</label><textarea id="dayText" rows="3" placeholder="その他の様子">${rec.day||''}</textarea></div>
+      <div class="fg"><label>記録者</label><select id="dayWriter">${buildStaffOpts(rec.dayWriter||'')}</select></div>
       <button class="btn btn-primary btn-block" onclick="saveDay()">記録</button>
     </div>
   </div>`;
@@ -1996,6 +2003,7 @@ function toggleDayChip(el,item){
 function saveDay(){
   const r=getRec(curRes);
   r.day=document.getElementById('dayText').value.trim();
+  r.dayWriter=document.getElementById('dayWriter').value;
   saveDB(); showSavedToast(); goBack();
 }
 
