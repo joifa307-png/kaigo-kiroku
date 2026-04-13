@@ -183,6 +183,8 @@ input,select,textarea{font-family:inherit;font-size:30px;}
 .btn-primary:active{opacity:.8;}
 .btn-danger{background:var(--red);color:#fff;}
 .btn-gray{background:var(--border2);color:var(--text2);}
+.btn-green{background:var(--green);color:#fff;}
+.btn-green:active{opacity:.8;}
 .btn-sm{padding:6px 12px;font-size:18px;}
 .btn-block{display:block;width:100%;}
 
@@ -518,20 +520,32 @@ input,select,textarea{font-family:inherit;font-size:30px;}
 
 <!-- ========== 利用者追加オーバーレイ ========== -->
 <div class="ov-back" id="ovAddRes" onclick="if(event.target===this)closeOv('ovAddRes')">
-  <div class="ov show" style="padding:20px;max-width:380px;width:90vw;">
+  <div class="ov show" style="padding:20px;max-width:400px;width:92vw;">
     <div style="display:flex;align-items:center;gap:12px;padding-bottom:12px;border-bottom:1px solid var(--border2);margin-bottom:16px;">
       <span style="font-size:20px;font-weight:700;">利用者追加</span>
       <button onclick="closeOv('ovAddRes')" style="margin-left:auto;border:none;background:none;font-size:26px;cursor:pointer;color:var(--text3);">×</button>
     </div>
+    <!-- 既存利用者から選ぶ -->
+    <div class="fg">
+      <label>既存の利用者から追加</label>
+      <select id="addResSelect" style="font-size:18px;width:100%;"></select>
+    </div>
+    <button class="btn btn-primary" style="width:100%;font-size:18px;" onclick="addExistingRes()">今日のスケジュールに追加</button>
+    <!-- 新規作成 -->
+    <div style="margin:16px 0 10px;display:flex;align-items:center;gap:8px;">
+      <div style="flex:1;border-top:1px solid var(--border2);"></div>
+      <span style="font-size:14px;color:var(--text3);">または新規作成</span>
+      <div style="flex:1;border-top:1px solid var(--border2);"></div>
+    </div>
     <div class="fg"><label>氏名</label><input type="text" id="addResName" placeholder="山田 花子" style="font-size:18px;"></div>
-    <div class="fg" style="margin-top:10px;"><label>介護度</label>
+    <div class="fg"><label>介護度</label>
       <select id="addResCare" style="font-size:18px;">
         <option>要支援１</option><option>要支援２</option>
         <option>要介護１</option><option>要介護２</option><option>要介護３</option>
         <option>要介護４</option><option selected>要介護５</option>
       </select>
     </div>
-    <button class="btn btn-primary" style="width:100%;margin-top:16px;font-size:18px;" onclick="addResidentFromMain()">追加</button>
+    <button class="btn btn-gray" style="width:100%;margin-top:8px;font-size:18px;" onclick="addResidentFromMain()">新規作成して追加</button>
   </div>
 </div>
 
@@ -1118,7 +1132,7 @@ function renderMain(){
   const tbody=document.getElementById('resBody');
   if(!tbody) return;
   if(todayRes.length===0){
-    tbody.innerHTML=`<tr><td colspan="12" style="padding:32px;color:var(--text3);text-align:center;">本日の利用者はいません</td></tr>
+    tbody.innerHTML=`<tr><td colspan="12" style="padding:20px;color:var(--text3);text-align:center;">本日の利用者はいません</td></tr>
     <tr class="res-add-row no-print"><td></td><td><button class="res-add-btn" onclick="openAddResOv()">＋ 利用者を追加</button></td><td colspan="10"></td></tr>`;
     return;
   }
@@ -1213,9 +1227,9 @@ function renderMain(){
       <td onclick="openDetail('${r.name}','med')">${mdc}</td>
     </tr>`;
   }).join('');
-  // ＋ 利用者追加行（最下部）
+  // ＋ 利用者追加行（最下部・氏名列に配置）
   tbody.innerHTML += `<tr class="res-add-row no-print">
-    <td colspan="12"><button class="res-add-btn" onclick="openAddResOv()">＋ 利用者を追加</button></td>
+    <td></td><td><button class="res-add-btn" onclick="openAddResOv()">＋ 利用者を追加</button></td><td colspan="10"></td>
   </tr>`;
 }
 
@@ -1466,7 +1480,7 @@ function buildExPanel(){
         <button type="button" class="chip" id="btnPadChange" onclick="this.classList.toggle('pc-on')">パット交換</button>
         <button type="button" class="chip" id="btnRehaChange" onclick="this.classList.toggle('pc-on')">リハパン交換</button>
         <button type="button" class="chip" id="btnDiaperChange" onclick="this.classList.toggle('pc-on')">オムツ交換</button>
-        <button type="button" class="btn btn-gray btn-sm" style="margin-left:auto;" onclick="openSupplyRecord(curRes)">📦卸記録</button>
+        <button type="button" class="btn btn-green btn-sm" style="margin-left:auto;" onclick="openSupplyRecord(curRes)">🩲卸記録</button>
       </div>
       <button class="btn btn-primary btn-block mt8" onclick="saveEx()">記録</button>
     </div>
@@ -2303,15 +2317,37 @@ function delResidentByName(name){
 }
 // メイン画面の＋ボタンから追加
 function openAddResOv(){
+  const dayIdx = curDate.getDate()-1;
+  const todayNames = new Set((db.residents||[]).filter(r=>r.sched&&r.sched[dayIdx]===1).map(r=>r.name));
+  const notToday = (db.residents||[]).filter(r=>!todayNames.has(r.name));
+  const sel = document.getElementById('addResSelect');
+  if(notToday.length>0){
+    sel.innerHTML = '<option value="">-- 選択してください --</option>'
+      + notToday.map(r=>`<option value="${r.name}">${r.name}${r.care?'（'+r.care+'）':''}</option>`).join('');
+    sel.disabled = false;
+  } else {
+    sel.innerHTML = '<option value="">（未登録の利用者はいません）</option>';
+    sel.disabled = true;
+  }
   document.getElementById('addResName').value='';
   document.getElementById('addResCare').value='要介護５';
   openOv('ovAddRes');
-  setTimeout(()=>document.getElementById('addResName').focus(),200);
+}
+function addExistingRes(){
+  const name = document.getElementById('addResSelect').value;
+  if(!name){ alert('利用者を選択してください'); return; }
+  const dayIdx = curDate.getDate()-1;
+  const r = (db.residents||[]).find(r=>r.name===name);
+  if(!r){ alert('利用者が見つかりません'); return; }
+  if(!r.sched) r.sched=Array(31).fill(0);
+  r.sched[dayIdx]=1;
+  saveDB(); closeOv('ovAddRes'); renderMain();
 }
 function addResidentFromMain(){
   const name=document.getElementById('addResName').value.trim();
   const care=document.getElementById('addResCare').value;
   if(!name){ alert('氏名を入力してください'); return; }
+  if((db.residents||[]).find(r=>r.name===name)){ alert('同名の利用者が既に存在します'); return; }
   db.residents.push({id:genId('r'),name,care,sched:Array(31).fill(0)});
   saveDB(); closeOv('ovAddRes'); renderMain();
 }
