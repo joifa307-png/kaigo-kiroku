@@ -7,6 +7,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="介護記録">
 <title id="pageTitle">介護記録</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
 /* ===== CSS変数 ===== */
 :root{
@@ -73,9 +74,15 @@ input,select,textarea{font-family:inherit;font-size:30px;}
 .res-table tr:nth-child(odd) td{background:var(--white);}
 .res-table tr:nth-child(even) td{background:#F7F6F2;}
 .res-table tr:active td{background:var(--blue2)!important;}
-.name-cell{text-align:left !important;padding-left:8px !important;cursor:default;}
+.name-cell{text-align:left !important;padding-left:6px !important;padding-right:4px !important;cursor:default;}
+.name-cell-inner{display:flex;align-items:center;gap:4px;}
+.name-cell-text{flex:1;}
 .name-txt{font-size:22px;font-weight:500;}
 .name-sub{font-size:16px;color:var(--text3);}
+.res-del-btn{border:none;background:none;color:var(--text3);font-size:18px;cursor:pointer;padding:4px 6px;line-height:1;flex-shrink:0;}
+.res-del-btn:active{color:var(--red);}
+.res-add-row td{background:var(--white)!important;text-align:center;padding:6px!important;}
+.res-add-btn{border:1px dashed var(--border2);background:none;color:var(--text2);font-size:16px;padding:6px 20px;border-radius:var(--r2);cursor:pointer;}
 .cell-val{font-size:18px;line-height:1.4;}
 .cell-empty{color:var(--text3);font-size:18px;}
 .cell-ok{color:var(--green);font-size:22px;font-weight:700;}
@@ -315,6 +322,7 @@ input,select,textarea{font-family:inherit;font-size:30px;}
       <span class="sync-dot" id="syncDot">●</span>
       <span id="syncLabel">--</span>
     </div>
+    <button class="hdr-btn no-print" onclick="openUpload()" style="background:#F3F0FF;color:#5B3FB5;border-color:#5B3FB5;font-weight:700;">📅予定</button>
     <button class="hdr-btn no-print" onclick="openPrint()" style="background:#E1F5EE;color:#0F6E56;border-color:#0F6E56;font-weight:700;">連絡帳</button>
     <button class="hdr-btn no-print" onclick="saveMonthlyBackup()" style="background:var(--blue2);color:var(--blue);border-color:var(--blue);font-weight:700;">月次保存</button>
     <button class="hdr-btn no-print" onclick="syncNow()">🔄</button>
@@ -325,7 +333,7 @@ input,select,textarea{font-family:inherit;font-size:30px;}
       <thead>
         <tr>
           <th style="width:32px;min-width:32px;">申送</th>
-          <th style="text-align:left;padding-left:8px;min-width:80px;">氏名</th>
+          <th style="min-width:80px;">氏名</th>
           <th>体温</th>
           <th>血圧</th>
           <th>脈拍</th>
@@ -422,6 +430,45 @@ input,select,textarea{font-family:inherit;font-size:30px;}
     </div>
     <p style="font-size:14px;color:var(--text2);margin-bottom:10px;">出席する日付をタップして選択してください</p>
     <div id="ovSchedBody"></div>
+  </div>
+</div>
+
+<!-- ========== 月間予定表取込オーバーレイ ========== -->
+<div class="ov-back" id="ovUpload" onclick="if(event.target===this)closeOv('ovUpload')">
+  <div class="ov show" style="padding:20px;max-width:480px;width:92vw;">
+    <div style="display:flex;align-items:center;gap:12px;padding-bottom:12px;border-bottom:1px solid var(--border2);margin-bottom:16px;">
+      <span style="font-size:20px;font-weight:700;">📅 月間予定表を読み込む</span>
+      <button onclick="closeOv('ovUpload')" style="margin-left:auto;border:none;background:none;font-size:26px;cursor:pointer;color:var(--text3);">×</button>
+    </div>
+    <div style="border:2px dashed var(--border2);border-radius:var(--r2);padding:28px 16px;text-align:center;cursor:pointer;color:var(--text3);background:#fafafa;" onclick="document.getElementById('xlsxFile').click()">
+      <div style="font-size:36px;margin-bottom:8px;">📊</div>
+      <div style="font-size:17px;font-weight:600;color:var(--text2);">タップしてExcelを選択</div>
+      <div style="font-size:13px;margin-top:6px;">利用月間予定表_YYYYMM_xxx.xlsm / .xlsx</div>
+    </div>
+    <input type="file" id="xlsxFile" accept=".xlsx,.xlsm,.xls" style="display:none;" onchange="handleXlsx(this.files[0])">
+    <div id="uploadMsg" style="margin-top:14px;font-size:15px;color:var(--text2);min-height:40px;"></div>
+    <p style="font-size:12px;color:var(--text3);margin-top:10px;">
+      ⚠ 読み込むと今月の利用者予定が上書きされ、全端末に同期されます
+    </p>
+  </div>
+</div>
+
+<!-- ========== 利用者追加オーバーレイ ========== -->
+<div class="ov-back" id="ovAddRes" onclick="if(event.target===this)closeOv('ovAddRes')">
+  <div class="ov show" style="padding:20px;max-width:380px;width:90vw;">
+    <div style="display:flex;align-items:center;gap:12px;padding-bottom:12px;border-bottom:1px solid var(--border2);margin-bottom:16px;">
+      <span style="font-size:20px;font-weight:700;">利用者追加</span>
+      <button onclick="closeOv('ovAddRes')" style="margin-left:auto;border:none;background:none;font-size:26px;cursor:pointer;color:var(--text3);">×</button>
+    </div>
+    <div class="fg"><label>氏名</label><input type="text" id="addResName" placeholder="山田 花子" style="font-size:18px;"></div>
+    <div class="fg" style="margin-top:10px;"><label>介護度</label>
+      <select id="addResCare" style="font-size:18px;">
+        <option>要支援１</option><option>要支援２</option>
+        <option>要介護１</option><option>要介護２</option><option>要介護３</option>
+        <option>要介護４</option><option selected>要介護５</option>
+      </select>
+    </div>
+    <button class="btn btn-primary" style="width:100%;margin-top:16px;font-size:18px;" onclick="addResidentFromMain()">追加</button>
   </div>
 </div>
 
@@ -1008,7 +1055,8 @@ function renderMain(){
   const tbody=document.getElementById('resBody');
   if(!tbody) return;
   if(todayRes.length===0){
-    tbody.innerHTML=`<tr><td colspan="12" style="padding:32px;color:var(--text3);text-align:center;">本日の利用者はいません</td></tr>`;
+    tbody.innerHTML=`<tr><td colspan="12" style="padding:32px;color:var(--text3);text-align:center;">本日の利用者はいません</td></tr>
+    <tr class="res-add-row no-print"><td></td><td><button class="res-add-btn" onclick="openAddResOv()">＋ 利用者を追加</button></td><td colspan="10"></td></tr>`;
     return;
   }
   tbody.innerHTML=todayRes.map(r=>{
@@ -1082,8 +1130,13 @@ function renderMain(){
     return `<tr>
       <td style="width:32px;min-width:32px;padding:4px;" onclick="openDetail('${r.name}','notes')">${nc}</td>
       <td class="name-cell">
-        <div class="name-txt" onclick="openSummary('${r.name}')">${r.name}</div>
-        <div class="name-sub">${r.care||''}</div>
+        <div class="name-cell-inner">
+          <div class="name-cell-text">
+            <div class="name-txt" onclick="openSummary('${r.name}')">${r.name}</div>
+            <div class="name-sub">${r.care||''}</div>
+          </div>
+          <button class="res-del-btn no-print" onclick="delResidentByName('${r.name}')">×</button>
+        </div>
       </td>
       <td onclick="openDetail('${r.name}','vital')">${tc}</td>
       <td onclick="openDetail('${r.name}','vital')">${bc}</td>
@@ -1097,6 +1150,10 @@ function renderMain(){
       <td onclick="openDetail('${r.name}','med')">${mdc}</td>
     </tr>`;
   }).join('');
+  // ＋ 利用者追加行（最下部）
+  tbody.innerHTML += `<tr class="res-add-row no-print">
+    <td colspan="12"><button class="res-add-btn" onclick="openAddResOv()">＋ 利用者を追加</button></td>
+  </tr>`;
 }
 
 function renderFacilityHeader(){
@@ -1922,7 +1979,6 @@ function openSupplyRecord(){
 // ========== 設定画面 ==========
 const SETTINGS_TABS=[
   {id:'facility', label:'施設・ロゴ'},
-  {id:'residents',label:'利用者管理'},
   {id:'staff',    label:'スタッフ'},
   {id:'supply',   label:'消耗品マスタ'},
   {id:'ex_opts',   label:'排泄項目'},
@@ -1957,7 +2013,6 @@ function renderSettingsPanel(id){
   const el=document.getElementById('settingsBody');
   switch(id){
     case 'facility':  el.innerHTML=buildFacilitySettings(); break;
-    case 'residents': el.innerHTML=buildResidentSettings(); break;
     case 'staff':     el.innerHTML=buildStaffSettings(); break;
     case 'supply':    el.innerHTML=buildSupplySettings(); break;
     case 'ex_opts':   el.innerHTML=buildListSettings('排泄項目','exUrineOptions','尿量オプション','exPadOptions','パッド汚染オプション','exStoolOptions','排便オプション'); break;
@@ -2049,6 +2104,108 @@ function delResident(idx){
   if(!confirm(`「${db.residents[idx].name}」を削除しますか？\n記録データは残ります`)) return;
   db.residents.splice(idx,1);
   saveDB(); renderSettingsPanel('residents');
+}
+// メイン画面の×ボタンから削除
+function delResidentByName(name){
+  const idx=db.residents.findIndex(r=>r.name===name);
+  if(idx<0) return;
+  if(!confirm(`「${name}」を削除しますか？\n記録データは残ります`)) return;
+  db.residents.splice(idx,1);
+  saveDB(); renderMain();
+}
+// メイン画面の＋ボタンから追加
+function openAddResOv(){
+  document.getElementById('addResName').value='';
+  document.getElementById('addResCare').value='要介護５';
+  openOv('ovAddRes');
+  setTimeout(()=>document.getElementById('addResName').focus(),200);
+}
+function addResidentFromMain(){
+  const name=document.getElementById('addResName').value.trim();
+  const care=document.getElementById('addResCare').value;
+  if(!name){ alert('氏名を入力してください'); return; }
+  db.residents.push({id:genId('r'),name,care,sched:Array(31).fill(0)});
+  saveDB(); closeOv('ovAddRes'); renderMain();
+}
+
+// ========== 月間予定表Excel取込 ==========
+function openUpload(){
+  document.getElementById('uploadMsg').textContent='';
+  document.getElementById('xlsxFile').value='';
+  openOv('ovUpload');
+}
+function handleXlsx(file){
+  if(!file) return;
+  const msg=document.getElementById('uploadMsg');
+  msg.textContent='読み込み中...';
+  const reader=new FileReader();
+  reader.onload=function(e){
+    try{
+      const wb=XLSX.read(e.target.result,{type:'array'});
+      const ws=wb.Sheets[wb.SheetNames[0]];
+      const data=XLSX.utils.sheet_to_json(ws,{header:1,defval:null});
+      const skip=['氏名','集計項目','利用者合計','介護保険内利用者','介護保険外利用者',
+                  'お泊り利用者','入浴利用者','送迎減算利用者','延長加算利用者','個別機能訓練加算利用者'];
+      // 名前でグループ化（結合セル対応：直前のcurNameを引き継ぐ）
+      var byName={}, cats=[], curName=null, curCare=null;
+      for(var i=17;i<data.length;i++){
+        var row=data[i];
+        if(row[0]&&skip.indexOf(String(row[0]).trim())<0){
+          curName=String(row[0]).trim();
+          curCare=String(row[1]||'').trim();
+        }
+        if(!curName) continue;
+        if(row[0]&&skip.indexOf(String(row[0]).trim())>=0){curName=null;continue;}
+        var cat=String(row[2]||'').trim();
+        if(!cat) continue;
+        if(cats.indexOf(cat)<0) cats.push(cat);
+        if(!byName[curName]) byName[curName]={care:curCare,riyou:null,otomari:null};
+        if(cat==='利用') byName[curName].riyou=row;
+        if(cat.indexOf('泊')>=0) byName[curName].otomari=row;
+      }
+      var newRes=[], dailyCount=0;
+      Object.keys(byName).forEach(function(n){
+        var v=byName[n], uRow=v.riyou, oRow=v.otomari;
+        // D列（col 3 = 1日目）のお泊行に入力があれば常時利用者
+        var d1Val=oRow?String(oRow[3]||'').trim():'';
+        var isDaily=(oRow&&d1Val.length>0);
+        if(!isDaily&&!uRow) return;
+        var sched=[];
+        for(var c=3;c<=33;c++){
+          var dayIdx=c-3;
+          if(isDaily){
+            sched.push(1);
+          } else {
+            var uv=uRow[c];
+            var val=(uv&&['〇','○','◯'].indexOf(String(uv).trim())>=0)?1:0;
+            // 翌日ルール：前日のお泊行に入力があれば翌日も利用扱い（ショートステイ）
+            if(oRow&&dayIdx>0&&String(oRow[c-1]||'').trim().length>0) val=1;
+            sched.push(val);
+          }
+        }
+        if(isDaily) dailyCount++;
+        // 既存利用者のIDを引き継ぐ（同期時に重複しないよう）
+        const existing=db.residents.find(r=>r.name===n);
+        const id=existing?existing.id:genId('r');
+        newRes.push({id,name:n,care:v.care,sched:sched});
+      });
+      if(newRes.length>0){
+        db.residents=newRes;
+        saveDB();
+        const dailyMsg=dailyCount>0?'（常時利用者'+dailyCount+'名含む）':'';
+        msg.innerHTML='<span style="color:var(--green);font-weight:700;">✔ '+newRes.length+'名の予定を読み込みました'+dailyMsg+'</span>'
+          +'<br><span style="font-size:13px;color:#888;">区分: '+cats.join(' / ')+' | 常時: '+dailyCount+'名</span>';
+        renderMain();
+        setTimeout(function(){closeOv('ovUpload');},2000);
+      } else {
+        msg.innerHTML='<span style="color:var(--red);">利用者データが見つかりませんでした</span>'
+          +'<br><span style="font-size:13px;color:#888;">検出された区分: '+cats.join(' / ')+'</span>';
+      }
+    }catch(err){
+      msg.innerHTML='<span style="color:var(--red);">エラー: '+err.message+'</span>';
+    }
+  };
+  reader.readAsArrayBuffer(file);
 }
 
 function buildStaffSettings(){
