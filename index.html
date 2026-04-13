@@ -34,7 +34,7 @@ input,select,textarea{font-family:inherit;font-size:30px;}
   padding:5px 10px;display:flex;align-items:center;gap:6px;
   position:sticky;top:0;z-index:100;box-shadow:var(--shadow);
 }
-.hdr-logo{height:32px;max-width:200px;object-fit:contain;}
+.hdr-logo{height:50px;max-width:200px;object-fit:contain;}
 .hdr-title{font-weight:700;font-size:16px;color:var(--orange2);}
 .hdr-facility{font-size:12px;color:var(--text3);margin-left:4px;}
 .hdr-btn{
@@ -582,6 +582,14 @@ function loadDB(){
     }
   });
   if(db.settings.facilityName) document.title = db.settings.facilityName;
+  // 名前重複を排除（同期バグで汚染された既存データを修復）
+  if(db.residents){
+    const seen = new Set();
+    db.residents = db.residents.filter(r=>{
+      if(seen.has(r.name)) return false;
+      seen.add(r.name); return true;
+    });
+  }
 }
 
 function saveDB(){
@@ -715,20 +723,27 @@ function mergeDb(base, target){
   });
 
   // ── residents：ローカル(base)を優先してユニオンマージ ──
-  // 同じIDがあればbase(ローカル)で上書き。baseにしかないIDは追加。
+  // IDマッチ優先、IDなしは名前でフォールバック検索
   if(!result.residents) result.residents = [];
   if(base.residents&&base.residents.length){
-    const idxMap = {};
-    result.residents.forEach((r,i)=>{ if(r.id) idxMap[r.id]=i; });
     base.residents.forEach(r=>{
-      if(!r.id) return;
-      if(idxMap[r.id]!==undefined){
-        result.residents[idxMap[r.id]] = r; // ローカルで上書き
-      } else {
-        result.residents.push(r); // 新規追加
+      let idx = r.id ? result.residents.findIndex(x=>x.id===r.id) : -1;
+      if(idx<0 && r.name) idx = result.residents.findIndex(x=>x.name===r.name);
+      if(idx<0){
+        result.residents.push(r); // クラウドにもローカルにもない → 追加
+      } else if(r.id){
+        result.residents[idx] = r; // IDが一致 → ローカルで上書き
       }
+      // IDなしで名前一致の場合はローカル優先でそのまま
     });
-    // cloudにあってbaseにない居住者はそのまま保持
+  }
+  // 名前重複を排除（同期バグで汚染されたデータを修復）
+  {
+    const seenNames = new Set();
+    result.residents = result.residents.filter(r=>{
+      if(seenNames.has(r.name)) return false;
+      seenNames.add(r.name); return true;
+    });
   }
 
   // ── supplies：ユニオンマージ ──
@@ -923,8 +938,8 @@ function openSummary(name){
     {label:'SpO2',   fn:(r)=>{const lv=r.vital&&r.vital.length?r.vital[r.vital.length-1]:null;return lv&&lv.spo2?lv.spo2+'%':'—';}},
     {label:'排便',   fn:(r)=>{if(!r.excretion)return '—';const ex=r.excretion.filter(e=>e.stool&&e.stool!=='なし');return ex.length?`<span style="color:#8B4513;">${ex[ex.length-1].stool}</span>`:'—';}},
     {label:'パット交換', fn:(r)=>{if(!r.excretion)return '—';return r.excretion.some(e=>e.padChange)?'<span style="color:#1a7fd4;font-weight:700;">交換</span>':'—';}},
-    {label:'リハパン',   fn:(r)=>{if(!r.excretion)return '—';return r.excretion.some(e=>e.rehaChange)?'<span style="color:#1a7fd4;font-weight:700;">交換</span>':'—';}},
-    {label:'おむつ',   fn:(r)=>{if(!r.excretion)return '—';return r.excretion.some(e=>e.diaperChange)?'<span style="color:#1a7fd4;font-weight:700;">交換</span>':'—';}},
+    {label:'リハパン交換', fn:(r)=>{if(!r.excretion)return '—';return r.excretion.some(e=>e.rehaChange)?'<span style="color:#1a7fd4;font-weight:700;">交換</span>':'—';}},
+    {label:'おむつ交換', fn:(r)=>{if(!r.excretion)return '—';return r.excretion.some(e=>e.diaperChange)?'<span style="color:#1a7fd4;font-weight:700;">交換</span>':'—';}},
     {label:'入浴',   fn:(r)=>{return r.bath&&r.bath.length?`<span style="color:var(--green);font-weight:700;">${r.bath[r.bath.length-1].type||'○'}</span>`:'—';}},
     {label:'レク',   fn:(r)=>{return (r.rec&&(r.rec.content||(r.rec.chips&&r.rec.chips.length)))?'<span style="color:var(--green);font-weight:700;">✔</span>':'—';}},
   ];
