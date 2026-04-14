@@ -684,12 +684,10 @@ function loadDB(){
     const s = localStorage.getItem(FAC.storageKey);
     if(s){ db = JSON.parse(s); }
   }catch(e){ console.error('loadDB error',e); }
-  // 初期値補完
-  if(!db.residents||db.residents.length===0){
-    db.residents = FACILITY_ID==='nishi'
-      ? JSON.parse(JSON.stringify(DEFAULT_RESIDENTS_NISHI))
-      : [];
-  }
+  // syncDirtyをlocalStorageから復元（ページ再読み込み後も未送信フラグを保持）
+  if(localStorage.getItem(FAC.storageKey+'_dirty')==='1') syncDirty = true;
+  // 初期値補完（DEFAULT_RESIDENTS_NIHSIは使わない：クラウド同期で復元するため）
+  if(!db.residents) db.residents = [];
   if(!db.records) db.records={};
   if(!db.supplies) db.supplies=[];
   if(!db.settings) db.settings={};
@@ -721,6 +719,7 @@ function saveDB(){
   if(!FAC) return;
   localStorage.setItem(FAC.storageKey, JSON.stringify(db));
   syncDirty = true;
+  localStorage.setItem(FAC.storageKey+'_dirty','1'); // ページ再読込後も未送信フラグを保持
 }
 
 function getRec(name, dateKey){
@@ -786,9 +785,11 @@ function mergeDb(base, target){
     const cloud = cloudSt[k];         // クラウド値
     const def = DEFAULT_SETTINGS[k];  // デフォルト値
 
-    if(cur === undefined || cur === null){
-      // ローカルに値なし → クラウド優先、なければデフォルト
-      result.settings[k] = (cloud !== undefined && cloud !== null)
+    if(cur === undefined || cur === null || cur === ''){
+      // ローカルが未設定 or 空文字 → クラウド優先、なければデフォルト
+      // （localStorageクリア後にfacilityName,logoB64がクラウドで復元されるための対応）
+      const cloudOk = cloud !== undefined && cloud !== null && cloud !== '';
+      result.settings[k] = cloudOk
         ? JSON.parse(JSON.stringify(cloud))
         : JSON.parse(JSON.stringify(def));
     } else if(Array.isArray(cur) && cur.length === 0){
@@ -902,6 +903,7 @@ function syncNow(){
       db = mergedDb;
       localStorage.setItem(FAC.storageKey, JSON.stringify(db));
       syncDirty = false;
+      localStorage.removeItem(FAC.storageKey+'_dirty'); // 未送信フラグをクリア
       renderMain();
       const n=new Date();
       setSyncStatus(`同期済 ${n.getHours()}:${pad(n.getMinutes())}`,'green');
