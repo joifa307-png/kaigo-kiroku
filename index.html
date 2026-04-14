@@ -2931,10 +2931,10 @@ function doPrint(){
   closeOv('ovPrint');
   const pages=buildPrintPages(sel,date);
   const html=buildPrintHtml(pages);
-  const w=window.open('','_blank','width=800,height=700');
+  const blob=new Blob([html],{type:'text/html;charset=utf-8'});
+  const url=URL.createObjectURL(blob);
+  const w=window.open(url,'_blank','width=800,height=700');
   if(!w){alert('ポップアップを許可してください');return;}
-  w.document.write(html);
-  w.document.close();
 }
 
 // ========== 月次バックアップ ==========
