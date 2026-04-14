@@ -1480,7 +1480,7 @@ function buildExPanel(){
         <button type="button" class="chip" id="btnPadChange" onclick="this.classList.toggle('pc-on')">パット交換</button>
         <button type="button" class="chip" id="btnRehaChange" onclick="this.classList.toggle('pc-on')">リハパン交換</button>
         <button type="button" class="chip" id="btnDiaperChange" onclick="this.classList.toggle('pc-on')">オムツ交換</button>
-        <button type="button" class="btn btn-green btn-sm" style="margin-left:auto;" onclick="openSupplyRecord(curRes)">🩲卸記録</button>
+        <button type="button" class="btn btn-green btn-sm" style="margin-left:auto;" onclick="openSupplyRecord(curRes)">卸記録</button>
       </div>
       <button class="btn btn-primary btn-block mt8" onclick="saveEx()">記録</button>
     </div>
@@ -2918,7 +2918,7 @@ function buildPrintHtml(pages){
     +'<div class="noprint">'
     +'<button onclick="window.close()" style="padding:8px 16px;font-size:14px;background:#888;color:#fff;border:none;border-radius:6px;cursor:pointer;">✕ 閉じる</button>'
     +'<button id="sb" onclick="var a=this.dataset.m!==\'a4\';var ss=document.getElementsByTagName(\'style\')[0];ss.textContent=ss.textContent.replace(a?\'A5 portrait\':\'A4 portrait\',a?\'A4 portrait\':\'A5 portrait\').replace(a?\'width:148mm\':\'width:210mm\',a?\'width:210mm\':\'width:148mm\').replace(a?\'margin:8mm\':\'margin:10mm\',a?\'margin:10mm\':\'margin:8mm\');this.dataset.m=a?\'a4\':\'\';this.textContent=a?\'A5に切替\':\'A4に切替\';" style="padding:8px 16px;font-size:14px;background:#185FA5;color:#fff;border:none;border-radius:6px;cursor:pointer;">A4に切替</button>'
-    +'<button onclick="window.print()" style="padding:8px 18px;font-size:14px;background:#E87722;color:#fff;border:none;border-radius:6px;cursor:pointer;">🖨 印刷/PDF</button>'
+    +'<button onclick="setTimeout(function(){window.print();},800)" style="padding:8px 18px;font-size:14px;background:#E87722;color:#fff;border:none;border-radius:6px;cursor:pointer;">🖨 印刷/PDF</button>'
     +'</div>'
     +pages
     +'</body></html>';
