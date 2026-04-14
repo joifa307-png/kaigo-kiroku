@@ -612,7 +612,7 @@ function startApp(){
   setSyncStatus('--','var(--text3)');
   renderDate();
   renderMain();
-  syncFrom();
+  syncNow();
   startAutoSync();
 }
 
@@ -760,57 +760,9 @@ function setSyncStatus(label, color){
   if(lbl) lbl.textContent=label;
 }
 
-function syncTo(){
-  if(!FAC||!JURL) return;
-  setSyncStatus('送信中...','#185FA5');
-  let mergedDb;
-  // 送信前にクラウドから取得→マージ→アップロード
-  fetch(JURL+'/latest',{headers:{'X-Master-Key':FAC.jkey}})
-    .then(r=>r.json()).then(res=>{
-      mergedDb = JSON.parse(JSON.stringify(db));
-      if(res.record && res.record.data){
-        try{
-          const cloudDb = JSON.parse(res.record.data);
-          mergedDb = mergeDb(db, cloudDb);
-        }catch(e){}
-      }
-      return fetch(JURL,{
-        method:'PUT',
-        headers:{'Content-Type':'application/json','X-Master-Key':FAC.jkey},
-        body: JSON.stringify({data:JSON.stringify(mergedDb), timestamp:Date.now()})
-      });
-    })
-    .then(r=>r.json()).then(res=>{
-      // マージ結果をローカルにも反映（Chromeなど他端末でUIが更新されない問題を修正）
-      db = mergedDb;
-      localStorage.setItem(FAC.storageKey, JSON.stringify(db));
-      syncTs = (res.record&&res.record.timestamp)||Date.now();
-      syncDirty = false;
-      renderMain();
-      const n=new Date();
-      setSyncStatus(`同期済 ${n.getHours()}:${pad(n.getMinutes())}`,'green');
-    })
-    .catch(()=>setSyncStatus('送信失敗','orange'));
-}
-
-function syncFrom(){
-  if(!FAC||!JURL) return;
-  setSyncStatus('受信中...','#185FA5');
-  fetch(JURL+'/latest',{headers:{'X-Master-Key':FAC.jkey}})
-    .then(r=>r.json()).then(res=>{
-      if(res.record && res.record.data){
-        const cloudDb = JSON.parse(res.record.data);
-        db = mergeDb(db, cloudDb); // タイムスタンプ問わず常にマージ
-        localStorage.setItem(FAC.storageKey, JSON.stringify(db));
-        syncTs = res.record.timestamp || Date.now();
-        syncDirty = false;
-        renderMain();
-        setSyncStatus('受信済','green');
-      } else {
-        setSyncStatus('データなし','orange');
-      }
-    }).catch(()=>setSyncStatus('受信失敗','orange'));
-}
+// ========== 双方向同期（常にGET→マージ→必要なら PUT）==========
+function syncTo(){ syncNow(); }   // 後方互換エイリアス
+function syncFrom(){ syncNow(); } // 後方互換エイリアス
 
 // 統一マージ関数（base に target をユニオンマージ）
 function mergeDb(base, target){
@@ -916,22 +868,61 @@ function mergeDb(base, target){
   return result;
 }
 
+// 双方向同期：常にGET→マージ→汚れていればPUT→ローカル反映
 function syncNow(){
-  if(syncDirty){ syncTo(); } else { syncFrom(); }
+  if(!FAC||!JURL){ setSyncStatus('設定なし','orange'); return; }
+  setSyncStatus('同期中...','#185FA5');
+  fetch(JURL+'/latest', {headers:{'X-Master-Key':FAC.jkey}})
+    .then(r=>{ if(!r.ok) throw new Error('GET '+r.status); return r.json(); })
+    .then(res=>{
+      // クラウドデータの解析（新形式 {data:...,timestamp:...} / 旧形式 直接db）
+      let cloudDb = null;
+      if(res.record){
+        if(res.record.data){
+          try{ cloudDb = JSON.parse(res.record.data); }catch(e){}
+        } else if(res.record.residents || res.record.records){
+          cloudDb = res.record; // 旧形式
+        }
+      }
+      // ローカル優先でマージ
+      const mergedDb = cloudDb ? mergeDb(db, cloudDb) : JSON.parse(JSON.stringify(db));
+      // ローカルが汚れている or クラウドにデータがない場合はアップロード
+      if(syncDirty || !cloudDb){
+        return fetch(JURL, {
+          method:'PUT',
+          headers:{'Content-Type':'application/json','X-Master-Key':FAC.jkey},
+          body: JSON.stringify({data:JSON.stringify(mergedDb), timestamp:Date.now()})
+        })
+        .then(r=>{ if(!r.ok) throw new Error('PUT '+r.status); return r.json(); })
+        .then(()=>mergedDb);
+      }
+      return mergedDb;
+    })
+    .then(mergedDb=>{
+      db = mergedDb;
+      localStorage.setItem(FAC.storageKey, JSON.stringify(db));
+      syncDirty = false;
+      renderMain();
+      const n=new Date();
+      setSyncStatus(`同期済 ${n.getHours()}:${pad(n.getMinutes())}`,'green');
+    })
+    .catch(e=>{
+      console.error('syncNow error:', e);
+      setSyncStatus('同期失敗: '+(e.message||'不明'),'orange');
+    });
 }
 
-// 自動クラウド送信タイマー（3時間ごと）＋前面復帰時同期
+// 自動同期タイマー（3時間ごと）＋前面復帰時同期
 function startAutoSync(){
   if(syncTimer) clearInterval(syncTimer);
-  syncTimer = setInterval(()=>{
-    if(syncDirty) syncTo();
-  }, 3*60*60*1000);
-  // iPadがバックグラウンドから戻った時に同期
-  document.addEventListener('visibilitychange', ()=>{
-    if(document.visibilityState==='visible' && FAC){
-      if(syncDirty) syncTo(); else syncFrom();
-    }
-  });
+  syncTimer = setInterval(syncNow, 3*60*60*1000);
+  // visibilitychangeは重複登録しない
+  if(!window._kaigoSyncListener){
+    window._kaigoSyncListener = ()=>{
+      if(document.visibilityState==='visible' && FAC) syncNow();
+    };
+    document.addEventListener('visibilitychange', window._kaigoSyncListener);
+  }
 }
 
 // ========== 施設未選択画面 ==========
