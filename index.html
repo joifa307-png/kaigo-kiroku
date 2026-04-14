@@ -654,6 +654,7 @@ let db = { residents:[], records:{}, supplies:[], settings:{...DEFAULT_SETTINGS}
 let syncTs = 0;
 let syncDirty = false;
 let syncTimer = null;
+let syncDebounceTimer = null;
 let curDate = new Date(); curDate.setHours(0,0,0,0);
 let curRes = null;
 let curTab = 'vital';
@@ -762,27 +763,32 @@ function setSyncStatus(label, color){
 function syncTo(){
   if(!FAC||!JURL) return;
   setSyncStatus('送信中...','#185FA5');
+  let mergedDb;
   // 送信前にクラウドから取得→マージ→アップロード
   fetch(JURL+'/latest',{headers:{'X-Master-Key':FAC.jkey}})
     .then(r=>r.json()).then(res=>{
-      let uploadDb = JSON.parse(JSON.stringify(db));
+      mergedDb = JSON.parse(JSON.stringify(db));
       if(res.record && res.record.data){
         try{
           const cloudDb = JSON.parse(res.record.data);
-          uploadDb = mergeDb(db, cloudDb); // local=base(settings優先) + cloud → merged
+          mergedDb = mergeDb(db, cloudDb);
         }catch(e){}
       }
       return fetch(JURL,{
         method:'PUT',
         headers:{'Content-Type':'application/json','X-Master-Key':FAC.jkey},
-        body: JSON.stringify({data:JSON.stringify(uploadDb), timestamp:Date.now()})
+        body: JSON.stringify({data:JSON.stringify(mergedDb), timestamp:Date.now()})
       });
     })
     .then(r=>r.json()).then(res=>{
+      // マージ結果をローカルにも反映（Chromeなど他端末でUIが更新されない問題を修正）
+      db = mergedDb;
+      localStorage.setItem(FAC.storageKey, JSON.stringify(db));
       syncTs = (res.record&&res.record.timestamp)||Date.now();
       syncDirty = false;
+      renderMain();
       const n=new Date();
-      setSyncStatus(`送信済 ${n.getHours()}:${pad(n.getMinutes())}`,'green');
+      setSyncStatus(`同期済 ${n.getHours()}:${pad(n.getMinutes())}`,'green');
     })
     .catch(()=>setSyncStatus('送信失敗','orange'));
 }
@@ -792,17 +798,16 @@ function syncFrom(){
   setSyncStatus('受信中...','#185FA5');
   fetch(JURL+'/latest',{headers:{'X-Master-Key':FAC.jkey}})
     .then(r=>r.json()).then(res=>{
-      if(res.record && res.record.timestamp > syncTs){
+      if(res.record && res.record.data){
         const cloudDb = JSON.parse(res.record.data);
-        db = mergeDb(db, cloudDb); // local + cloud → merged
+        db = mergeDb(db, cloudDb); // タイムスタンプ問わず常にマージ
         localStorage.setItem(FAC.storageKey, JSON.stringify(db));
-        syncTs = res.record.timestamp;
+        syncTs = res.record.timestamp || Date.now();
         syncDirty = false;
         renderMain();
         setSyncStatus('受信済','green');
       } else {
-        setSyncStatus('最新です','green');
-        setTimeout(()=>setSyncStatus('同期済','green'),2000);
+        setSyncStatus('データなし','orange');
       }
     }).catch(()=>setSyncStatus('受信失敗','orange'));
 }
@@ -915,12 +920,18 @@ function syncNow(){
   if(syncDirty){ syncTo(); } else { syncFrom(); }
 }
 
-// 自動クラウド送信タイマー（2時間ごと）
+// 自動クラウド送信タイマー（3時間ごと）＋前面復帰時同期
 function startAutoSync(){
   if(syncTimer) clearInterval(syncTimer);
   syncTimer = setInterval(()=>{
     if(syncDirty) syncTo();
-  }, 2*60*60*1000);
+  }, 3*60*60*1000);
+  // iPadがバックグラウンドから戻った時に同期
+  document.addEventListener('visibilitychange', ()=>{
+    if(document.visibilityState==='visible' && FAC){
+      if(syncDirty) syncTo(); else syncFrom();
+    }
+  });
 }
 
 // ========== 施設未選択画面 ==========
