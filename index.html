@@ -918,17 +918,14 @@ function syncNow(){
       }
       // ローカル優先でマージ
       const mergedDb = cloudDb ? mergeDb(db, cloudDb) : JSON.parse(JSON.stringify(db));
-      // ローカルが汚れている or クラウドにデータがない場合はアップロード
-      if(syncDirty || !cloudDb){
-        return fetch(JURL, {
-          method:'PUT',
-          headers:{'Content-Type':'application/json','X-Master-Key':FAC.jkey},
-          body: JSON.stringify({data:JSON.stringify(mergedDb), timestamp:Date.now()})
-        })
-        .then(r=>{ if(!r.ok) throw new Error('PUT '+r.status); return r.json(); })
-        .then(()=>mergedDb);
-      }
-      return mergedDb;
+      // 常にアップロード（手動🔄でChrome→クラウドへ確実に反映）
+      return fetch(JURL, {
+        method:'PUT',
+        headers:{'Content-Type':'application/json','X-Master-Key':FAC.jkey},
+        body: JSON.stringify({data:JSON.stringify(mergedDb), timestamp:Date.now()})
+      })
+      .then(r=>{ if(!r.ok) throw new Error('PUT '+r.status); return r.json(); })
+      .then(()=>mergedDb);
     })
     .then(mergedDb=>{
       db = mergedDb;
