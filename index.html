@@ -344,6 +344,7 @@ input,select,textarea{font-family:inherit;font-size:30px;}
     <button class="hdr-btn no-print" onclick="openPrint()" style="background:#E1F5EE;color:#0F6E56;border-color:#0F6E56;font-weight:700;">連絡帳</button>
     <button class="hdr-btn no-print" onclick="saveMonthlyBackup()" style="background:var(--blue2);color:var(--blue);border-color:var(--blue);font-weight:700;">月次保存</button>
     <button class="hdr-btn no-print" onclick="syncNow()">🔄</button>
+    <button class="hdr-btn no-print" onclick="diagSync()" style="background:#FFF3CD;color:#856404;border-color:#856404;font-size:13px;">診断</button>
     <button class="hdr-btn no-print" onclick="openSettings()">⚙️</button>
   </div>
   <div class="main-scroll">
@@ -869,6 +870,36 @@ function mergeDb(base, target){
   return result;
 }
 
+// ========== 診断ツール ==========
+function diagSync(){
+  if(!FAC||!JURL){ alert('施設未選択'); return; }
+  alert('【診断開始】\nJSONBinに接続中...\nBin ID: '+FAC.jbin.slice(-6));
+  fetch(JURL+'/latest',{headers:{'X-Master-Key':FAC.jkey}})
+    .then(r=>r.json())
+    .then(res=>{
+      if(!res.record){
+        alert('【エラー】JSONBinの応答:\n'+JSON.stringify(res).slice(0,300));
+        return;
+      }
+      if(!res.record.data){
+        alert('【クラウドにデータなし】\nres.recordのキー: '+Object.keys(res.record).join(','));
+        return;
+      }
+      try{
+        const cdb=JSON.parse(res.record.data);
+        const rCount=(cdb.residents||[]).length;
+        const rNames=(cdb.residents||[]).slice(0,3).map(r=>r.name).join('、');
+        const recKeys=Object.keys(cdb.records||{}).length;
+        const staff=((cdb.settings&&cdb.settings.staffList)||[]).length;
+        const facName=(cdb.settings&&cdb.settings.facilityName)||'（なし）';
+        alert('【クラウドデータ確認】\n施設名: '+facName+'\n利用者: '+rCount+'名 ('+rNames+'...)\n記録日数: '+recKeys+'日\nスタッフ: '+staff+'名\n\n【ローカルデータ】\n利用者: '+(db.residents||[]).length+'名\n記録日数: '+Object.keys(db.records||{}).length+'日');
+      }catch(e){
+        alert('【データ解析エラー】\n'+e.message+'\nデータ先頭: '+res.record.data.slice(0,100));
+      }
+    })
+    .catch(e=>alert('【通信エラー】\n'+e.message));
+}
+
 // 双方向同期：常にGET→マージ→汚れていればPUT→ローカル反映
 function syncNow(){
   if(!FAC||!JURL){ setSyncStatus('設定なし','orange'); return; }
@@ -906,7 +937,8 @@ function syncNow(){
       localStorage.removeItem(FAC.storageKey+'_dirty'); // 未送信フラグをクリア
       renderMain();
       const n=new Date();
-      setSyncStatus(`同期済 ${n.getHours()}:${pad(n.getMinutes())}`,'green');
+      const rCnt=(db.residents||[]).length;
+      setSyncStatus(`同期済 ${n.getHours()}:${pad(n.getMinutes())} ${rCnt}名`,'green');
     })
     .catch(e=>{
       console.error('syncNow error:', e);
