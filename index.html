@@ -918,14 +918,17 @@ function syncNow(){
       }
       // ローカル優先でマージ
       const mergedDb = cloudDb ? mergeDb(db, cloudDb) : JSON.parse(JSON.stringify(db));
-      // 常にアップロード（手動🔄でChrome→クラウドへ確実に反映）
-      return fetch(JURL, {
-        method:'PUT',
-        headers:{'Content-Type':'application/json','X-Master-Key':FAC.jkey},
-        body: JSON.stringify({data:JSON.stringify(mergedDb), timestamp:Date.now()})
-      })
-      .then(r=>{ if(!r.ok) throw new Error('PUT '+r.status); return r.json(); })
-      .then(()=>mergedDb);
+      // ローカルが汚れている or クラウドにデータがない場合のみアップロード
+      if(syncDirty || !cloudDb){
+        return fetch(JURL, {
+          method:'PUT',
+          headers:{'Content-Type':'application/json','X-Master-Key':FAC.jkey},
+          body: JSON.stringify({data:JSON.stringify(mergedDb), timestamp:Date.now()})
+        })
+        .then(r=>{ if(!r.ok) throw new Error('PUT '+r.status); return r.json(); })
+        .then(()=>mergedDb);
+      }
+      return mergedDb;
     })
     .then(mergedDb=>{
       db = mergedDb;
@@ -1875,6 +1878,7 @@ function buildMealPanel(){
       </div>
       <div class="fg"><label>おやつ</label><input type="text" id="mealSnack" value="${d0.snack}"></div>
       <button class="btn btn-primary btn-block mt8" onclick="saveMealSection()">記録</button>
+      <button class="btn btn-block mt8" style="background:#F3F0FF;color:#5B3FB5;border-color:#5B3FB5;font-weight:700;" onclick="saveMealSectionAll()">全員へ反映</button>
     </div>
   </div>`;
 }
@@ -1895,24 +1899,37 @@ function selectMealChip(section){
   document.getElementById('mealWater').value=String(data.water);
   document.getElementById('mealSnack').value=data.snack;
 }
-function saveMealSection(){
+function _getMealFormData(){
   const section=document.getElementById('mealSection')?.value;
-  if(!section){alert('区分を選んでください');return;}
-  const r=getRec(curRes);
-  const m=r.meal;
-  const time=document.getElementById('mealTime').value;
-  const main=parseInt(document.getElementById('mealMain').value)||0;
-  const side=parseInt(document.getElementById('mealSide').value)||0;
-  const menu=document.getElementById('mealMenu').value;
-  const water=document.getElementById('mealWater').value;
-  const snack=document.getElementById('mealSnack').value;
-  if(section==='breakfast'){
-    m.bTime=time; m.bMain=main; m.bSide=side; m.bWater=water;
-  } else if(section==='lunch'){
-    m.time=time; m.main=main; m.side=side; m.menu=menu; m.water=water; m.snack=snack;
-  } else {
-    m.dTime=time; m.dMain=main; m.dSide=side; m.dWater=water;
-  }
+  if(!section){alert('区分を選んでください');return null;}
+  return{
+    section,
+    time:document.getElementById('mealTime').value,
+    main:parseInt(document.getElementById('mealMain').value)||0,
+    side:parseInt(document.getElementById('mealSide').value)||0,
+    menu:document.getElementById('mealMenu').value,
+    water:document.getElementById('mealWater').value,
+    snack:document.getElementById('mealSnack').value
+  };
+}
+function _applyMealData(resName, d){
+  const m=getRec(resName).meal;
+  if(d.section==='breakfast'){ m.bTime=d.time; m.bMain=d.main; m.bSide=d.side; m.bWater=d.water; }
+  else if(d.section==='lunch'){ m.time=d.time; m.main=d.main; m.side=d.side; m.menu=d.menu; m.water=d.water; m.snack=d.snack; }
+  else { m.dTime=d.time; m.dMain=d.main; m.dSide=d.side; m.dWater=d.water; }
+}
+function saveMealSection(){
+  const d=_getMealFormData(); if(!d) return;
+  _applyMealData(curRes, d);
+  saveDB(); showSavedToast(); goBack();
+}
+function saveMealSectionAll(){
+  const d=_getMealFormData(); if(!d) return;
+  const label={breakfast:'朝食',lunch:'昼食',dinner:'夕食'}[d.section]||d.section;
+  const dayIdx=curDate.getDate()-1;
+  const todayRes=db.residents.filter(r=>r.sched&&r.sched[dayIdx]===1);
+  if(!confirm(`本日の利用者 ${todayRes.length}名 全員の${label}記録を反映します。よろしいですか？`)) return;
+  todayRes.forEach(res=>_applyMealData(res.name, d));
   saveDB(); showSavedToast(); goBack();
 }
 
@@ -1951,6 +1968,7 @@ function buildRecPanel(){
       </div>
       <div class="fg"><label>メモ（自由記入）</label><textarea id="recContent" rows="3">${rec.rec.content||''}</textarea></div>
       <button class="btn btn-primary btn-block" onclick="saveRec()">記録</button>
+      <button class="btn btn-block mt8" style="background:#F3F0FF;color:#5B3FB5;border-color:#5B3FB5;font-weight:700;" onclick="saveRecAll()">全員へ反映</button>
     </div>
   </div>`;
 }
@@ -1958,17 +1976,25 @@ function toggleRecChip(el,item){
   el.classList.toggle('selected');
 }
 function toggleKanken(el){ el.classList.toggle('selected'); }
-function saveRec(){
-  const r=getRec(curRes);
-  const chips=[...document.querySelectorAll('#recChips .chip.selected')].map(e=>e.textContent);
-  const kanken=document.getElementById('kankenChip')?.classList.contains('selected')||false;
-  r.rec={
+function _getRecFormData(){
+  return{
     time:document.getElementById('recTime').value,
     part:document.getElementById('recPart').value,
-    chips,
-    kanken,
+    chips:[...document.querySelectorAll('#recChips .chip.selected')].map(e=>e.textContent),
+    kanken:document.getElementById('kankenChip')?.classList.contains('selected')||false,
     content:document.getElementById('recContent').value.trim()
   };
+}
+function saveRec(){
+  getRec(curRes).rec=_getRecFormData();
+  saveDB(); showSavedToast(); goBack();
+}
+function saveRecAll(){
+  const dayIdx=curDate.getDate()-1;
+  const todayRes=db.residents.filter(r=>r.sched&&r.sched[dayIdx]===1);
+  if(!confirm(`本日の利用者 ${todayRes.length}名 全員のレク記録を反映します。よろしいですか？`)) return;
+  const d=_getRecFormData();
+  todayRes.forEach(res=>{ getRec(res.name).rec=JSON.parse(JSON.stringify(d)); });
   saveDB(); showSavedToast(); goBack();
 }
 
