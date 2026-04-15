@@ -147,6 +147,18 @@ function esc(s){ return String(s || '').replace(/[&<>"]/g, m => ({'&':'&amp;','<
 function deepClone(o){ return JSON.parse(JSON.stringify(o)); }
 function normalizeResidentName(name){ return String(name || '').trim().replace(/\s+/g, ' '); }
 function residentIdFromName(name){ return 'rname:' + encodeURIComponent(normalizeResidentName(name)); }
+function normalizeDateKey(v){
+  const s = String(v || '').trim();
+  if(!s) return '';
+  const m = s.match(/^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})$/);
+  if(m){
+    const y = m[1];
+    const mm = String(Number(m[2])).padStart(2,'0');
+    const dd = String(Number(m[3])).padStart(2,'0');
+    return y + '-' + mm + '-' + dd;
+  }
+  return s;
+}
 
 function setStatus(main, cls, sub){
   const el = document.getElementById('syncStatus');
@@ -234,12 +246,26 @@ function upsertResident(name){
 }
 
 function setNote(dateKey, residentId, text){
-  if(!db.notes[dateKey]) db.notes[dateKey] = {};
-  db.notes[dateKey][residentId] = { text: text || '', updatedAt: nowTs() };
+  const dk = normalizeDateKey(dateKey);
+  if(!dk) return;
+  if(!db.notes[dk]) db.notes[dk] = {};
+  // 1日1利用者1メモを強制（過去IDの取り残しがあっても同名は上書き一本化）
+  const ridToName = new Map((db.residents || []).map(r => [r.id, normalizeResidentName(r.name)]));
+  const targetName = ridToName.get(residentId) || '';
+  if(targetName){
+    Object.keys(db.notes[dk]).forEach(rid => {
+      const n = ridToName.get(rid) || '';
+      if(n && n === targetName && rid !== residentId){
+        delete db.notes[dk][rid];
+      }
+    });
+  }
+  db.notes[dk][residentId] = { text: text || '', updatedAt: nowTs() };
 }
 
 function getNote(dateKey, residentId){
-  return db.notes[dateKey] && db.notes[dateKey][residentId] ? db.notes[dateKey][residentId] : { text:'', updatedAt:0 };
+  const dk = normalizeDateKey(dateKey);
+  return db.notes[dk] && db.notes[dk][residentId] ? db.notes[dk][residentId] : { text:'', updatedAt:0 };
 }
 
 function rowsFromDb(inDb, cfg){
@@ -290,7 +316,7 @@ function dbFromRows(rows){
       while(i < rows.length){
         const r = rows[i];
         if(!r || !r.length){ i++; continue; }
-        const dk = String(r[0] || '').trim();
+        const dk = normalizeDateKey(r[0]);
         if(!dk){ i++; continue; }
         if(dk === SEC_RES || dk === SEC_META) break;
         const rid = String(r[1] || '').trim();
@@ -326,8 +352,10 @@ function normalizeDbResidentsAndNotes(inDb){
   const canonIds = new Set(residents.map(r => r.id));
   const notes = {};
 
-  Object.keys(src.notes || {}).forEach(dk => {
-    const day = src.notes[dk] || {};
+  Object.keys(src.notes || {}).forEach(rawDk => {
+    const dk = normalizeDateKey(rawDk);
+    if(!dk) return;
+    const day = src.notes[rawDk] || {};
     const outDay = {};
     Object.keys(day).forEach(oldRid => {
       const rec = day[oldRid] || {};
@@ -582,19 +610,28 @@ function renderResidentSelect(){
 function renderPreview(){
   const rows = [];
   const ridToName = new Map((db.residents || []).map(r => [r.id, r.name]));
-  Object.keys(db.notes || {}).sort().forEach(dk => {
+  const uniq = new Map();
+  Object.keys(db.notes || {}).sort().forEach(rawDk => {
+    const dk = normalizeDateKey(rawDk);
+    if(!dk) return;
     const day = db.notes[dk] || {};
     Object.keys(day).forEach(rid => {
       const n = day[rid] || {};
       if(!n.text) return;
-      rows.push({
+      const name = ridToName.get(rid) || rid;
+      // 表示は「日付 + 利用者」で1件化（文面差があっても最新を優先）
+      const key = dk + '|' + normalizeResidentName(name);
+      const cand = {
         name: ridToName.get(rid) || rid,
         date: dk,
         updatedAt: Number(n.updatedAt || 0),
         text: n.text
-      });
+      };
+      const old = uniq.get(key);
+      if(!old || cand.updatedAt > old.updatedAt) uniq.set(key, cand);
     });
   });
+  rows.push(...uniq.values());
   rows.sort((a,b)=> b.updatedAt - a.updatedAt);
   const body = document.getElementById('previewBody');
   if(!rows.length){
