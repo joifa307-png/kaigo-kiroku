@@ -602,9 +602,21 @@ function initFacility(facId){
   return true;
 }
 
+/** ブックマークと実際のユニットのずれ防止（西／南は別データのため） */
+function syncFacilityIntoUrl(facId){
+  if(!facId || !FACILITIES[facId]) return;
+  try{
+    const u=new URL(window.location.href);
+    if(u.searchParams.get('f')===facId) return;
+    u.searchParams.set('f', facId);
+    history.replaceState(history.state,'',u.pathname+u.search+(u.hash||''));
+  }catch(_){}
+}
+
 function selectFacility(facId){
   localStorage.setItem('kaigo_last_facility', facId);
   if(initFacility(facId)){
+    syncFacilityIntoUrl(facId);
     startApp();
   }
 }
@@ -3499,10 +3511,11 @@ function showSavedToast(){
 
 // ========== 初期化 ==========
 function init(){
-  // URLパラメーター or localStorage から施設を復元
-  const savedFac = new URLSearchParams(location.search).get('f')
-    || localStorage.getItem('kaigo_last_facility');
+  const params=new URLSearchParams(location.search);
+  const savedFac=params.get('f')||localStorage.getItem('kaigo_last_facility');
   if(savedFac && initFacility(savedFac)){
+    localStorage.setItem('kaigo_last_facility', savedFac);
+    syncFacilityIntoUrl(savedFac);
     startApp();
   } else {
     showScreen('selectScreen');
