@@ -34,6 +34,8 @@ input,select,textarea{font-family:inherit;font-size:30px;}
   border-bottom:1px solid var(--border1);
   padding:4px 10px;display:flex;align-items:center;gap:6px;
   position:sticky;top:0;z-index:100;box-shadow:var(--shadow);
+  /* iPad 狭幅で右端の🔄等が画面外に出たり、下の表にタッチが奪われるのを防ぐ */
+  overflow-x:auto;-webkit-overflow-scrolling:touch;flex-wrap:nowrap;
 }
 .hdr-logo{height:60px;width:auto;display:block;}
 .hdr-title{font-weight:700;font-size:16px;color:var(--orange2);}
@@ -42,17 +44,18 @@ input,select,textarea{font-family:inherit;font-size:30px;}
   padding:7px 12px;border-radius:var(--r2);border:1px solid var(--border2);
   background:var(--white);color:var(--text2);font-size:14px;
   cursor:pointer;white-space:nowrap;user-select:none;
+  flex-shrink:0;
 }
 .hdr-btn:active{opacity:.7;}
 .hdr-btn.primary{background:var(--orange);color:#fff;border-color:var(--orange);}
 .hdr-btn.nav{padding:6px 10px;font-size:18px;}
-.hdr-center{display:flex;align-items:center;gap:4px;}
+.hdr-center{display:flex;align-items:center;gap:4px;flex-shrink:0;}
 .hdr-date{
   font-size:17px;font-weight:600;padding:6px 10px;
   border-radius:var(--r2);border:1px solid var(--border2);
   background:var(--white);cursor:pointer;white-space:nowrap;
 }
-.sync-indicator{display:flex;align-items:center;gap:4px;font-size:12px;color:var(--text3);}
+.sync-indicator{display:flex;align-items:center;gap:4px;font-size:12px;color:var(--text3);flex-shrink:0;max-width:42vw;}
 .sync-dot{font-size:16px;line-height:1;}
 
 /* ===== 画面切替 ===== */
@@ -769,6 +772,14 @@ function gasToken(){ return (localStorage.getItem('kaigo_gas_token')||'').trim()
 function gasUrl(){ return (localStorage.getItem('kaigo_gas_webapp_url')||'').trim(); }
 function gasConfigured(){ return !!(gasUrl() && gasToken() && FAC); }
 
+/** iPad等で「GAS未設定」だけだと分かりづらいので、足りない項目を表示 */
+function setSyncStatusIfGasMissing(){
+  if(!FAC){ setSyncStatus('施設未選択','orange'); return; }
+  if(!gasUrl()){ setSyncStatus('GASのURL未保存','orange'); return; }
+  if(!gasToken()){ setSyncStatus('トークン未保存','orange'); return; }
+  setSyncStatus('同期できません','orange');
+}
+
 function setSyncStatus(label, color){
   const dot=document.getElementById('syncDot');
   const lbl=document.getElementById('syncLabel');
@@ -1254,9 +1265,10 @@ function touchSetU(key){
 function gasPost(extra){
   const url=gasUrl(), tok=gasToken();
   if(!url||!tok) return Promise.reject(new Error('GAS未設定（データ管理でURL・トークンを入力）'));
+  // charset 付きだと環境によっては CORS のプリフライトが発生し、GAS が OPTIONS に応答できず失敗することがある
   return fetch(url,{
     method:'POST',
-    headers:{'Content-Type':'text/plain;charset=utf-8'},
+    headers:{'Content-Type':'text/plain'},
     body: JSON.stringify(Object.assign({}, extra, {token:tok}))
   }).then(r=>{
     if(!r.ok) return r.text().then(t=>{ throw new Error('HTTP '+r.status+': '+t.slice(0,120)); });
@@ -1277,7 +1289,7 @@ function persistLocalQuiet(){
 }
 
 function syncPullOnly(){
-  if(!gasConfigured()){ setSyncStatus('GAS未設定','orange'); return Promise.resolve(); }
+  if(!gasConfigured()){ setSyncStatusIfGasMissing(); return Promise.resolve(); }
   setSyncStatus('取得中...','#185FA5');
   return gasPost({action:'pull', sheetName:FAC.sheetName})
     .then(j=>{
@@ -1295,7 +1307,7 @@ function syncPullOnly(){
 }
 
 function runGasPushCycle(){
-  if(!gasConfigured()){ setSyncStatus('GAS未設定','orange'); return Promise.resolve(); }
+  if(!gasConfigured()){ setSyncStatusIfGasMissing(); return Promise.resolve(); }
   if(!syncDirty) return Promise.resolve();
   setSyncStatus('同期中...','#185FA5');
   return gasPost({action:'pull', sheetName:FAC.sheetName})
@@ -1332,7 +1344,7 @@ function scheduleGasSync(){
 
 function syncNow(force){
   if(!FAC){ setSyncStatus('施設未選択','orange'); return; }
-  if(!gasConfigured()){ setSyncStatus('GAS未設定','orange'); return; }
+  if(!gasConfigured()){ setSyncStatusIfGasMissing(); return; }
   syncDirty=true;
   runGasPushCycle();
 }
