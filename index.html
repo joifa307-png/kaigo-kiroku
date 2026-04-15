@@ -676,6 +676,15 @@ let calY, calM;
 // ========== ユーティリティ ==========
 const pad = n => String(n).padStart(2,'0');
 const dk = (d) => { const dt=d||curDate; return `${dt.getFullYear()}-${pad(dt.getMonth()+1)}-${pad(dt.getDate())}`; };
+function normalizeDateKey(v){
+  const s=String(v||'').trim();
+  if(!s) return '';
+  const m=s.match(/^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})$/);
+  if(m) return `${m[1]}-${pad(Number(m[2]))}-${pad(Number(m[3]))}`;
+  const t=Date.parse(s);
+  if(!isNaN(t)) return dk(new Date(t));
+  return s;
+}
 const nowTime = () => { const n=new Date(); return `${pad(n.getHours())}:${pad(n.getMinutes())}`; };
 const genId = (prefix) => `${prefix}_${Date.now().toString(36)}${Math.random().toString(36).slice(2,6)}`;
 const wareki = (d) => {
@@ -702,6 +711,7 @@ function loadDB(){
   // 初期値補完（DEFAULT_RESIDENTS_NIHSIは使わない：クラウド同期で復元するため）
   if(!db.residents) db.residents = [];
   if(!db.records) db.records={};
+  db.records=normalizeRecordsMap(db.records||{});
   if(!db.supplies) db.supplies=[];
   if(!db.settings) db.settings={};
   // settingsのデフォルト補完（未定義 or 空配列の場合にデフォルトを適用）
@@ -943,7 +953,7 @@ function dbToSheet(inDb){
 
   const pushR=a=>rows.push(PR(a));
 
-  const recs=inDb.records||{};
+  const recs=normalizeRecordsMap(inDb.records||{});
   Object.keys(recs).sort().forEach(dk=>{
     const day=recs[dk]||{};
     Object.keys(day).sort().forEach(name=>{
@@ -1079,7 +1089,7 @@ function ensureDay(dbOut, dk, name){
 
 function applyRecordRow(dbOut, row){
   const kind=String(row[REC.k]||'').trim();
-  const dk=String(row[REC.dk]||'').trim();
+  const dk=normalizeDateKey(row[REC.dk]);
   const name=String(row[REC.nm]||'').trim();
   const u=_numU(row[REC.uu]);
   if(!dk||!name||!kind) return;
@@ -1234,7 +1244,23 @@ function sheetToDb(rows){
     });
   });
   dbOut.supplies.sort((a,b)=>(a.date||'').localeCompare(b.date||''));
+  dbOut.records=normalizeRecordsMap(dbOut.records||{});
   return dbOut;
+}
+
+function normalizeRecordsMap(records){
+  const out={};
+  Object.keys(records||{}).forEach(rawKey=>{
+    const nk=normalizeDateKey(rawKey);
+    if(!nk) return;
+    const day=records[rawKey]||{};
+    if(!out[nk]) out[nk]={};
+    Object.keys(day).forEach(nm=>{
+      if(!out[nk][nm]) out[nk][nm]=cloneDeep(day[nm]);
+      else out[nk][nm]=mergeRecordDay(out[nk][nm], day[nm], nk, nm);
+    });
+  });
+  return out;
 }
 
 function mergeArraysById(a, b, idFn){
@@ -1341,15 +1367,17 @@ function mergePulledDb(local, remote){
         out.settings[k]=cloneDeep(def);
     }
   });
-  const dates=new Set([...Object.keys(local.records||{}), ...Object.keys(remote.records||{})]);
+  const lrec=normalizeRecordsMap(local.records||{});
+  const rrec=normalizeRecordsMap(remote.records||{});
+  const dates=new Set([...Object.keys(lrec), ...Object.keys(rrec)]);
   out.records={};
   dates.forEach(dk=>{
     out.records[dk]={};
-    const names=new Set([...Object.keys((local.records||{})[dk]||{}), ...Object.keys((remote.records||{})[dk]||{})]);
+    const names=new Set([...Object.keys((lrec||{})[dk]||{}), ...Object.keys((rrec||{})[dk]||{})]);
     names.forEach(nm=>{
       out.records[dk][nm]=mergeRecordDay(
-        (local.records[dk]||{})[nm],
-        (remote.records[dk]||{})[nm],
+        (lrec[dk]||{})[nm],
+        (rrec[dk]||{})[nm],
         dk,nm
       );
     });
@@ -1488,7 +1516,7 @@ function diagSync(){
       const nRec=Object.keys(remote.records||{}).length;
       const nRes=(remote.residents||[]).length;
       const nSup=(remote.supplies||[]).length;
-      alert('【スプレッドシート】シート: '+FAC.sheetName+'\nA1マーカー: '+(markerOk?'OK':'NG')+' （実値:「'+a1+'」／正しくは「'+SYNC_MARKER+'」）\n利用者: '+nRes+'名\n記録のある日: '+nRec+'日\n消耗品行: '+nSup+'\n\n【ローカル】\n利用者: '+(db.residents||[]).length+'名\n記録日数: '+Object.keys(db.records||{}).length+'日');
+      alert('【スプレッドシート】シート: '+FAC.sheetName+'\nA1マーカー: '+(markerOk?'OK':'NG')+' （実値:「'+a1+'」／正しくは「'+SYNC_MARKER+'」）\n利用者: '+nRes+'名\n記録のある日: '+nRec+'日（シート上にデータがある日付の種類）\n消耗品行: '+nSup+'\n\n【ローカル・この端末】\n利用者: '+(db.residents||[]).length+'名\n記録日数: '+Object.keys(db.records||{}).length+'日（端末内の記録キー数。未同期の日があればシートより多くなります）\n\n※ローカル記録日数は端末ごとに異なります（未同期・ブラウザ別ストレージ）。');
     })
     .catch(e=>alert('診断エラー: '+e.message));
 }
@@ -1694,12 +1722,18 @@ function getLastStool(name){
   return null;
 }
 
+/** 本日スケジュールの利用者を氏名順に（同期マージで residents 配列順が端末でずれるため） */
+function residentsOnDaySorted(dayIdx){
+  return db.residents.filter(r=>r.sched&&r.sched[dayIdx]===1)
+    .sort((a,b)=>(a.name||'').localeCompare(b.name||'','ja'));
+}
+
 function renderMain(){
   if(!FAC) return;
   renderDate();
   renderFacilityHeader();
   const day=curDate.getDate()-1;
-  const todayRes=db.residents.filter(r=>r.sched&&r.sched[day]===1);
+  const todayRes=residentsOnDaySorted(day);
   const tbody=document.getElementById('resBody');
   if(!tbody) return;
   if(todayRes.length===0){
@@ -2312,7 +2346,7 @@ function openBulkMed(){
   const today=dk(new Date());
   if(dk()!==today){ alert('服薬一括入力は本日のみ対応しています'); return; }
   const day=curDate.getDate()-1;
-  const todayRes=db.residents.filter(r=>r.sched&&r.sched[day]===1);
+  const todayRes=residentsOnDaySorted(day);
   const timingOpts=MED_TIMINGS.map(t=>`<div class="chip" style="font-size:20px;" onclick="this.classList.toggle('selected')">${t.label}</div>`).join('');
   const resChips=todayRes.map(r=>`<div class="chip" style="font-size:20px;" onclick="this.classList.toggle('selected')" data-name="${r.name}">${r.name}</div>`).join('');
   openBulkMedOv(`
@@ -2469,7 +2503,7 @@ function saveMealSectionAll(){
   const d=_getMealFormData(); if(!d) return;
   const label={breakfast:'朝食',lunch:'昼食',dinner:'夕食'}[d.section]||d.section;
   const dayIdx=curDate.getDate()-1;
-  const todayRes=db.residents.filter(r=>r.sched&&r.sched[dayIdx]===1);
+  const todayRes=residentsOnDaySorted(dayIdx);
   if(!confirm(`本日の利用者 ${todayRes.length}名 全員の${label}記録を反映します。よろしいですか？`)) return;
   todayRes.forEach(res=>_applyMealData(res.name, d));
   saveDB(); showSavedToast(); goBack();
@@ -2533,7 +2567,7 @@ function saveRec(){
 }
 function saveRecAll(){
   const dayIdx=curDate.getDate()-1;
-  const todayRes=db.residents.filter(r=>r.sched&&r.sched[dayIdx]===1);
+  const todayRes=residentsOnDaySorted(dayIdx);
   if(!confirm(`本日の利用者 ${todayRes.length}名 全員のレク記録を反映します。よろしいですか？`)) return;
   const d=_getRecFormData();
   todayRes.forEach(res=>{ getRec(res.name).rec={...JSON.parse(JSON.stringify(d)),_u:Date.now()}; });
@@ -3510,7 +3544,7 @@ function printCareRange(){
 function openPrint(){
   document.getElementById('pDate').value=dk();
   const day=curDate.getDate()-1;
-  const resList=db.residents.filter(r=>r.sched&&r.sched[day]===1);
+  const resList=residentsOnDaySorted(day);
   const cont=document.getElementById('pResidents');
   cont.innerHTML=resList.map(r=>`<button class="chip" style="border:2px solid var(--bdr);" onclick="this.classList.toggle('selected')">${r.name}</button>`).join('');
   openOv('ovPrint');
