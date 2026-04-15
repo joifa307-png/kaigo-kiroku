@@ -576,27 +576,23 @@ const FACILITIES = {
   nishi: {
     name: '西ユニット',
     storageKey: 'kaigo_nishi',
-    jkey: '$2a$10$io4g10aMQgAiZnfT2gQOg.e1PBmvQZ5OFZo3ia3qB/PDfkv2j77w.',
-    jbin: '69c8da1b6860e0745bff1652',
+    sheetName: '西',
   },
   minami: {
     name: '南ユニット',
     storageKey: 'kaigo_minami',
-    jkey: '$2a$10$io4g10aMQgAiZnfT2gQOg.e1PBmvQZ5OFZo3ia3qB/PDfkv2j77w.',
-    jbin: '69cdcd32856a682189efeb07',
+    sheetName: '南',
   }
 };
 
 // 施設情報（動的に設定）
 let FACILITY_ID = null;
 let FAC = null;
-let JURL = null;
 
 function initFacility(facId){
   if(!FACILITIES[facId]) return false;
   FACILITY_ID = facId;
   FAC = FACILITIES[facId];
-  JURL = `https://api.jsonbin.io/v3/b/${FAC.jbin}`;
   return true;
 }
 
@@ -613,7 +609,7 @@ function startApp(){
   setSyncStatus('--','var(--text3)');
   renderDate();
   renderMain();
-  syncNow();
+  syncPullOnly();
   startAutoSync();
 }
 
@@ -652,10 +648,8 @@ const DEFAULT_SETTINGS = {
 
 // ========== 状態 ==========
 let db = { residents:[], records:{}, supplies:[], settings:{...DEFAULT_SETTINGS} };
-let syncTs = 0;
 let syncDirty = false;
 let syncTimer = null;
-let syncDebounceTimer = null;
 let curDate = new Date(); curDate.setHours(0,0,0,0);
 let curRes = null;
 let curTab = 'vital';
@@ -714,6 +708,7 @@ function loadDB(){
       seen.add(r.name); return true;
     });
   }
+  if(!db._setU) db._setU={};
 }
 
 function saveDB(){
@@ -721,6 +716,7 @@ function saveDB(){
   localStorage.setItem(FAC.storageKey, JSON.stringify(db));
   syncDirty = true;
   localStorage.setItem(FAC.storageKey+'_dirty','1'); // ページ再読込後も未送信フラグを保持
+  if(!window._kaigoGasSaving) scheduleGasSync();
 }
 
 function getRec(name, dateKey){
@@ -752,7 +748,27 @@ function getRec(name, dateKey){
   return r;
 }
 
-// ========== 同期 ==========
+// ========== 同期（Google スプレッドシート + GAS）==========
+const SYNC_MARKER = 'KAIGO_SYNC_V1';
+const SEC_RES = 'RESIDENTS';
+const SEC_REC = 'RECORDS';
+const SEC_SET = 'SETTINGS';
+const SEC_SUP = 'SUPPLIES';
+
+const REC = {
+  rid:0,k:1,dk:2,nm:3,uu:4,seq:5,tm:6,
+  v0:7,v1:8,v2:9,v3:10,v4:11,v5:12,v6:13,
+  ex0:14,ex1:15,ex2:16,ex3:17,ex4:18,ex5:19,ex6:20,
+  ba0:21,ba1:22, ca0:23,ca1:24, nt0:25,nt1:26,nt2:27,
+  mbt:28,mbm:29,mbs:30,mbw:31,mlt:32,mm:33,msk:34,mlmi:35,mls:36,mlw:37,mdt:38,mdm:39,mds:40,mdw:41,
+  mt:42,mtt:43,mts:44,mj:45, rp:46,rc:47,rk:48,rch:49, dt:50,dw:51, sr:52,sp:53,sq:54, exj:55
+};
+const N_RECORD_COLS = 56;
+
+function gasToken(){ return (localStorage.getItem('kaigo_gas_token')||'').trim(); }
+function gasUrl(){ return (localStorage.getItem('kaigo_gas_webapp_url')||'').trim(); }
+function gasConfigured(){ return !!(gasUrl() && gasToken() && FAC); }
+
 function setSyncStatus(label, color){
   const dot=document.getElementById('syncDot');
   const lbl=document.getElementById('syncLabel');
@@ -760,204 +776,593 @@ function setSyncStatus(label, color){
   if(lbl) lbl.textContent=label;
 }
 
-// ========== 双方向同期（常にGET→マージ→必要なら PUT）==========
-function syncTo(){ syncNow(); }   // 後方互換エイリアス
-function syncFrom(){ syncNow(); } // 後方互換エイリアス
+function syncTo(){ syncNow(true); }
+function syncFrom(){ syncNow(true); }
 
-// 統一マージ関数（base に target をユニオンマージ）
-function mergeDb(base, target){
-  const result = JSON.parse(JSON.stringify(target)); // targetをベースにコピー
+function _numU(x){ const n=Number(x); return isNaN(n)?0:n; }
+function cloneDeep(o){ return JSON.parse(JSON.stringify(o==null?{}:o)); }
 
-  // ── settings：スマートマージ ──
-  // 方針：ローカル(base)優先だが、ローカルが空の項目はクラウド(target)で補完。
-  // これにより「新端末やキャッシュクリア後でもJSONBinからスタッフ名等を復元できる」
-  if(!result.settings) result.settings = {};
-  const bs = base.settings || {};
-  const cloudSt = JSON.parse(JSON.stringify(result.settings)); // クラウド設定を退避
+function buildResidentHeaderRow(){
+  const h=['id','氏名','要介護度'];
+  for(let d=1;d<=31;d++) h.push('d'+d);
+  h.push('updatedAt');
+  return h;
+}
+function buildRecordHeaderRow(){
+  const a=Array(N_RECORD_COLS).fill('');
+  a[REC.rid]='record_id'; a[REC.k]='kind'; a[REC.dk]='date'; a[REC.nm]='resident'; a[REC.uu]='updatedAt'; a[REC.seq]='seq'; a[REC.tm]='time';
+  a[REC.v0]='v_temp'; a[REC.v1]='v_sbp'; a[REC.v2]='v_dbp'; a[REC.v3]='v_pulse'; a[REC.v4]='v_spo2'; a[REC.v5]='v_weight'; a[REC.v6]='v_staff';
+  a[REC.ex0]='ex_urine'; a[REC.ex1]='ex_pad'; a[REC.ex2]='ex_stool'; a[REC.ex3]='ex_writer'; a[REC.ex4]='ex_padChange'; a[REC.ex5]='ex_rehaChange'; a[REC.ex6]='ex_diaperChange';
+  a[REC.ba0]='ba_type'; a[REC.ba1]='ba_staff';
+  a[REC.ca0]='ca_content'; a[REC.ca1]='ca_staff';
+  a[REC.nt0]='nt_content'; a[REC.nt1]='nt_writer'; a[REC.nt2]='nt_ts';
+  a[REC.mbt]='meal_bTime'; a[REC.mbm]='meal_bMain'; a[REC.mbs]='meal_bSide'; a[REC.mbw]='meal_bWater';
+  a[REC.mlt]='meal_lTime'; a[REC.mm]='meal_menu'; a[REC.msk]='meal_snack'; a[REC.mlmi]='meal_lMain'; a[REC.mls]='meal_side'; a[REC.mlw]='meal_water';
+  a[REC.mdt]='meal_dTime'; a[REC.mdm]='meal_dMain'; a[REC.mds]='meal_dSide'; a[REC.mdw]='meal_dWater';
+  a[REC.mt]='med_timing'; a[REC.mtt]='med_time'; a[REC.mts]='med_staff'; a[REC.mj]='med_items_json';
+  a[REC.rp]='rec_part'; a[REC.rc]='rec_content'; a[REC.rk]='rec_kanken'; a[REC.rch]='rec_chips_json';
+  a[REC.dt]='day_text'; a[REC.dw]='day_writer';
+  a[REC.sr]='sup_resName'; a[REC.sp]='sup_product'; a[REC.sq]='sup_qty';
+  a[REC.exj]='extra_json';
+  return a;
+}
 
-  // まずローカル設定で上書き
-  if(bs && Object.keys(bs).length){
-    result.settings = JSON.parse(JSON.stringify(bs));
-  }
+function padSheetRow(a, minLen){
+  const m=Math.max(minLen||0, a.length, 56);
+  const o=a.slice();
+  while(o.length<m) o.push('');
+  return o;
+}
 
-  // 各キーをスマート補完
-  Object.keys(DEFAULT_SETTINGS).forEach(k=>{
-    const cur = result.settings[k];   // ローカル値
-    const cloud = cloudSt[k];         // クラウド値
-    const def = DEFAULT_SETTINGS[k];  // デフォルト値
+function mealRowHasData(m){
+  if(!m) return false;
+  if(m._u>0) return true;
+  if(m.menu||m.snack) return true;
+  if(Number(m.bMain)!==100||Number(m.main)!==100||Number(m.dMain)!==100) return true;
+  if((m.bWater&&String(m.bWater)!=='')||(m.water&&String(m.water)!=='')||(m.dWater&&String(m.dWater)!=='')) return true;
+  return false;
+}
 
-    if(cur === undefined || cur === null || cur === ''){
-      // ローカルが未設定 or 空文字 → クラウド優先、なければデフォルト
-      // （localStorageクリア後にfacilityName,logoB64がクラウドで復元されるための対応）
-      const cloudOk = cloud !== undefined && cloud !== null && cloud !== '';
-      result.settings[k] = cloudOk
-        ? JSON.parse(JSON.stringify(cloud))
-        : JSON.parse(JSON.stringify(def));
-    } else if(Array.isArray(cur) && cur.length === 0){
-      // ローカルが空配列 → クラウドに値があれば使う（スタッフ名・消耗品を含む）
-      if(Array.isArray(cloud) && cloud.length > 0){
-        result.settings[k] = JSON.parse(JSON.stringify(cloud));
-      } else if(Array.isArray(def) && def.length > 0 && !['staffList','supplyProducts'].includes(k)){
-        // ローカルもクラウドも空でデフォルトがある → デフォルト補完（staffListは補完しない）
-        result.settings[k] = JSON.parse(JSON.stringify(def));
-      }
-    }
-    // それ以外（ローカルに値あり）: ローカルの値をそのまま使う
+function blankRecRow(){ return Array(N_RECORD_COLS).fill(''); }
+
+function dbToSheet(inDb){
+  const resH=buildResidentHeaderRow();
+  const recH=buildRecordHeaderRow();
+  const W=Math.max(resH.length, recH.length, 56);
+  const rows=[];
+  const PR=r=>padSheetRow(r,W);
+
+  rows.push(PR([SYNC_MARKER]));
+  rows.push(PR([SEC_RES]));
+  rows.push(PR(resH));
+  (inDb.residents||[]).forEach(r=>{
+    const row=[r.id||'',r.name||'',r.care||''];
+    const sch=r.sched||[];
+    for(let di=0;di<31;di++) row.push(sch[di]===1?1:0);
+    row.push(_numU(r._u));
+    rows.push(PR(row));
   });
+  rows.push(PR([]));
+  rows.push(PR([SEC_REC]));
+  rows.push(PR(recH));
 
-  // ── residents：ローカル(base)を優先してユニオンマージ ──
-  // IDマッチ優先、IDなしは名前でフォールバック検索
-  if(!result.residents) result.residents = [];
-  if(base.residents&&base.residents.length){
-    base.residents.forEach(r=>{
-      let idx = r.id ? result.residents.findIndex(x=>x.id===r.id) : -1;
-      if(idx<0 && r.name) idx = result.residents.findIndex(x=>x.name===r.name);
-      if(idx<0){
-        result.residents.push(r); // クラウドにもローカルにもない → 追加
-      } else if(r.id){
-        result.residents[idx] = r; // IDが一致 → ローカルで上書き
-      }
-      // IDなしで名前一致の場合はローカル優先でそのまま
-    });
-  }
-  // 名前重複を排除（同期バグで汚染されたデータを修復）
-  {
-    const seenNames = new Set();
-    result.residents = result.residents.filter(r=>{
-      if(seenNames.has(r.name)) return false;
-      seenNames.add(r.name); return true;
-    });
-  }
+  const pushR=a=>rows.push(PR(a));
 
-  // ── supplies：ユニオンマージ ──
-  if(!result.supplies) result.supplies = [];
-  if(base.supplies&&base.supplies.length){
-    const ids = new Set(result.supplies.map(s=>s.id));
-    base.supplies.forEach(s=>{ if(s.id&&!ids.has(s.id)) result.supplies.push(s); });
-    result.supplies.sort((a,b)=>(a.date||'').localeCompare(b.date||''));
-  }
+  const recs=inDb.records||{};
+  Object.keys(recs).sort().forEach(dk=>{
+    const day=recs[dk]||{};
+    Object.keys(day).sort().forEach(name=>{
+      const rec=day[name];
+      if(!rec||typeof rec!=='object') return;
 
-  // ── records：ユニオンマージ ──
-  if(!base.records) return result;
-  if(!result.records) result.records={};
-  Object.entries(base.records).forEach(([dateK, dayData])=>{
-    if(!result.records[dateK]){ result.records[dateK]=dayData; return; }
-    Object.entries(dayData).forEach(([name, baseRec])=>{
-      if(!result.records[dateK][name]){ result.records[dateK][name]=baseRec; return; }
-      const tr = result.records[dateK][name];
-      // 配列フィールド：IDまたは時刻をキーにユニオンマージ
-      ['vital','excretion','bath','care','notes'].forEach(field=>{
-        if(!baseRec[field]||!baseRec[field].length) return;
-        if(!tr[field]||!tr[field].length){ tr[field]=baseRec[field]; return; }
-        const targetIds = new Set(tr[field].map(e=>e.id||e.time||JSON.stringify(e)));
-        baseRec[field].forEach(e=>{
-          const key = e.id||e.time||JSON.stringify(e);
-          if(!targetIds.has(key)) tr[field].push(e);
-        });
-        tr[field].sort((a,b)=>(a.time||'').localeCompare(b.time||''));
+      (rec.vital||[]).forEach((v,idx)=>{
+        const a=blankRecRow();
+        a[REC.rid]=String(v.id||('v|'+dk+'|'+name+'|'+idx));
+        a[REC.k]='vital'; a[REC.dk]=dk; a[REC.nm]=name; a[REC.uu]=String(_numU(v.sheetU||v.u||0));
+        a[REC.seq]=String(idx); a[REC.tm]=v.time||'';
+        a[REC.v0]=v.temp??''; a[REC.v1]=v.sbp??''; a[REC.v2]=v.dbp??''; a[REC.v3]=v.pulse??''; a[REC.v4]=v.spo2??''; a[REC.v5]=v.weight??''; a[REC.v6]=v.staff||'';
+        pushR(a);
       });
-      // med：タイミング別にbaseを保護
-      if(baseRec.med){
-        if(!tr.med) tr.med=baseRec.med;
-        else ['morning','lunch','dinner','bedtime'].forEach(t=>{
-          if(baseRec.med[t]&&baseRec.med[t].items&&baseRec.med[t].items.length&&
-             (!tr.med[t]||!tr.med[t].items||!tr.med[t].items.length))
-            tr.med[t]=baseRec.med[t];
-        });
+      (rec.excretion||[]).forEach((v,idx)=>{
+        const a=blankRecRow();
+        a[REC.rid]=String(v.id||('e|'+dk+'|'+name+'|'+idx));
+        a[REC.k]='excretion'; a[REC.dk]=dk; a[REC.nm]=name; a[REC.uu]=String(_numU(v.sheetU||v.u||0));
+        a[REC.seq]=String(idx); a[REC.tm]=v.time||'';
+        a[REC.ex0]=v.urine||''; a[REC.ex1]=v.pad||''; a[REC.ex2]=v.stool||''; a[REC.ex3]=v.writer||'';
+        a[REC.ex4]=v.padChange?1:0; a[REC.ex5]=v.rehaChange?1:0; a[REC.ex6]=v.diaperChange?1:0;
+        pushR(a);
+      });
+      (rec.bath||[]).forEach((v,idx)=>{
+        const a=blankRecRow();
+        a[REC.rid]=String(v.id||('b|'+dk+'|'+name+'|'+idx));
+        a[REC.k]='bath'; a[REC.dk]=dk; a[REC.nm]=name; a[REC.uu]=String(_numU(v.sheetU||v.u||0));
+        a[REC.seq]=String(idx); a[REC.tm]=v.time||'';
+        a[REC.ba0]=v.type||''; a[REC.ba1]=v.staff||'';
+        pushR(a);
+      });
+      (rec.care||[]).forEach((v,idx)=>{
+        const a=blankRecRow();
+        a[REC.rid]=String(v.id||('c|'+dk+'|'+name+'|'+idx));
+        a[REC.k]='care'; a[REC.dk]=dk; a[REC.nm]=name; a[REC.uu]=String(_numU(v.sheetU||v.u||0));
+        a[REC.seq]=String(idx); a[REC.tm]=v.time||'';
+        a[REC.ca0]=v.content||''; a[REC.ca1]=v.staff||'';
+        pushR(a);
+      });
+      (rec.notes||[]).forEach((v,idx)=>{
+        const a=blankRecRow();
+        a[REC.rid]=String(v.id||('n|'+dk+'|'+name+'|'+idx));
+        a[REC.k]='notes'; a[REC.dk]=dk; a[REC.nm]=name; a[REC.uu]=String(_numU(v.sheetU||v.u||0));
+        a[REC.seq]=String(idx); a[REC.tm]=v.time||'';
+        a[REC.nt0]=v.content||''; a[REC.nt1]=v.writer||''; a[REC.nt2]=v.ts||'';
+        pushR(a);
+      });
+
+      const m=rec.meal||{};
+      if(mealRowHasData(m)){
+        const a=blankRecRow();
+        a[REC.rid]='meal|'+dk+'|'+name; a[REC.k]='meal'; a[REC.dk]=dk; a[REC.nm]=name; a[REC.uu]=String(_numU(m._u||0));
+        a[REC.seq]='0'; a[REC.tm]='';
+        a[REC.mbt]=m.bTime||''; a[REC.mbm]=m.bMain??''; a[REC.mbs]=m.bSide??''; a[REC.mbw]=m.bWater??'';
+        a[REC.mlt]=m.time||''; a[REC.mm]=m.menu||''; a[REC.msk]=m.snack||''; a[REC.mlmi]=m.main??''; a[REC.mls]=m.side??''; a[REC.mlw]=m.water??'';
+        a[REC.mdt]=m.dTime||''; a[REC.mdm]=m.dMain??''; a[REC.mds]=m.dSide??''; a[REC.mdw]=m.dWater??'';
+        pushR(a);
+      }
+
+      const med=rec.med||{};
+      ['morning','lunch','dinner','bedtime'].forEach(timing=>{
+        const slot=med[timing]||{};
+        if(!((slot.items||[]).length||slot.time||slot.staff)) return;
+        const a=blankRecRow();
+        a[REC.rid]='med|'+dk+'|'+name+'|'+timing; a[REC.k]='med'; a[REC.dk]=dk; a[REC.nm]=name; a[REC.uu]=String(_numU(slot._u||0));
+        a[REC.seq]='0'; a[REC.tm]='';
+        a[REC.mt]=timing; a[REC.mtt]=slot.time||''; a[REC.mts]=slot.staff||''; a[REC.mj]=JSON.stringify(slot.items||[]);
+        pushR(a);
+      });
+
+      const rc=rec.rec||{};
+      if(rc.content||(rc.chips&&rc.chips.length)||rc.kanken||rc.time||rc.part){
+        const a=blankRecRow();
+        a[REC.rid]='rec|'+dk+'|'+name; a[REC.k]='rec'; a[REC.dk]=dk; a[REC.nm]=name; a[REC.uu]=String(_numU(rc._u||0));
+        a[REC.seq]='0'; a[REC.tm]=rc.time||'';
+        a[REC.rp]=rc.part||''; a[REC.rc]=rc.content||''; a[REC.rk]=rc.kanken?1:0; a[REC.rch]=JSON.stringify(rc.chips||[]);
+        pushR(a);
+      }
+
+      if(rec.day || rec.dayWriter || (rec._dayU||0)>0){
+        const a=blankRecRow();
+        a[REC.rid]='day|'+dk+'|'+name; a[REC.k]='day'; a[REC.dk]=dk; a[REC.nm]=name; a[REC.uu]=String(_numU(rec._dayU||0));
+        a[REC.seq]='0'; a[REC.tm]='';
+        a[REC.dt]=String(rec.day||'').replace(/\r/g,' '); a[REC.dw]=rec.dayWriter||'';
+        pushR(a);
       }
     });
   });
-  return result;
+
+  rows.push(PR([]));
+  rows.push(PR([SEC_SET]));
+  rows.push(PR(['key','valueJson','updatedAt']));
+  const S=inDb.settings||{};
+  const skip=new Set(['logoB64']);
+  if(!inDb._setU) inDb._setU={};
+  Object.keys(S).forEach(k=>{
+    if(skip.has(k)) return;
+    const v=S[k];
+    rows.push(PR([k, JSON.stringify(v), String(_numU(inDb._setU&&inDb._setU[k]))]));
+  });
+
+  rows.push(PR([]));
+  rows.push(PR([SEC_SUP]));
+  rows.push(PR(['id','date','resName','product','qty','updatedAt']));
+  (inDb.supplies||[]).forEach(s=>{
+    rows.push(PR([s.id||'', s.date||'', s.resName||'', s.product||'', s.qty??'', String(_numU(s._u||0))]));
+  });
+
+  return rows;
 }
 
-// ========== 診断ツール ==========
-function diagSync(){
-  if(!FAC||!JURL){ alert('施設未選択'); return; }
-  alert('【診断開始】\nJSONBinに接続中...\nBin ID: '+FAC.jbin.slice(-6));
-  fetch(JURL+'/latest',{headers:{'X-Master-Key':FAC.jkey}})
-    .then(r=>r.json())
-    .then(res=>{
-      if(!res.record){
-        alert('【エラー】JSONBinの応答:\n'+JSON.stringify(res).slice(0,300));
-        return;
-      }
-      if(!res.record.data){
-        alert('【クラウドにデータなし】\nres.recordのキー: '+Object.keys(res.record).join(','));
-        return;
-      }
-      try{
-        const cdb=JSON.parse(res.record.data);
-        const rCount=(cdb.residents||[]).length;
-        const rNames=(cdb.residents||[]).slice(0,3).map(r=>r.name).join('、');
-        const recKeys=Object.keys(cdb.records||{}).length;
-        const staff=((cdb.settings&&cdb.settings.staffList)||[]).length;
-        const facName=(cdb.settings&&cdb.settings.facilityName)||'（なし）';
-        alert('【クラウドデータ確認】\n施設名: '+facName+'\n利用者: '+rCount+'名 ('+rNames+'...)\n記録日数: '+recKeys+'日\nスタッフ: '+staff+'名\n\n【ローカルデータ】\n利用者: '+(db.residents||[]).length+'名\n記録日数: '+Object.keys(db.records||{}).length+'日');
-      }catch(e){
-        alert('【データ解析エラー】\n'+e.message+'\nデータ先頭: '+res.record.data.slice(0,100));
-      }
-    })
-    .catch(e=>alert('【通信エラー】\n'+e.message));
+function ensureDay(dbOut, dk, name){
+  if(!dbOut.records[dk]) dbOut.records[dk]={};
+  if(!dbOut.records[dk][name]){
+    dbOut.records[dk][name]={
+      vital:[], excretion:[], bath:[], care:[], notes:[],
+      meal:{bTime:'07:30',bMain:100,bSide:100,bWater:'', time:'11:50',menu:'',snack:'',main:100,side:100,water:'', dTime:'17:30',dMain:100,dSide:100,dWater:''},
+      med:{morning:{time:'',staff:'',items:[]},lunch:{time:'',staff:'',items:[]},dinner:{time:'',staff:'',items:[]},bedtime:{time:'',staff:'',items:[]}},
+      rec:{content:'',part:'',time:''},
+      day:''
+    };
+  }
+  const r=dbOut.records[dk][name];
+  ['vital','excretion','bath','care','notes'].forEach(f=>{ if(!r[f]) r[f]=[]; });
+  if(!r.med) r.med={morning:{time:'',staff:'',items:[]},lunch:{time:'',staff:'',items:[]},dinner:{time:'',staff:'',items:[]},bedtime:{time:'',staff:'',items:[]}};
+  ['morning','lunch','dinner','bedtime'].forEach(t=>{
+    if(!r.med[t]) r.med[t]={time:'',staff:'',items:[]};
+    if(!r.med[t].items) r.med[t].items=[];
+  });
+  if(!r.rec) r.rec={content:'',part:'',time:''};
+  return r;
 }
 
-// 双方向同期：常にGET→マージ→汚れていればPUT→ローカル反映
-function syncNow(){
-  if(!FAC||!JURL){ setSyncStatus('設定なし','orange'); return; }
-  setSyncStatus('同期中...','#185FA5');
-  fetch(JURL+'/latest', {headers:{'X-Master-Key':FAC.jkey}})
-    .then(r=>{ if(!r.ok) throw new Error('GET '+r.status); return r.json(); })
-    .then(res=>{
-      // クラウドデータの解析（新形式 {data:...,timestamp:...} / 旧形式 直接db）
-      let cloudDb = null;
-      if(res.record){
-        if(res.record.data){
-          try{ cloudDb = JSON.parse(res.record.data); }catch(e){}
-        } else if(res.record.residents || res.record.records){
-          cloudDb = res.record; // 旧形式
-        }
-      }
-      // ローカル優先でマージ
-      const mergedDb = cloudDb ? mergeDb(db, cloudDb) : JSON.parse(JSON.stringify(db));
-      // ローカルが汚れている or クラウドにデータがない場合のみアップロード
-      if(syncDirty || !cloudDb){
-        return fetch(JURL, {
-          method:'PUT',
-          headers:{'Content-Type':'application/json','X-Master-Key':FAC.jkey},
-          body: JSON.stringify({data:JSON.stringify(mergedDb), timestamp:Date.now()})
-        })
-        .then(r=>{ if(!r.ok) throw new Error('PUT '+r.status); return r.json(); })
-        .then(()=>mergedDb);
-      }
-      return mergedDb;
-    })
-    .then(mergedDb=>{
-      db = mergedDb;
-      localStorage.setItem(FAC.storageKey, JSON.stringify(db));
-      syncDirty = false;
-      localStorage.removeItem(FAC.storageKey+'_dirty'); // 未送信フラグをクリア
+function applyRecordRow(dbOut, row){
+  const kind=String(row[REC.k]||'').trim();
+  const dk=String(row[REC.dk]||'').trim();
+  const name=String(row[REC.nm]||'').trim();
+  const u=_numU(row[REC.uu]);
+  if(!dk||!name||!kind) return;
+  const rec=ensureDay(dbOut, dk, name);
+
+  if(kind==='vital'){
+    const o={
+      id:String(row[REC.rid]||genId('v')),
+      time:row[REC.tm]||'', temp:row[REC.v0], sbp:row[REC.v1], dbp:row[REC.v2], pulse:row[REC.v3], spo2:row[REC.v4], weight:row[REC.v5], staff:row[REC.v6],
+      sheetU:u
+    };
+    rec.vital.push(o);
+    return;
+  }
+  if(kind==='excretion'){
+    rec.excretion.push({
+      id:String(row[REC.rid]||genId('e')),
+      time:row[REC.tm]||'',
+      urine:row[REC.ex0], pad:row[REC.ex1], stool:row[REC.ex2], writer:row[REC.ex3],
+      padChange:!!Number(row[REC.ex4]), rehaChange:!!Number(row[REC.ex5]), diaperChange:!!Number(row[REC.ex6]),
+      sheetU:u
+    });
+    return;
+  }
+  if(kind==='bath'){
+    rec.bath.push({ id:String(row[REC.rid]||genId('b')), time:row[REC.tm]||'', type:row[REC.ba0], staff:row[REC.ba1], sheetU:u });
+    return;
+  }
+  if(kind==='care'){
+    rec.care.push({ id:String(row[REC.rid]||genId('c')), time:row[REC.tm]||'', content:row[REC.ca0], staff:row[REC.ca1], sheetU:u });
+    return;
+  }
+  if(kind==='notes'){
+    rec.notes.push({ id:String(row[REC.rid]||genId('n')), time:row[REC.tm]||'', content:row[REC.nt0], writer:row[REC.nt1], ts:row[REC.nt2]||new Date().toISOString(), sheetU:u });
+    return;
+  }
+  if(kind==='meal'){
+    rec.meal={
+      bTime:row[REC.mbt]||'07:30', bMain:_numU(row[REC.mbm])||100, bSide:_numU(row[REC.mbs])||100, bWater:row[REC.mbw]||'',
+      time:row[REC.mlt]||'11:50', menu:row[REC.mm]||'', snack:row[REC.msk]||'', main:_numU(row[REC.mlmi])||100, side:_numU(row[REC.mls])||100, water:row[REC.mlw]||'',
+      dTime:row[REC.mdt]||'17:30', dMain:_numU(row[REC.mdm])||100, dSide:_numU(row[REC.mds])||100, dWater:row[REC.mdw]||'',
+      _u:u
+    };
+    return;
+  }
+  if(kind==='med'){
+    const timing=String(row[REC.mt]||'morning');
+    let items=[];
+    try{ items=JSON.parse(row[REC.mj]||'[]')||[]; }catch(_){ items=[]; }
+    rec.med[timing]={ time:row[REC.mtt]||'', staff:row[REC.mts]||'', items, _u:u };
+    return;
+  }
+  if(kind==='rec'){
+    let chips=[];
+    try{ chips=JSON.parse(row[REC.rch]||'[]')||[]; }catch(_){ chips=[]; }
+    rec.rec={ time:row[REC.tm]||'', part:row[REC.rp]||'', content:row[REC.rc]||'', kanken:!!Number(row[REC.rk]), chips, _u:u };
+    return;
+  }
+  if(kind==='day'){
+    rec.day=row[REC.dt]||''; rec.dayWriter=row[REC.dw]||''; rec._dayU=u;
+  }
+}
+
+function sheetToDb(rows){
+  const empty=()=>({ residents:[], records:{}, supplies:[], settings:cloneDeep(DEFAULT_SETTINGS), _setU:{} });
+  if(!rows||!rows.length||String(rows[0][0])!==SYNC_MARKER) return empty();
+
+  const dbOut=empty();
+  let i=1;
+  while(i<rows.length && String(rows[i][0])!==SEC_RES) i++;
+  if(i>=rows.length) return dbOut;
+  i++;
+  i++;
+  while(i<rows.length){
+    const r=rows[i];
+    if(!r||!r.length){ i++; continue; }
+    if(String(r[0])===SEC_REC) break;
+    const name=String(r[1]||'').trim();
+    const id=String(r[0]||'').trim();
+    if(!name && !id){ i++; continue; }
+    const care=String(r[2]||'');
+    const sched=[];
+    for(let c=3;c<34;c++) sched.push(Number(r[c])===1?1:0);
+    while(sched.length<31) sched.push(0);
+    dbOut.residents.push({ id:id||genId('r'), name, care, sched, _u:_numU(r[34]) });
+    i++;
+  }
+  while(i<rows.length && String(rows[i][0])!==SEC_REC) i++;
+  if(i>=rows.length) return dbOut;
+  i+=2;
+  while(i<rows.length){
+    const r=rows[i];
+    if(!r||!r.length){ i++; continue; }
+    const c0=String(r[0]||'');
+    if(c0===SEC_SET||c0===SEC_SUP) break;
+    applyRecordRow(dbOut, r);
+    i++;
+  }
+
+  while(i<rows.length && String(rows[i][0])!==SEC_SET) i++;
+  if(i<rows.length && String(rows[i][0])===SEC_SET){
+    i+=2;
+    while(i<rows.length){
+      const r=rows[i];
+      if(!r||!r.length){ i++; continue; }
+      if(String(r[0])===SEC_SUP) break;
+      const k=String(r[0]||'').trim();
+      if(!k){ i++; continue; }
+      try{ dbOut.settings[k]=JSON.parse(r[1]); }catch(_){ dbOut.settings[k]=r[1]; }
+      dbOut._setU[k]=_numU(r[2]);
+      i++;
+    }
+  }
+
+  while(i<rows.length && String(rows[i][0])!==SEC_SUP) i++;
+  if(i<rows.length && String(rows[i][0])===SEC_SUP){
+    i+=2;
+    while(i<rows.length){
+      const r=rows[i];
+      if(!r||!r.length){ i++; continue; }
+      const id=String(r[0]||'').trim();
+      if(!id){ i++; continue; }
+      dbOut.supplies.push({ id, date:String(r[1]||''), resName:String(r[2]||''), product:String(r[3]||''), qty:_numU(r[4]), _u:_numU(r[5]) });
+      i++;
+    }
+  }
+
+  Object.keys(dbOut.records||{}).forEach(dk=>{
+    Object.keys(dbOut.records[dk]||{}).forEach(nm=>{
+      const rr=dbOut.records[dk][nm];
+      ['vital','excretion','bath','care','notes'].forEach(f=>{
+        if(rr[f]) rr[f].sort((a,b)=>(a.time||'').localeCompare(b.time||''));
+      });
+    });
+  });
+  dbOut.supplies.sort((a,b)=>(a.date||'').localeCompare(b.date||''));
+  return dbOut;
+}
+
+function mergeArraysById(a, b, idFn){
+  const m=new Map();
+  [...(a||[]), ...(b||[])].forEach(x=>{
+    const k=idFn(x);
+    const u=_numU(x.sheetU||x.u||0);
+    const old=m.get(k);
+    if(!old||u>old.u) m.set(k, {x:cloneDeep(x), u});
+  });
+  return [...m.values()].sort((p,q)=>(p.x.time||'').localeCompare(q.x.time||'')).map(p=>p.x);
+}
+
+function mergeRecordDay(L, R, dk, nm){
+  if(!L && !R) return null;
+  if(!L) return cloneDeep(R);
+  if(!R) return cloneDeep(L);
+  const out=cloneDeep(L);
+
+  out.vital=mergeArraysById(L.vital, R.vital, e=>String(e.id||e.time||''));
+  out.excretion=mergeArraysById(L.excretion, R.excretion, e=>String(e.id||e.time||''));
+  out.bath=mergeArraysById(L.bath, R.bath, e=>String(e.id||e.time||''));
+  out.care=mergeArraysById(L.care, R.care, e=>String(e.id||e.time||''));
+  out.notes=mergeArraysById(L.notes, R.notes, e=>String(e.id||e.time||''));
+
+  const muL=_numU((L.meal||{})._u), muR=_numU((R.meal||{})._u);
+  out.meal=cloneDeep(muR>muL?(R.meal||L.meal||{}):(L.meal||R.meal||{}));
+
+  out.med={ morning:{time:'',staff:'',items:[]}, lunch:{time:'',staff:'',items:[]}, dinner:{time:'',staff:'',items:[]}, bedtime:{time:'',staff:'',items:[]} };
+  ['morning','lunch','dinner','bedtime'].forEach(t=>{
+    const a=L.med&&L.med[t], b=R.med&&R.med[t];
+    const au=_numU(a&&a._u), bu=_numU(b&&b._u);
+    out.med[t]= bu>au ? cloneDeep(b||{time:'',staff:'',items:[]}) : cloneDeep(a||{time:'',staff:'',items:[]});
+    if(!out.med[t].items) out.med[t].items=[];
+  });
+
+  const ruL=_numU((L.rec||{})._u), ruR=_numU((R.rec||{})._u);
+  out.rec= ruR>ruL ? cloneDeep(R.rec||{}) : cloneDeep(L.rec||{});
+
+  const duL=_numU(L._dayU), duR=_numU(R._dayU);
+  if(duR>duL){ out.day=R.day||''; out.dayWriter=R.dayWriter||''; out._dayU=duR; }
+  else { out.day=L.day||''; out.dayWriter=L.dayWriter||''; out._dayU=duL; }
+
+  return out;
+}
+
+function mergeResidentsLoc(a, b){
+  const m=new Map();
+  (a||[]).forEach(r=>{
+    const key=String(r.name||r.id||'');
+    m.set(key,{r:cloneDeep(r),u:_numU(r._u)});
+  });
+  (b||[]).forEach(r=>{
+    const key=String(r.name||r.id||'');
+    const u=_numU(r._u);
+    const old=m.get(key);
+    if(!old||u>old.u) m.set(key,{r:cloneDeep(r),u});
+  });
+  const seen=new Set();
+  return [...m.values()].map(o=>o.r).filter(r=>{
+    if(!r.name||seen.has(r.name)) return false;
+    seen.add(r.name); return true;
+  });
+}
+
+function mergeSuppliesLoc(a, b){
+  const m=new Map();
+  (a||[]).forEach(s=>{
+    if(!s.id) return;
+    m.set(s.id,{x:cloneDeep(s),u:_numU(s._u)});
+  });
+  (b||[]).forEach(s=>{
+    if(!s.id) return;
+    const u=_numU(s._u);
+    const old=m.get(s.id);
+    if(!old||u>old.u) m.set(s.id,{x:cloneDeep(s),u});
+  });
+  return [...m.values()].map(o=>o.x).sort((p,q)=>(p.date||'').localeCompare(q.date||''));
+}
+
+function mergePulledDb(local, remote){
+  const out={};
+  out.residents=mergeResidentsLoc(local.residents, remote.residents);
+  out.supplies=mergeSuppliesLoc(local.supplies, remote.supplies);
+  out.settings=cloneDeep(local.settings||{});
+  const ru=remote._setU||{}, lu=local._setU||{};
+  out._setU={};
+  [...new Set([...Object.keys(lu),...Object.keys(ru)])].forEach(k=>{
+    out._setU[k]=Math.max(_numU(lu[k]),_numU(ru[k]));
+  });
+  Object.keys(remote.settings||{}).forEach(k=>{
+    if(k==='logoB64') return;
+    if(_numU(ru[k])>_numU(lu[k])) out.settings[k]=cloneDeep(remote.settings[k]);
+  });
+  Object.keys(DEFAULT_SETTINGS).forEach(k=>{
+    if(k==='logoB64') return;
+    const cur=out.settings[k], def=DEFAULT_SETTINGS[k], cloud=(remote.settings||{})[k];
+    if(cur===undefined||cur===null||cur===''){
+      const cloudOk=cloud!==undefined&&cloud!==null&&cloud!=='';
+      out.settings[k]=cloudOk?cloneDeep(cloud):cloneDeep(def);
+    } else if(Array.isArray(def)&&def.length>0&&Array.isArray(cur)&&cur.length===0){
+      if(Array.isArray(cloud)&&cloud.length>0) out.settings[k]=cloneDeep(cloud);
+      else if(!['staffList','supplyProducts'].includes(k)&&Array.isArray(def)&&def.length>0)
+        out.settings[k]=cloneDeep(def);
+    }
+  });
+  const dates=new Set([...Object.keys(local.records||{}), ...Object.keys(remote.records||{})]);
+  out.records={};
+  dates.forEach(dk=>{
+    out.records[dk]={};
+    const names=new Set([...Object.keys((local.records||{})[dk]||{}), ...Object.keys((remote.records||{})[dk]||{})]);
+    names.forEach(nm=>{
+      out.records[dk][nm]=mergeRecordDay(
+        (local.records[dk]||{})[nm],
+        (remote.records[dk]||{})[nm],
+        dk,nm
+      );
+    });
+  });
+  const logo=(local.settings||{}).logoB64;
+  if(logo) out.settings.logoB64=logo;
+  return out;
+}
+
+function touchSetU(key){
+  db._setU=db._setU||{};
+  db._setU[key]=Date.now();
+}
+
+function gasPost(extra){
+  const url=gasUrl(), tok=gasToken();
+  if(!url||!tok) return Promise.reject(new Error('GAS未設定（データ管理でURL・トークンを入力）'));
+  return fetch(url,{
+    method:'POST',
+    headers:{'Content-Type':'text/plain;charset=utf-8'},
+    body: JSON.stringify(Object.assign({}, extra, {token:tok}))
+  }).then(r=>{
+    if(!r.ok) return r.text().then(t=>{ throw new Error('HTTP '+r.status+': '+t.slice(0,120)); });
+    return r.json();
+  }).then(j=>{
+    if(!j.ok) throw new Error(j.error||'GAS応答エラー');
+    return j;
+  });
+}
+
+function persistLocalQuiet(){
+  window._kaigoGasSaving=true;
+  try{
+    localStorage.setItem(FAC.storageKey, JSON.stringify(db));
+  } finally {
+    window._kaigoGasSaving=false;
+  }
+}
+
+function syncPullOnly(){
+  if(!gasConfigured()){ setSyncStatus('GAS未設定','orange'); return Promise.resolve(); }
+  setSyncStatus('取得中...','#185FA5');
+  return gasPost({action:'pull', sheetName:FAC.sheetName})
+    .then(j=>{
+      const remote=sheetToDb(j.rows||[]);
+      db=mergePulledDb(db, remote);
+      persistLocalQuiet();
       renderMain();
       const n=new Date();
-      const rCnt=(db.residents||[]).length;
-      setSyncStatus(`同期済 ${n.getHours()}:${pad(n.getMinutes())} ${rCnt}名`,'green');
+      setSyncStatus(`取得 ${n.getHours()}:${pad(n.getMinutes())}`,'green');
     })
     .catch(e=>{
-      console.error('syncNow error:', e);
-      setSyncStatus('同期失敗: '+(e.message||'不明'),'orange');
+      console.error(e);
+      setSyncStatus('取得失敗: '+(e.message||''),'orange');
     });
 }
 
-// 自動同期タイマー（3時間ごと）＋前面復帰時同期
+function runGasPushCycle(){
+  if(!gasConfigured()){ setSyncStatus('GAS未設定','orange'); return Promise.resolve(); }
+  if(!syncDirty) return Promise.resolve();
+  setSyncStatus('同期中...','#185FA5');
+  return gasPost({action:'pull', sheetName:FAC.sheetName})
+    .then(j=>{
+      const remote=sheetToDb(j.rows||[]);
+      db=mergePulledDb(db, remote);
+      const rows=dbToSheet(db);
+      return gasPost({action:'push', sheetName:FAC.sheetName, rows});
+    })
+    .then(()=>{
+      persistLocalQuiet();
+      syncDirty=false;
+      localStorage.removeItem(FAC.storageKey+'_dirty');
+      renderMain();
+      const n=new Date();
+      setSyncStatus(`反映済 ${n.getHours()}:${pad(n.getMinutes())}`,'green');
+    })
+    .catch(e=>{
+      console.error(e);
+      setSyncStatus('同期失敗: '+(e.message||''),'orange');
+    });
+}
+
+let gasDebounceTimer=null;
+function scheduleGasSync(){
+  if(!FAC||window._kaigoGasSaving) return;
+  if(gasDebounceTimer) clearTimeout(gasDebounceTimer);
+  gasDebounceTimer=setTimeout(()=>{
+    gasDebounceTimer=null;
+    if(!gasConfigured()) return;
+    runGasPushCycle();
+  }, 2500);
+}
+
+function syncNow(force){
+  if(!FAC){ setSyncStatus('施設未選択','orange'); return; }
+  if(!gasConfigured()){ setSyncStatus('GAS未設定','orange'); return; }
+  syncDirty=true;
+  runGasPushCycle();
+}
+
 function startAutoSync(){
   if(syncTimer) clearInterval(syncTimer);
-  syncTimer = setInterval(syncNow, 3*60*60*1000);
-  // visibilitychangeは重複登録しない
+  syncTimer=setInterval(()=>{ if(FAC&&gasConfigured()) syncPullOnly(); }, 90*1000);
   if(!window._kaigoSyncListener){
-    window._kaigoSyncListener = ()=>{
-      if(document.visibilityState==='visible' && FAC) syncNow();
+    window._kaigoSyncListener=()=>{
+      if(document.visibilityState==='visible'&&FAC&&gasConfigured()) syncPullOnly();
     };
     document.addEventListener('visibilitychange', window._kaigoSyncListener);
   }
 }
+
+function diagSync(){
+  if(!FAC){ alert('施設未選択'); return; }
+  if(!gasConfigured()){ alert('データ管理タブで GAS Webアプリ URL とトークンを設定してください。'); return; }
+  gasPost({action:'ping', sheetName:FAC.sheetName})
+    .then(()=>gasPost({action:'pull', sheetName:FAC.sheetName}))
+    .then(j=>{
+      const remote=sheetToDb(j.rows||[]);
+      const nRec=Object.keys(remote.records||{}).length;
+      const nRes=(remote.residents||[]).length;
+      const nSup=(remote.supplies||[]).length;
+      alert('【スプレッドシート】シート: '+FAC.sheetName+'\n利用者: '+nRes+'名\n記録のある日: '+nRec+'日\n消耗品行: '+nSup+'\n\n【ローカル】\n利用者: '+(db.residents||[]).length+'名\n記録日数: '+Object.keys(db.records||{}).length+'日');
+    })
+    .catch(e=>alert('診断エラー: '+e.message));
+}
+
 
 // ========== 施設未選択画面 ==========
 // ========== 日付・曜日 ==========
@@ -1457,10 +1862,10 @@ function saveVital(){
   const staff=document.getElementById('vStaff').value;
   if(_editVital){
     const r=getRec(curRes,_editVital.dkStr);
-    r.vital[_editVital.idx]={...r.vital[_editVital.idx],time,sbp,dbp,pulse,temp,spo2,weight,staff};
+    r.vital[_editVital.idx]={...r.vital[_editVital.idx],time,sbp,dbp,pulse,temp,spo2,weight,staff,sheetU:Date.now()};
     _editVital=null;
   } else {
-    getRec(curRes).vital.push({id:genId('v'),time,sbp,dbp,pulse,temp,spo2,weight,staff});
+    getRec(curRes).vital.push({id:genId('v'),time,sbp,dbp,pulse,temp,spo2,weight,staff,sheetU:Date.now()});
   }
   saveDB(); showSavedToast(); goBack();
 }
@@ -1550,7 +1955,7 @@ function saveEx(){
   const diaperChange=document.getElementById('btnDiaperChange').classList.contains('pc-on');
   if(_editEx){
     const r=getRec(curRes,_editEx.dkStr);
-    r.excretion[_editEx.idx]={...r.excretion[_editEx.idx],time,writer,urine,pad,stool,padChange,rehaChange,diaperChange};
+    r.excretion[_editEx.idx]={...r.excretion[_editEx.idx],time,writer,urine,pad,stool,padChange,rehaChange,diaperChange,sheetU:Date.now()};
     _editEx=null;
   } else {
     getRec(curRes).excretion.push({id:genId('e'),time,writer,urine,pad,stool,padChange,rehaChange,diaperChange});
@@ -1606,10 +2011,10 @@ function saveBath(){
   const staff=document.getElementById('baStaff').value;
   if(_editBath){
     const r=getRec(curRes,_editBath.dkStr);
-    r.bath[_editBath.idx]={...r.bath[_editBath.idx],time,type,staff};
+    r.bath[_editBath.idx]={...r.bath[_editBath.idx],time,type,staff,sheetU:Date.now()};
     _editBath=null;
   } else {
-    getRec(curRes).bath.push({id:genId('b'),time,type,staff});
+    getRec(curRes).bath.push({id:genId('b'),time,type,staff,sheetU:Date.now()});
   }
   saveDB(); showSavedToast(); goBack();
 }
@@ -1655,7 +2060,7 @@ function saveCare(){
   const staff=document.getElementById('caStaff').value;
   const content=document.getElementById('caContent').value.trim();
   if(!content){ alert('内容を入力してください'); return; }
-  getRec(curRes).care.push({id:genId('c'),time,content,staff});
+  getRec(curRes).care.push({id:genId('c'),time,content,staff,sheetU:Date.now()});
   saveDB(); showSavedToast(); goBack();
 }
 function delCare(dkStr,idx){
@@ -1758,7 +2163,7 @@ function saveMed(){
   const other=(document.getElementById('medFormOther')?.value||'').trim();
   const items=[...chipped,...(other?other.split('、').map(s=>s.trim()).filter(Boolean):[])];
   const r=getRec(curRes);
-  r.med[timing]={time,staff,items};
+  r.med[timing]={time,staff,items,_u:Date.now()};
   saveDB(); showSavedToast(); goBack();
 }
 function delMed(dkStr,timing){
@@ -1810,7 +2215,7 @@ function saveBulkMed(){
   names.forEach(name=>{
     timings.forEach(timing=>{
       const r=getRec(name);
-      r.med[timing]={time,staff,items:['処方薬']};
+      r.med[timing]={time,staff,items:['処方薬'],_u:Date.now()};
     });
   });
   saveDB(); closeMainOv(); renderMain();
@@ -1917,6 +2322,7 @@ function _applyMealData(resName, d){
   if(d.section==='breakfast'){ m.bTime=d.time; m.bMain=d.main; m.bSide=d.side; m.bWater=d.water; }
   else if(d.section==='lunch'){ m.time=d.time; m.main=d.main; m.side=d.side; m.menu=d.menu; m.water=d.water; m.snack=d.snack; }
   else { m.dTime=d.time; m.dMain=d.main; m.dSide=d.side; m.dWater=d.water; }
+  m._u=Date.now();
 }
 function saveMealSection(){
   const d=_getMealFormData(); if(!d) return;
@@ -1986,7 +2392,7 @@ function _getRecFormData(){
   };
 }
 function saveRec(){
-  getRec(curRes).rec=_getRecFormData();
+  getRec(curRes).rec={..._getRecFormData(),_u:Date.now()};
   saveDB(); showSavedToast(); goBack();
 }
 function saveRecAll(){
@@ -1994,7 +2400,7 @@ function saveRecAll(){
   const todayRes=db.residents.filter(r=>r.sched&&r.sched[dayIdx]===1);
   if(!confirm(`本日の利用者 ${todayRes.length}名 全員のレク記録を反映します。よろしいですか？`)) return;
   const d=_getRecFormData();
-  todayRes.forEach(res=>{ getRec(res.name).rec=JSON.parse(JSON.stringify(d)); });
+  todayRes.forEach(res=>{ getRec(res.name).rec={...JSON.parse(JSON.stringify(d)),_u:Date.now()}; });
   saveDB(); showSavedToast(); goBack();
 }
 
@@ -2025,7 +2431,7 @@ function saveNote(){
   const writer=document.getElementById('ntWriter').value;
   const content=document.getElementById('ntContent').value.trim();
   if(!content){ alert('内容を入力してください'); return; }
-  getRec(curRes).notes.push({id:genId('n'),time,writer,content,ts:new Date().toISOString()});
+  getRec(curRes).notes.push({id:genId('n'),time,writer,content,ts:new Date().toISOString(),sheetU:Date.now()});
   saveDB(); showSavedToast(); refreshPanel('notes');
 }
 function delNote(dkStr,idx){
@@ -2077,6 +2483,7 @@ function saveDay(){
   const r=getRec(curRes);
   r.day=document.getElementById('dayText').value.trim();
   r.dayWriter=document.getElementById('dayWriter').value;
+  r._dayU=Date.now();
   saveDB(); showSavedToast(); goBack();
 }
 
@@ -2223,7 +2630,7 @@ function addSupply(){
   if(!date||!resName||!product){ alert('日付・利用者・品目を入力してください'); return; }
   if(qty<=0){ alert('個数を1以上で入力してください'); return; }
   if(!db.supplies) db.supplies=[];
-  db.supplies.push({id:genId('sup'),date,resName,product,qty});
+  db.supplies.push({id:genId('sup'),date,resName,product,qty,_u:Date.now()});
   db.supplies.sort((a,b)=>a.date.localeCompare(b.date));
   saveDB();
   document.getElementById('supQty').value='1';
@@ -2305,6 +2712,7 @@ function buildFacilitySettings(){
 }
 function saveFacilityName(){
   db.settings.facilityName=document.getElementById('stFacName').value.trim();
+  touchSetU('facilityName');
   saveDB();
   renderSettingsPanel('facility');
   alert('施設名を保存しました');
@@ -2358,7 +2766,7 @@ function addResident(){
   const name=document.getElementById('newResName').value.trim();
   const care=document.getElementById('newResCare').value;
   if(!name){ alert('氏名を入力してください'); return; }
-  db.residents.push({id:genId('r'),name,care,sched:Array(31).fill(0)});
+  db.residents.push({id:genId('r'),name,care,sched:Array(31).fill(0),_u:Date.now()});
   saveDB(); renderSettingsPanel('residents');
 }
 function delResident(idx){
@@ -2514,11 +2922,13 @@ function addStaff(){
   if(!name) return;
   if(!db.settings.staffList) db.settings.staffList=[];
   db.settings.staffList.push(name);
+  touchSetU('staffList');
   saveDB(); renderSettingsPanel('staff');
 }
 function delStaff(idx){
   if(!confirm('削除しますか？')) return;
   db.settings.staffList.splice(idx,1);
+  touchSetU('staffList');
   saveDB(); renderSettingsPanel('staff');
 }
 
@@ -2545,11 +2955,13 @@ function addSupplyProduct(){
   if(!name) return;
   if(!db.settings.supplyProducts) db.settings.supplyProducts=[];
   db.settings.supplyProducts.push(name);
+  touchSetU('supplyProducts');
   saveDB(); renderSettingsPanel('supply');
 }
 function delSupplyProduct(idx){
   if(!confirm('削除しますか？')) return;
   db.settings.supplyProducts.splice(idx,1);
+  touchSetU('supplyProducts');
   saveDB(); renderSettingsPanel('supply');
 }
 
@@ -2597,11 +3009,13 @@ function addListItem(key){
   if(!val) return;
   if(!db.settings[key]) db.settings[key]=[];
   db.settings[key].push(val);
+  touchSetU(key);
   saveDB(); renderSettingsPanel(curSettingsTab);
 }
 function delListItem(key,idx){
   if(!confirm('削除しますか？')) return;
   db.settings[key].splice(idx,1);
+  touchSetU(key);
   saveDB(); renderSettingsPanel(curSettingsTab);
 }
 
@@ -2637,6 +3051,7 @@ function saveResidentSched(){
   r.sched=Array.from({length:31},(_,d)=>
     document.getElementById('schedDay_'+d)?.classList.contains('selected')?1:0
   );
+  r._u=Date.now();
   saveDB(); closeOv('ovSched'); renderSettingsPanel('residents');
   showSavedToast();
 }
@@ -2644,7 +3059,21 @@ function saveResidentSched(){
 // ========== データ管理 ==========
 function buildDataSettings(){
   const hasOldData = !!localStorage.getItem('kaigo3');
+  const gUrl=(typeof localStorage!=='undefined'&&localStorage.getItem('kaigo_gas_webapp_url'))||'';
+  const gUrlEsc=String(gUrl).replace(/&/g,'&amp;').replace(/"/g,'&quot;');
+  const hasTok=!!(typeof localStorage!=='undefined'&&localStorage.getItem('kaigo_gas_token'));
   return `<div class="settings-panel active">
+    <div class="panel-sec">
+      <h3>☁ Google スプレッドシート同期（GAS）</h3>
+      <p style="font-size:14px;color:var(--text2);margin-bottom:10px;">スプレッドシートにバインドした Apps Script をウェブアプリとしてデプロイし、URL とトークン（スクリプトプロパティ SYNC_TOKEN と同一）を入力してください。cursol/apps-script/Code.gs を参照。</p>
+      <div class="fg"><label>ウェブアプリ URL</label><input type="url" id="gasWebUrl" value="${gUrlEsc}" placeholder="https://script.google.com/macros/s/.../exec" autocomplete="off"></div>
+      <div class="fg"><label>同期トークン</label><input type="password" id="gasTokenInp" value="" placeholder="${hasTok?'再入力で変更（空欄なら維持）':'SYNC_TOKEN と同じ文字列'}" autocomplete="off"></div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;">
+        <button type="button" class="btn btn-primary btn-sm" onclick="saveGasConfig()">URL・トークンを保存</button>
+        <button type="button" class="btn btn-sm" style="background:#FFF3CD;color:#856404;border:1px solid #856404;" onclick="testGasConnection()">接続テスト</button>
+      </div>
+      <p style="font-size:13px;color:var(--text3);margin-top:10px;">シート名は「${FAC?FAC.sheetName:'西'}」（${FAC?FAC.name:'西ユニット'}）です。南ユニット利用時は「南」シートに書き込まれます。</p>
+    </div>
     <div class="panel-sec" style="${hasOldData?'border:2px solid var(--green);border-radius:10px;padding:14px;background:var(--green2);':'display:none;'}">
       <h3 style="color:var(--green);">🔄 旧アプリからデータ移行</h3>
       <p style="font-size:14px;color:var(--text2);margin-bottom:4px;">旧アプリの記録・利用者・スタッフが見つかりました。</p>
@@ -2666,6 +3095,24 @@ function buildDataSettings(){
       </label>
     </div>
   </div>`;
+}
+function saveGasConfig(){
+  const u=document.getElementById('gasWebUrl').value.trim();
+  const t=document.getElementById('gasTokenInp').value.trim();
+  localStorage.setItem('kaigo_gas_webapp_url',u);
+  if(t) localStorage.setItem('kaigo_gas_token',t);
+  alert('保存しました');
+}
+function testGasConnection(){
+  if(!FAC){ alert('先に施設を選び、設定を開いてください'); return; }
+  const u=document.getElementById('gasWebUrl').value.trim();
+  const t=document.getElementById('gasTokenInp').value.trim();
+  if(u) localStorage.setItem('kaigo_gas_webapp_url',u);
+  if(t) localStorage.setItem('kaigo_gas_token',t);
+  if(!gasUrl()||!gasToken()){ alert('URL とトークンを入力して保存してください'); return; }
+  gasPost({action:'ping', sheetName:FAC.sheetName})
+    .then(()=>alert('接続成功（シート: '+FAC.sheetName+'）'))
+    .catch(e=>alert('接続失敗: '+e.message));
 }
 function exportDB(){
   const today=new Date().toISOString().slice(0,10).replace(/-/g,'');
