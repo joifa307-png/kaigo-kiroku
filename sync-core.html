@@ -82,6 +82,7 @@ th,td{border-bottom:1px solid var(--line);padding:8px;text-align:left;font-size:
       <div class="col">
         <label>利用者</label>
         <select id="residentSel"></select>
+        <div class="small">※最初は「新規利用者追加」で1名作成してください</div>
       </div>
       <div class="col">
         <label>新規利用者追加</label>
@@ -359,6 +360,7 @@ function saveConfig(){
   if(cfg.token) document.getElementById('gasToken').value = '';
   document.getElementById('cfgState').textContent = (cfg.url && cfg.token) ? '保存済み' : '未保存';
   setStatus('設定保存済み', (cfg.url && cfg.token) ? 'ok' : 'warn', 'トークン欄は空表示でも保存済みの場合があります');
+  alert((cfg.url && cfg.token) ? '設定を保存しました。' : 'URLまたはトークンが未入力です。');
 }
 
 function reloadConfig(){
@@ -374,15 +376,23 @@ function testConnection(){
   const cfg = getActiveCfg();
   const old = getCfg();
   if(!cfg.token && old.token) cfg.token = old.token;
-  if(!cfg.url || !cfg.token){ setStatus('未設定', 'warn', 'URL とトークンを保存してください'); return; }
+  if(!cfg.url || !cfg.token){
+    setStatus('未設定', 'warn', 'URL とトークンを保存してください');
+    alert('URL とトークンを入力して保存してください。');
+    return;
+  }
   setStatus('接続テスト中...', 'warn', cfg.sheetName);
   gasPost(cfg, { action:'ping', sheetName: cfg.sheetName })
     .then(() => {
       setCfg(cfg);
       document.getElementById('cfgState').textContent = '保存済み';
       setStatus('接続成功', 'ok', 'sheet=' + cfg.sheetName);
+      alert('接続成功: ' + cfg.sheetName);
     })
-    .catch(e => setStatus('接続失敗', 'ng', e.message));
+    .catch(e => {
+      setStatus('接続失敗', 'ng', e.message);
+      alert('接続失敗: ' + e.message);
+    });
 }
 
 function syncPull(){
@@ -454,8 +464,20 @@ function addResident(){
 
 function saveLocalNote(){
   const dk = document.getElementById('workDate').value || isoDate();
-  const rid = document.getElementById('residentSel').value;
-  if(!rid){ alert('利用者を選択してください'); return; }
+  let rid = document.getElementById('residentSel').value;
+  if(!rid){
+    const seedName = document.getElementById('newResident').value.trim();
+    if(seedName){
+      const r = upsertResident(seedName);
+      rid = r ? r.id : '';
+      document.getElementById('newResident').value = '';
+    }
+  }
+  if(!rid){
+    alert('利用者が未登録です。「新規利用者追加」に名前を入力して追加してください。');
+    document.getElementById('newResident').focus();
+    return;
+  }
   const text = document.getElementById('noteText').value;
   setNote(dk, rid, text);
   saveDb(true);
@@ -473,6 +495,12 @@ function renderResidentSelect(){
   const sel = document.getElementById('residentSel');
   const cur = sel.value;
   const list = (db.residents || []).slice().sort((a,b)=>(a.name||'').localeCompare(b.name||'','ja'));
+  if(!list.length){
+    sel.innerHTML = '<option value="">利用者を追加してください</option>';
+    sel.disabled = true;
+    return;
+  }
+  sel.disabled = false;
   sel.innerHTML = list.map(r => '<option value="'+esc(r.id)+'">'+esc(r.name)+'</option>').join('');
   if(cur && list.some(r => r.id === cur)) sel.value = cur;
   else if(list[0]) sel.value = list[0].id;
@@ -522,6 +550,12 @@ function init(){
 
 document.getElementById('workDate').addEventListener('change', onDateOrResidentChange);
 document.getElementById('residentSel').addEventListener('change', onDateOrResidentChange);
+document.getElementById('newResident').addEventListener('keydown', (e)=>{
+  if(e.key === 'Enter'){
+    e.preventDefault();
+    addResident();
+  }
+});
 document.addEventListener('DOMContentLoaded', init);
 </script>
 </body>
