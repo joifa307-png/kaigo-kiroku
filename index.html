@@ -737,6 +737,7 @@ function loadDB(){
       seen.add(r.name); return true;
     });
   }
+  normalizeResidentsOrder();
   if(!db._setU) db._setU={};
   initializeSetUForExistingSettings();
   saveSettingsSnapshot();
@@ -745,6 +746,7 @@ function loadDB(){
 function saveDB(){
   if(!FAC) return;
   initializeSetUForExistingSettings();
+  normalizeResidentsOrder();
   localStorage.setItem(FAC.storageKey, JSON.stringify(db));
   saveSettingsSnapshot();
   syncDirty = true;
@@ -1320,6 +1322,17 @@ function normalizeVitalTempsInRecords(records){
   });
 }
 
+/** 利用者一覧の並びを端末・同期のたびに固定（氏名→id。入力・閲覧のブレ防止） */
+function compareResidentsStable(a,b){
+  const c=String((a&&a.name)||'').localeCompare(String((b&&b.name)||''),'ja');
+  if(c!==0) return c;
+  return String((a&&a.id)||'').localeCompare(String((b&&b.id)||''));
+}
+function normalizeResidentsOrder(){
+  if(!db||!Array.isArray(db.residents)) return;
+  db.residents.sort(compareResidentsStable);
+}
+
 function mergeArraysById(a, b, idFn){
   const m=new Map();
   [...(a||[]), ...(b||[])].forEach(x=>{
@@ -1380,7 +1393,7 @@ function mergeResidentsLoc(a, b){
   return [...m.values()].map(o=>o.r).filter(r=>{
     if(!r.name||seen.has(r.name)) return false;
     seen.add(r.name); return true;
-  });
+  }).sort(compareResidentsStable);
 }
 
 function mergeSuppliesLoc(a, b){
@@ -1784,7 +1797,7 @@ function getLastStool(name){
 /** 本日スケジュールの利用者を氏名順に（同期マージで residents 配列順が端末でずれるため） */
 function residentsOnDaySorted(dayIdx){
   return db.residents.filter(r=>r.sched&&r.sched[dayIdx]===1)
-    .sort((a,b)=>(a.name||'').localeCompare(b.name||'','ja'));
+    .sort(compareResidentsStable);
 }
 
 function renderMain(){
@@ -2773,7 +2786,7 @@ function openSupplyRecord(initResName){
   // 日付
   document.getElementById('supDate').value = dk();
   // 利用者セレクト（全利用者）
-  const resOpts = db.residents.map(r=>`<option value="${r.name}">${r.name}</option>`).join('');
+  const resOpts = [...db.residents].sort(compareResidentsStable).map(r=>`<option value="${r.name}">${r.name}</option>`).join('');
   document.getElementById('supRes').innerHTML = resOpts;
   // 呼び出し元の利用者名があれば初期選択
   if(initResName){
@@ -2998,6 +3011,7 @@ function clearLogo(){
 }
 
 function buildResidentSettings(){
+  normalizeResidentsOrder();
   const list=db.residents;
   const items=list.map((r,i)=>{
     const onDays=(r.sched||[]).filter(v=>v===1).length;
@@ -3051,7 +3065,7 @@ function delResidentByName(name){
 function openAddResOv(){
   const dayIdx = curDate.getDate()-1;
   const todayNames = new Set((db.residents||[]).filter(r=>r.sched&&r.sched[dayIdx]===1).map(r=>r.name));
-  const notToday = (db.residents||[]).filter(r=>!todayNames.has(r.name));
+  const notToday = (db.residents||[]).filter(r=>!todayNames.has(r.name)).sort(compareResidentsStable);
   const sel = document.getElementById('addResSelect');
   if(notToday.length>0){
     sel.innerHTML = '<option value="">-- 選択してください --</option>'
@@ -3555,7 +3569,7 @@ function migrateFromOldApp(){
 
 // ========== 印刷機能 ==========
 function buildPrintSettings(){
-  const resOpts=db.residents.map(r=>`<option value="${r.name}">${r.name}</option>`).join('');
+  const resOpts=[...db.residents].sort(compareResidentsStable).map(r=>`<option value="${r.name}">${r.name}</option>`).join('');
   const today=new Date().toISOString().slice(0,10);
   const monthFirst=today.slice(0,8)+'01';
   return `<div class="settings-panel active">
@@ -3597,7 +3611,7 @@ function printVitalRange(){
   const resName=document.getElementById('printVitalRes').value;
   if(!from||!to){ alert('期間を入力してください'); return; }
   const dates=getDatesInRange(from,to);
-  const targets=resName==='__all__'?db.residents:db.residents.filter(r=>r.name===resName);
+  const targets=resName==='__all__'?[...db.residents].sort(compareResidentsStable):db.residents.filter(r=>r.name===resName);
   let rows='';
   targets.forEach(res=>{
     dates.forEach(dk=>{
@@ -3629,7 +3643,7 @@ function printCareRange(){
   if(!from||!to){ alert('期間を入力してください'); return; }
   const dates=getDatesInRange(from,to);
   let html=`<div class="print-title">${FAC.name} ケア記録サマリー ${from} ～ ${to}</div>`;
-  db.residents.forEach(res=>{
+  [...db.residents].sort(compareResidentsStable).forEach(res=>{
     const rows=[];
     dates.forEach(dk=>{
       const rec=db.records[dk]&&db.records[dk][res.name];
