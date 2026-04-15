@@ -1,0 +1,528 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>介護記録 Sync Core</title>
+<style>
+:root{
+  --bg:#f6f6f4; --card:#fff; --line:#d9d9d4; --text:#1e1e1e; --muted:#666;
+  --brand:#185fa5; --ok:#1b7f3a; --warn:#b36b00; --ng:#a32020;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Meiryo",sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:14px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px;margin-bottom:12px}
+h1{font-size:20px;margin:0 0 8px}
+h2{font-size:16px;margin:0 0 8px}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.col{display:flex;flex-direction:column;gap:4px;min-width:180px;flex:1}
+label{font-size:12px;color:var(--muted)}
+input,textarea,select,button{font:inherit}
+input,select,textarea{padding:8px;border:1px solid var(--line);border-radius:8px;background:#fff}
+textarea{min-height:80px;resize:vertical}
+button{padding:8px 12px;border-radius:8px;border:1px solid var(--line);background:#fff;cursor:pointer}
+button.primary{background:var(--brand);color:#fff;border-color:var(--brand)}
+button.ok{background:#e9f8ed;border-color:#a6d7b3;color:var(--ok)}
+button.warn{background:#fff7e9;border-color:#ebd19e;color:var(--warn)}
+button.ng{background:#ffecec;border-color:#efb2b2;color:var(--ng)}
+.status{font-weight:700}
+.ok{color:var(--ok)} .warn{color:var(--warn)} .ng{color:var(--ng)}
+table{width:100%;border-collapse:collapse}
+th,td{border-bottom:1px solid var(--line);padding:8px;text-align:left;font-size:14px}
+.small{font-size:12px;color:var(--muted)}
+.pill{display:inline-block;padding:2px 8px;border-radius:999px;border:1px solid var(--line);font-size:12px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="card">
+    <h1>Sync Core（検証用）</h1>
+    <div class="small">既存アプリと分離した最小同期版です。まず同期の安定性だけを検証します。</div>
+  </div>
+
+  <div class="card">
+    <h2>1) 同期設定</h2>
+    <div class="row">
+      <div class="col" style="min-width:100%">
+        <label>GAS Webアプリ URL</label>
+        <input id="gasUrl" type="url" placeholder="https://script.google.com/macros/s/.../exec">
+      </div>
+      <div class="col">
+        <label>同期トークン（SYNC_TOKEN）</label>
+        <input id="gasToken" type="password" placeholder="token">
+      </div>
+      <div class="col">
+        <label>シート名（検証用）</label>
+        <input id="sheetName" type="text" value="西_core">
+      </div>
+      <div class="col">
+        <label>施設ID（表示のみ）</label>
+        <select id="facility">
+          <option value="nishi">nishi（西）</option>
+          <option value="minami">minami（南）</option>
+        </select>
+      </div>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <button class="primary" onclick="saveConfig()">設定を保存</button>
+      <button class="warn" onclick="testConnection()">接続テスト</button>
+      <button onclick="reloadConfig()">再読込</button>
+      <span id="cfgState" class="pill">未確認</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>2) データ入力（最小）</h2>
+    <div class="row">
+      <div class="col">
+        <label>日付</label>
+        <input id="workDate" type="date">
+      </div>
+      <div class="col">
+        <label>利用者</label>
+        <select id="residentSel"></select>
+      </div>
+      <div class="col">
+        <label>新規利用者追加</label>
+        <div class="row">
+          <input id="newResident" type="text" placeholder="例: 大野 ヒロコ">
+          <button onclick="addResident()">追加</button>
+        </div>
+      </div>
+    </div>
+    <div class="col" style="margin-top:8px">
+      <label>メモ（このSync Coreでは1日1利用者1メモ）</label>
+      <textarea id="noteText" placeholder="同期検証用メモ"></textarea>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <button class="primary" onclick="saveLocalNote()">ローカル保存</button>
+      <span class="small">未同期変更: <b id="dirtyCount">0</b></span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>3) 同期操作</h2>
+    <div class="row">
+      <button class="warn" onclick="syncPull()">Pull（取得のみ）</button>
+      <button class="ok" onclick="syncPush()">Push（送信）</button>
+      <button class="primary" onclick="syncNow()">双方向同期</button>
+      <button onclick="showDiag()">診断</button>
+    </div>
+    <div style="margin-top:8px" class="status" id="syncStatus">待機中</div>
+    <div class="small" id="syncSub">-</div>
+  </div>
+
+  <div class="card">
+    <h2>4) ローカル確認</h2>
+    <table>
+      <thead><tr><th>利用者</th><th>日付</th><th>更新時刻</th><th>メモ</th></tr></thead>
+      <tbody id="previewBody"></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+'use strict';
+
+const CORE_MARKER = 'KAIGO_SYNC_CORE_V1';
+const SEC_META = 'META';
+const SEC_RES = 'RESIDENTS';
+const SEC_NOT = 'NOTES';
+
+const K_CFG = 'kaigo_sync_core_cfg_v1';
+const K_DB = 'kaigo_sync_core_db_v1';
+const K_DIRTY = 'kaigo_sync_core_dirty_v1';
+const K_SNAP = 'kaigo_sync_core_cfg_snap_v1';
+
+let db = { residents: [], notes: {}, updatedAt: 0 };
+let syncDirty = false;
+
+function nowTs(){ return Date.now(); }
+function isoDate(d){ return (d||new Date()).toISOString().slice(0,10); }
+function esc(s){ return String(s || '').replace(/[&<>"]/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m])); }
+function deepClone(o){ return JSON.parse(JSON.stringify(o)); }
+
+function setStatus(main, cls, sub){
+  const el = document.getElementById('syncStatus');
+  el.className = 'status ' + (cls || '');
+  el.textContent = main;
+  document.getElementById('syncSub').textContent = sub || '-';
+}
+
+function getCfg(){
+  const raw = localStorage.getItem(K_CFG);
+  let cfg = {};
+  if(raw){ try{ cfg = JSON.parse(raw); }catch(_){ cfg = {}; } }
+  if(!cfg.sheetName) cfg.sheetName = '西_core';
+  if(!cfg.facility) cfg.facility = 'nishi';
+  return cfg;
+}
+
+function setCfg(cfg){
+  localStorage.setItem(K_CFG, JSON.stringify(cfg));
+  localStorage.setItem(K_SNAP, JSON.stringify(cfg));
+}
+
+function repairCfgIfNeeded(){
+  const cfg = getCfg();
+  if(cfg.url && cfg.token) return cfg;
+  const snapRaw = localStorage.getItem(K_SNAP);
+  if(!snapRaw) return cfg;
+  try{
+    const snap = JSON.parse(snapRaw) || {};
+    const merged = Object.assign({}, snap, cfg);
+    if(!cfg.url && snap.url) merged.url = snap.url;
+    if(!cfg.token && snap.token) merged.token = snap.token;
+    if(merged.url || merged.token){
+      localStorage.setItem(K_CFG, JSON.stringify(merged));
+      return merged;
+    }
+  }catch(_){}
+  return cfg;
+}
+
+function loadDb(){
+  const raw = localStorage.getItem(K_DB);
+  if(raw){
+    try{ db = JSON.parse(raw); }catch(_){ db = { residents: [], notes: {}, updatedAt: 0 }; }
+  }
+  if(!db.residents) db.residents = [];
+  if(!db.notes) db.notes = {};
+  syncDirty = localStorage.getItem(K_DIRTY) === '1';
+}
+
+function saveDb(markDirty){
+  localStorage.setItem(K_DB, JSON.stringify(db));
+  if(markDirty){
+    syncDirty = true;
+    localStorage.setItem(K_DIRTY, '1');
+  }
+  render();
+}
+
+function markSynced(){
+  syncDirty = false;
+  localStorage.removeItem(K_DIRTY);
+  render();
+}
+
+function updateDirtyCount(){
+  document.getElementById('dirtyCount').textContent = syncDirty ? '1+' : '0';
+}
+
+function upsertResident(name){
+  const n = String(name || '').trim();
+  if(!n) return null;
+  let r = db.residents.find(x => x.name === n);
+  if(!r){
+    r = { id: 'r_' + nowTs().toString(36), name: n, updatedAt: nowTs() };
+    db.residents.push(r);
+  }else{
+    r.updatedAt = nowTs();
+  }
+  return r;
+}
+
+function setNote(dateKey, residentId, text){
+  if(!db.notes[dateKey]) db.notes[dateKey] = {};
+  db.notes[dateKey][residentId] = { text: text || '', updatedAt: nowTs() };
+}
+
+function getNote(dateKey, residentId){
+  return db.notes[dateKey] && db.notes[dateKey][residentId] ? db.notes[dateKey][residentId] : { text:'', updatedAt:0 };
+}
+
+function rowsFromDb(inDb, cfg){
+  const rows = [];
+  rows.push([CORE_MARKER]);
+  rows.push([SEC_META]);
+  rows.push(['key','value']);
+  rows.push(['facility', cfg.facility || 'nishi']);
+  rows.push(['updatedAt', String(nowTs())]);
+  rows.push([]);
+  rows.push([SEC_RES]);
+  rows.push(['id','name','updatedAt']);
+  inDb.residents.forEach(r => rows.push([r.id || '', r.name || '', Number(r.updatedAt || 0)]));
+  rows.push([]);
+  rows.push([SEC_NOT]);
+  rows.push(['date','residentId','text','updatedAt']);
+  Object.keys(inDb.notes || {}).sort().forEach(dk => {
+    const day = inDb.notes[dk] || {};
+    Object.keys(day).sort().forEach(rid => {
+      const n = day[rid] || {};
+      rows.push([dk, rid, n.text || '', Number(n.updatedAt || 0)]);
+    });
+  });
+  return rows;
+}
+
+function dbFromRows(rows){
+  const out = { residents: [], notes: {}, updatedAt: 0 };
+  if(!rows || !rows.length) return out;
+  if(String((rows[0] && rows[0][0]) || '').trim() !== CORE_MARKER) return out;
+  let i = 0;
+  while(i < rows.length){
+    const tag = String((rows[i] && rows[i][0]) || '').trim();
+    if(tag === SEC_RES){
+      i += 2;
+      while(i < rows.length){
+        const r = rows[i];
+        if(!r || !r.length || String(r[0] || '').trim() === ''){ i++; continue; }
+        const c0 = String(r[0] || '').trim();
+        if(c0 === SEC_NOT || c0 === SEC_META) break;
+        out.residents.push({ id: String(r[0] || ''), name: String(r[1] || ''), updatedAt: Number(r[2] || 0) || 0 });
+        i++;
+      }
+      continue;
+    }
+    if(tag === SEC_NOT){
+      i += 2;
+      while(i < rows.length){
+        const r = rows[i];
+        if(!r || !r.length){ i++; continue; }
+        const dk = String(r[0] || '').trim();
+        if(!dk){ i++; continue; }
+        if(dk === SEC_RES || dk === SEC_META) break;
+        const rid = String(r[1] || '').trim();
+        if(rid){
+          if(!out.notes[dk]) out.notes[dk] = {};
+          out.notes[dk][rid] = { text: String(r[2] || ''), updatedAt: Number(r[3] || 0) || 0 };
+        }
+        i++;
+      }
+      continue;
+    }
+    i++;
+  }
+  return out;
+}
+
+function mergeDb(localDb, remoteDb){
+  const out = { residents: [], notes: {}, updatedAt: nowTs() };
+  const rm = new Map();
+  (localDb.residents || []).forEach(r => rm.set(r.id, deepClone(r)));
+  (remoteDb.residents || []).forEach(r => {
+    const old = rm.get(r.id);
+    if(!old || Number(r.updatedAt || 0) > Number(old.updatedAt || 0)) rm.set(r.id, deepClone(r));
+  });
+  out.residents = [...rm.values()].filter(x => x && x.id && x.name)
+    .sort((a,b)=>(a.name||'').localeCompare(b.name||'','ja'));
+
+  const dates = new Set([...Object.keys(localDb.notes || {}), ...Object.keys(remoteDb.notes || {})]);
+  dates.forEach(dk => {
+    out.notes[dk] = {};
+    const localDay = (localDb.notes || {})[dk] || {};
+    const remoteDay = (remoteDb.notes || {})[dk] || {};
+    const rids = new Set([...Object.keys(localDay), ...Object.keys(remoteDay)]);
+    rids.forEach(rid => {
+      const l = localDay[rid];
+      const r = remoteDay[rid];
+      if(!l && !r) return;
+      if(!l) out.notes[dk][rid] = deepClone(r);
+      else if(!r) out.notes[dk][rid] = deepClone(l);
+      else out.notes[dk][rid] = Number(r.updatedAt || 0) > Number(l.updatedAt || 0) ? deepClone(r) : deepClone(l);
+    });
+    if(!Object.keys(out.notes[dk]).length) delete out.notes[dk];
+  });
+  return out;
+}
+
+function gasPost(cfg, payload){
+  if(!cfg.url || !cfg.token) return Promise.reject(new Error('URL またはトークン未設定'));
+  return fetch(cfg.url, {
+    method: 'POST',
+    headers: { 'Content-Type':'text/plain' },
+    body: JSON.stringify(Object.assign({}, payload, { token: cfg.token }))
+  })
+  .then(r => r.ok ? r.json() : r.text().then(t => { throw new Error('HTTP '+r.status+' '+t.slice(0,120)); }))
+  .then(j => {
+    if(!j.ok) throw new Error(j.error || 'GAS応答エラー');
+    return j;
+  });
+}
+
+function getActiveCfg(){
+  return {
+    url: document.getElementById('gasUrl').value.trim(),
+    token: document.getElementById('gasToken').value.trim(),
+    sheetName: (document.getElementById('sheetName').value.trim() || '西_core'),
+    facility: document.getElementById('facility').value || 'nishi'
+  };
+}
+
+function saveConfig(){
+  const cfg = getActiveCfg();
+  const old = getCfg();
+  if(!cfg.token && old.token) cfg.token = old.token;
+  setCfg(cfg);
+  if(cfg.token) document.getElementById('gasToken').value = '';
+  document.getElementById('cfgState').textContent = (cfg.url && cfg.token) ? '保存済み' : '未保存';
+  setStatus('設定保存済み', (cfg.url && cfg.token) ? 'ok' : 'warn', 'トークン欄は空表示でも保存済みの場合があります');
+}
+
+function reloadConfig(){
+  const cfg = repairCfgIfNeeded();
+  document.getElementById('gasUrl').value = cfg.url || '';
+  document.getElementById('gasToken').value = '';
+  document.getElementById('sheetName').value = cfg.sheetName || '西_core';
+  document.getElementById('facility').value = cfg.facility || 'nishi';
+  document.getElementById('cfgState').textContent = (cfg.url && cfg.token) ? '保存済み' : '未保存';
+}
+
+function testConnection(){
+  const cfg = getActiveCfg();
+  const old = getCfg();
+  if(!cfg.token && old.token) cfg.token = old.token;
+  if(!cfg.url || !cfg.token){ setStatus('未設定', 'warn', 'URL とトークンを保存してください'); return; }
+  setStatus('接続テスト中...', 'warn', cfg.sheetName);
+  gasPost(cfg, { action:'ping', sheetName: cfg.sheetName })
+    .then(() => {
+      setCfg(cfg);
+      document.getElementById('cfgState').textContent = '保存済み';
+      setStatus('接続成功', 'ok', 'sheet=' + cfg.sheetName);
+    })
+    .catch(e => setStatus('接続失敗', 'ng', e.message));
+}
+
+function syncPull(){
+  const cfg = repairCfgIfNeeded();
+  if(!cfg.url || !cfg.token){ setStatus('未設定', 'warn', 'URL/トークン未保存'); return; }
+  setStatus('Pull中...', 'warn', cfg.sheetName);
+  gasPost(cfg, { action:'pull', sheetName: cfg.sheetName })
+    .then(j => {
+      const remote = dbFromRows(j.rows || []);
+      db = mergeDb(db, remote);
+      saveDb(false);
+      setStatus('Pull完了', 'ok', 'remote rows=' + ((j.rows || []).length));
+    })
+    .catch(e => setStatus('Pull失敗', 'ng', e.message));
+}
+
+function syncPush(){
+  const cfg = repairCfgIfNeeded();
+  if(!cfg.url || !cfg.token){ setStatus('未設定', 'warn', 'URL/トークン未保存'); return; }
+  setStatus('Push中...', 'warn', cfg.sheetName);
+  gasPost(cfg, { action:'pull', sheetName: cfg.sheetName })
+    .then(j => {
+      const remote = dbFromRows(j.rows || []);
+      db = mergeDb(db, remote);
+      const rows = rowsFromDb(db, cfg);
+      return gasPost(cfg, { action:'push', sheetName: cfg.sheetName, rows });
+    })
+    .then(() => {
+      saveDb(false);
+      markSynced();
+      setStatus('Push完了', 'ok', '反映済み');
+    })
+    .catch(e => setStatus('Push失敗', 'ng', e.message));
+}
+
+function syncNow(){ syncPush(); }
+
+function showDiag(){
+  const cfg = repairCfgIfNeeded();
+  if(!cfg.url || !cfg.token){ alert('未設定です'); return; }
+  gasPost(cfg, { action:'pull', sheetName: cfg.sheetName })
+    .then(j => {
+      const rows = j.rows || [];
+      const a1 = String((rows[0] && rows[0][0]) || '').trim() || '(空)';
+      const remote = dbFromRows(rows);
+      const localDates = Object.keys(db.notes || {}).length;
+      const remoteDates = Object.keys(remote.notes || {}).length;
+      alert(
+        'シート: ' + cfg.sheetName +
+        '\nA1: ' + a1 +
+        '\n利用者(シート): ' + (remote.residents || []).length +
+        '\n記録日(シート): ' + remoteDates +
+        '\n利用者(ローカル): ' + (db.residents || []).length +
+        '\n記録日(ローカル): ' + localDates
+      );
+    })
+    .catch(e => alert('診断失敗: ' + e.message));
+}
+
+function addResident(){
+  const el = document.getElementById('newResident');
+  const name = el.value.trim();
+  if(!name) return;
+  upsertResident(name);
+  el.value = '';
+  saveDb(true);
+  render();
+}
+
+function saveLocalNote(){
+  const dk = document.getElementById('workDate').value || isoDate();
+  const rid = document.getElementById('residentSel').value;
+  if(!rid){ alert('利用者を選択してください'); return; }
+  const text = document.getElementById('noteText').value;
+  setNote(dk, rid, text);
+  saveDb(true);
+  setStatus('ローカル保存', 'ok', dk + ' / ' + rid);
+}
+
+function onDateOrResidentChange(){
+  const dk = document.getElementById('workDate').value || isoDate();
+  const rid = document.getElementById('residentSel').value;
+  const n = getNote(dk, rid);
+  document.getElementById('noteText').value = n.text || '';
+}
+
+function renderResidentSelect(){
+  const sel = document.getElementById('residentSel');
+  const cur = sel.value;
+  const list = (db.residents || []).slice().sort((a,b)=>(a.name||'').localeCompare(b.name||'','ja'));
+  sel.innerHTML = list.map(r => '<option value="'+esc(r.id)+'">'+esc(r.name)+'</option>').join('');
+  if(cur && list.some(r => r.id === cur)) sel.value = cur;
+  else if(list[0]) sel.value = list[0].id;
+}
+
+function renderPreview(){
+  const rows = [];
+  const ridToName = new Map((db.residents || []).map(r => [r.id, r.name]));
+  Object.keys(db.notes || {}).sort().forEach(dk => {
+    const day = db.notes[dk] || {};
+    Object.keys(day).forEach(rid => {
+      const n = day[rid] || {};
+      if(!n.text) return;
+      rows.push({
+        name: ridToName.get(rid) || rid,
+        date: dk,
+        updatedAt: Number(n.updatedAt || 0),
+        text: n.text
+      });
+    });
+  });
+  rows.sort((a,b)=> b.updatedAt - a.updatedAt);
+  const body = document.getElementById('previewBody');
+  if(!rows.length){
+    body.innerHTML = '<tr><td colspan="4" class="small">データなし</td></tr>';
+    return;
+  }
+  body.innerHTML = rows.slice(0,100).map(r => (
+    '<tr><td>'+esc(r.name)+'</td><td>'+esc(r.date)+'</td><td>'+new Date(r.updatedAt).toLocaleString()+'</td><td>'+esc(r.text)+'</td></tr>'
+  )).join('');
+}
+
+function render(){
+  updateDirtyCount();
+  renderResidentSelect();
+  onDateOrResidentChange();
+  renderPreview();
+}
+
+function init(){
+  document.getElementById('workDate').value = isoDate();
+  loadDb();
+  reloadConfig();
+  render();
+  setStatus('準備完了', 'ok', 'まず接続テスト→ローカル保存→双方向同期の順で確認してください');
+}
+
+document.getElementById('workDate').addEventListener('change', onDateOrResidentChange);
+document.getElementById('residentSel').addEventListener('change', onDateOrResidentChange);
+document.addEventListener('DOMContentLoaded', init);
+</script>
+</body>
+</html>
