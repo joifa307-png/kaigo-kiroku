@@ -135,14 +135,18 @@ const K_CFG = 'kaigo_sync_core_cfg_v1';
 const K_DB = 'kaigo_sync_core_db_v1';
 const K_DIRTY = 'kaigo_sync_core_dirty_v1';
 const K_SNAP = 'kaigo_sync_core_cfg_snap_v1';
+const AUTO_PULL_MS = 20000;
 
 let db = { residents: [], notes: {}, updatedAt: 0 };
 let syncDirty = false;
+let autoPullTimer = null;
 
 function nowTs(){ return Date.now(); }
 function isoDate(d){ return (d||new Date()).toISOString().slice(0,10); }
 function esc(s){ return String(s || '').replace(/[&<>"]/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m])); }
 function deepClone(o){ return JSON.parse(JSON.stringify(o)); }
+function normalizeResidentName(name){ return String(name || '').trim().replace(/\s+/g, ' '); }
+function residentIdFromName(name){ return 'rname:' + encodeURIComponent(normalizeResidentName(name)); }
 
 function setStatus(main, cls, sub){
   const el = document.getElementById('syncStatus');
@@ -190,6 +194,7 @@ function loadDb(){
   }
   if(!db.residents) db.residents = [];
   if(!db.notes) db.notes = {};
+  db = normalizeDbResidentsAndNotes(db);
   syncDirty = localStorage.getItem(K_DIRTY) === '1';
 }
 
@@ -213,13 +218,16 @@ function updateDirtyCount(){
 }
 
 function upsertResident(name){
-  const n = String(name || '').trim();
+  const n = normalizeResidentName(name);
   if(!n) return null;
-  let r = db.residents.find(x => x.name === n);
+  const cid = residentIdFromName(n);
+  let r = db.residents.find(x => x.id === cid || normalizeResidentName(x.name) === n);
   if(!r){
-    r = { id: 'r_' + nowTs().toString(36), name: n, updatedAt: nowTs() };
+    r = { id: cid, name: n, updatedAt: nowTs() };
     db.residents.push(r);
   }else{
+    r.id = cid;
+    r.name = n;
     r.updatedAt = nowTs();
   }
   return r;
@@ -299,6 +307,56 @@ function dbFromRows(rows){
   return out;
 }
 
+function normalizeDbResidentsAndNotes(inDb){
+  const src = deepClone(inDb || { residents: [], notes: {} });
+  const canonByName = new Map();
+  const idToCanon = new Map();
+
+  (src.residents || []).forEach(r => {
+    const n = normalizeResidentName(r && r.name);
+    if(!n) return;
+    const cid = residentIdFromName(n);
+    const cur = canonByName.get(n);
+    const cand = { id: cid, name: n, updatedAt: Number(r && r.updatedAt || 0) };
+    if(!cur || cand.updatedAt > cur.updatedAt) canonByName.set(n, cand);
+    if(r && r.id) idToCanon.set(String(r.id), cid);
+  });
+
+  const residents = [...canonByName.values()].sort((a,b)=>(a.name||'').localeCompare(b.name||'','ja'));
+  const canonIds = new Set(residents.map(r => r.id));
+  const notes = {};
+
+  Object.keys(src.notes || {}).forEach(dk => {
+    const day = src.notes[dk] || {};
+    const outDay = {};
+    Object.keys(day).forEach(oldRid => {
+      const rec = day[oldRid] || {};
+      let cid = idToCanon.get(String(oldRid)) || String(oldRid || '');
+      if(!canonIds.has(cid)){
+        const guessed = String(cid || '').startsWith('rname:') ? decodeURIComponent(String(cid).slice(6)) : '';
+        const gname = normalizeResidentName(guessed);
+        if(gname){
+          cid = residentIdFromName(gname);
+          if(!canonIds.has(cid)){
+            residents.push({ id: cid, name: gname, updatedAt: Number(rec.updatedAt || 0) });
+            canonIds.add(cid);
+          }
+        } else {
+          return;
+        }
+      }
+      const old = outDay[cid];
+      if(!old || Number(rec.updatedAt || 0) > Number(old.updatedAt || 0)){
+        outDay[cid] = { text: String(rec.text || ''), updatedAt: Number(rec.updatedAt || 0) };
+      }
+    });
+    if(Object.keys(outDay).length) notes[dk] = outDay;
+  });
+
+  residents.sort((a,b)=>(a.name||'').localeCompare(b.name||'','ja'));
+  return { residents, notes, updatedAt: Number(src.updatedAt || 0) };
+}
+
 function mergeDb(localDb, remoteDb){
   const out = { residents: [], notes: {}, updatedAt: nowTs() };
   const rm = new Map();
@@ -326,7 +384,7 @@ function mergeDb(localDb, remoteDb){
     });
     if(!Object.keys(out.notes[dk]).length) delete out.notes[dk];
   });
-  return out;
+  return normalizeDbResidentsAndNotes(out);
 }
 
 function gasPost(cfg, payload){
@@ -395,18 +453,19 @@ function testConnection(){
     });
 }
 
-function syncPull(){
+function syncPull(opts){
+  const silent = !!(opts && opts.silent);
   const cfg = repairCfgIfNeeded();
-  if(!cfg.url || !cfg.token){ setStatus('未設定', 'warn', 'URL/トークン未保存'); return; }
-  setStatus('Pull中...', 'warn', cfg.sheetName);
+  if(!cfg.url || !cfg.token){ if(!silent) setStatus('未設定', 'warn', 'URL/トークン未保存'); return; }
+  if(!silent) setStatus('Pull中...', 'warn', cfg.sheetName);
   gasPost(cfg, { action:'pull', sheetName: cfg.sheetName })
     .then(j => {
       const remote = dbFromRows(j.rows || []);
       db = mergeDb(db, remote);
       saveDb(false);
-      setStatus('Pull完了', 'ok', 'remote rows=' + ((j.rows || []).length));
+      if(!silent) setStatus('Pull完了', 'ok', 'remote rows=' + ((j.rows || []).length));
     })
-    .catch(e => setStatus('Pull失敗', 'ng', e.message));
+    .catch(e => { if(!silent) setStatus('Pull失敗', 'ng', e.message); });
 }
 
 function syncPush(){
@@ -417,10 +476,16 @@ function syncPush(){
     .then(j => {
       const remote = dbFromRows(j.rows || []);
       db = mergeDb(db, remote);
+      if(!syncDirty){
+        saveDb(false);
+        setStatus('同期不要', 'ok', 'ローカル変更なし');
+        return Promise.resolve(null);
+      }
       const rows = rowsFromDb(db, cfg);
       return gasPost(cfg, { action:'push', sheetName: cfg.sheetName, rows });
     })
-    .then(() => {
+    .then((res) => {
+      if(res === null) return;
       saveDb(false);
       markSynced();
       setStatus('Push完了', 'ok', '反映済み');
@@ -429,6 +494,14 @@ function syncPush(){
 }
 
 function syncNow(){ syncPush(); }
+
+function startAutoPull(){
+  if(autoPullTimer) clearInterval(autoPullTimer);
+  autoPullTimer = setInterval(() => syncPull({silent:true}), AUTO_PULL_MS);
+  document.addEventListener('visibilitychange', () => {
+    if(document.visibilityState === 'visible') syncPull({silent:true});
+  }, { passive:true });
+}
 
 function showDiag(){
   const cfg = repairCfgIfNeeded();
@@ -545,6 +618,7 @@ function init(){
   loadDb();
   reloadConfig();
   render();
+  startAutoPull();
   setStatus('準備完了', 'ok', 'まず接続テスト→ローカル保存→双方向同期の順で確認してください');
 }
 
