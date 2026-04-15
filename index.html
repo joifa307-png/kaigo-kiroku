@@ -1996,10 +1996,13 @@ function normalizeTempValue(v){
     .replace(/[。．]/g,'.')
     .replace(/[^\d.]/g,'');
   if(!s) return '';
-  // 0.365 のような誤値は 36.5 として扱う（現場入力ルール: 365 -> 36.5）
-  if(/^0\.\d{3}$/.test(s)){
+  // 0.xx / 0.xxx のような誤値は温度入力の省略記法として補正
+  // 例: 0.37 -> 37.0 / 0.365 -> 36.5
+  if(/^0\.\d{2,4}$/.test(s)){
     const d=s.slice(2);
-    s=d.slice(0,2)+'.'+d.slice(2);
+    if(d.length===2) s=d+'.0';
+    else if(d.length===3) s=d.slice(0,2)+'.'+d.slice(2);
+    else s=d.slice(0,3)+'.'+d.slice(3);
   }
   if(/^\d{3,4}$/.test(s)) s=s.slice(0,-1)+'.'+s.slice(-1);
   if(/^\.\d{3,}$/.test(s)){
