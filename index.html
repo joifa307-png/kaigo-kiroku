@@ -1074,9 +1074,27 @@ function applyRecordRow(dbOut, row){
   }
 }
 
+/** A1 がずれていると sheetToDb が空になり「取得は成功したが反映されない」になる */
+function sheetTopCell(rows){
+  if(!rows||!rows.length||!rows[0]||!rows[0].length) return '';
+  const v=rows[0][0];
+  if(v==null||v===undefined) return '';
+  return String(v).trim();
+}
+function sheetHasValidSyncMarker(rows){
+  return sheetTopCell(rows)===SYNC_MARKER;
+}
+/** マーカー不正だが「完全な空シート」なら false（従来どおり sheetToDb→空マージでよい） */
+function sheetLooksLikeCorruptMarker(rows){
+  if(!rows||!rows.length||sheetHasValidSyncMarker(rows)) return false;
+  const t=sheetTopCell(rows);
+  if(rows.length===1 && !t) return false;
+  return true;
+}
+
 function sheetToDb(rows){
   const empty=()=>({ residents:[], records:{}, supplies:[], settings:cloneDeep(DEFAULT_SETTINGS), _setU:{} });
-  if(!rows||!rows.length||String(rows[0][0])!==SYNC_MARKER) return empty();
+  if(!rows||!rows.length||sheetTopCell(rows)!==SYNC_MARKER) return empty();
 
   const dbOut=empty();
   let i=1;
@@ -1308,7 +1326,14 @@ function syncPullOnly(){
   setSyncStatus('取得中...','#185FA5');
   return gasPost({action:'pull', sheetName:FAC.sheetName})
     .then(j=>{
-      const remote=sheetToDb(j.rows||[]);
+      const raw=j.rows||[];
+      if(sheetLooksLikeCorruptMarker(raw)){
+        const got=sheetTopCell(raw)||'(空)';
+        setSyncStatus('取得:A1不正(反映なし)','orange');
+        console.warn('syncPullOnly: シートA1は「'+SYNC_MARKER+'」である必要があります。実際:', got);
+        return;
+      }
+      const remote=sheetToDb(raw);
       db=mergePulledDb(db, remote);
       persistLocalQuiet();
       renderMain();
@@ -1327,7 +1352,12 @@ function runGasPushCycle(){
   setSyncStatus('同期中...','#185FA5');
   return gasPost({action:'pull', sheetName:FAC.sheetName})
     .then(j=>{
-      const remote=sheetToDb(j.rows||[]);
+      const raw=j.rows||[];
+      if(sheetLooksLikeCorruptMarker(raw)){
+        setSyncStatus('同期:A1不正(中断)','orange');
+        return Promise.reject(Object.assign(new Error('bad_sheet_marker'),{silent:true}));
+      }
+      const remote=sheetToDb(raw);
       db=mergePulledDb(db, remote);
       const rows=dbToSheet(db);
       return gasPost({action:'push', sheetName:FAC.sheetName, rows});
@@ -1341,6 +1371,7 @@ function runGasPushCycle(){
       setSyncStatus(`反映済 ${n.getHours()}:${pad(n.getMinutes())}`,'green');
     })
     .catch(e=>{
+      if(e&&e.silent) return;
       console.error(e);
       setSyncStatus('同期失敗: '+(e.message||''),'orange');
     });
@@ -1381,11 +1412,14 @@ function diagSync(){
   gasPost({action:'ping', sheetName:FAC.sheetName})
     .then(()=>gasPost({action:'pull', sheetName:FAC.sheetName}))
     .then(j=>{
-      const remote=sheetToDb(j.rows||[]);
+      const raw=j.rows||[];
+      const a1=sheetTopCell(raw)||'(空)';
+      const markerOk=!sheetLooksLikeCorruptMarker(raw);
+      const remote=sheetToDb(raw);
       const nRec=Object.keys(remote.records||{}).length;
       const nRes=(remote.residents||[]).length;
       const nSup=(remote.supplies||[]).length;
-      alert('【スプレッドシート】シート: '+FAC.sheetName+'\n利用者: '+nRes+'名\n記録のある日: '+nRec+'日\n消耗品行: '+nSup+'\n\n【ローカル】\n利用者: '+(db.residents||[]).length+'名\n記録日数: '+Object.keys(db.records||{}).length+'日');
+      alert('【スプレッドシート】シート: '+FAC.sheetName+'\nA1マーカー: '+(markerOk?'OK':'NG')+' （実値:「'+a1+'」／正しくは「'+SYNC_MARKER+'」）\n利用者: '+nRes+'名\n記録のある日: '+nRec+'日\n消耗品行: '+nSup+'\n\n【ローカル】\n利用者: '+(db.residents||[]).length+'名\n記録日数: '+Object.keys(db.records||{}).length+'日');
     })
     .catch(e=>alert('診断エラー: '+e.message));
 }
