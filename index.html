@@ -350,7 +350,6 @@ input,select,textarea{font-family:inherit;font-size:30px;}
     <button class="hdr-btn no-print" onclick="openPrint()" style="background:#E1F5EE;color:#0F6E56;border-color:#0F6E56;font-weight:700;">連絡帳</button>
     <button class="hdr-btn no-print" onclick="saveMonthlyBackup()" style="background:var(--blue2);color:var(--blue);border-color:var(--blue);font-weight:700;">月次保存</button>
     <button class="hdr-btn no-print" onclick="syncNow()">🔄</button>
-    <button class="hdr-btn no-print" onclick="diagSync()" style="background:#FFF3CD;color:#856404;border-color:#856404;font-size:13px;">診断</button>
     <button class="hdr-btn no-print" onclick="openSettings()">⚙️</button>
   </div>
   <div class="main-scroll">
@@ -715,6 +714,7 @@ function loadDB(){
   normalizeVitalTempsInRecords(db.records);
   if(!db.supplies) db.supplies=[];
   if(!db.settings) db.settings={};
+  restoreSettingsSnapshotIfNeeded();
   // settingsのデフォルト補完（未定義 or 空配列の場合にデフォルトを適用）
   Object.keys(DEFAULT_SETTINGS).forEach(k=>{
     const cur = db.settings[k];
@@ -738,14 +738,56 @@ function loadDB(){
     });
   }
   if(!db._setU) db._setU={};
+  initializeSetUForExistingSettings();
+  saveSettingsSnapshot();
 }
 
 function saveDB(){
   if(!FAC) return;
+  initializeSetUForExistingSettings();
   localStorage.setItem(FAC.storageKey, JSON.stringify(db));
+  saveSettingsSnapshot();
   syncDirty = true;
   localStorage.setItem(FAC.storageKey+'_dirty','1'); // ページ再読込後も未送信フラグを保持
   if(!window._kaigoGasSaving) scheduleGasSync();
+}
+
+function settingsSnapshotKey(){
+  return FAC ? (FAC.storageKey+'_settings_snap_v1') : 'kaigo_settings_snap_v1';
+}
+function settingHasValue(v){
+  if(Array.isArray(v)) return v.length>0;
+  if(v===null||v===undefined) return false;
+  if(typeof v==='string') return v.trim()!=='';
+  return true;
+}
+function saveSettingsSnapshot(){
+  if(!FAC||!db||!db.settings) return;
+  try{
+    localStorage.setItem(settingsSnapshotKey(), JSON.stringify(db.settings));
+  }catch(_){}
+}
+function restoreSettingsSnapshotIfNeeded(){
+  if(!FAC||!db) return;
+  try{
+    const raw=localStorage.getItem(settingsSnapshotKey());
+    if(!raw) return;
+    const snap=JSON.parse(raw)||{};
+    db.settings=db.settings||{};
+    Object.keys(snap).forEach(k=>{
+      const cur=db.settings[k];
+      if(!settingHasValue(cur) && settingHasValue(snap[k])) db.settings[k]=cloneDeep(snap[k]);
+    });
+  }catch(_){}
+}
+function initializeSetUForExistingSettings(){
+  db._setU=db._setU||{};
+  const ts=Date.now();
+  Object.keys(db.settings||{}).forEach(k=>{
+    if(k==='logoB64') return;
+    if(_numU(db._setU[k])>0) return;
+    if(settingHasValue(db.settings[k])) db._setU[k]=ts;
+  });
 }
 
 function getRec(name, dateKey){
@@ -3299,6 +3341,7 @@ function buildDataSettings(){
       <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;">
         <button type="button" class="btn btn-primary btn-sm" onclick="saveGasConfig()">URL・トークンを保存</button>
         <button type="button" class="btn btn-sm" style="background:#FFF3CD;color:#856404;border:1px solid #856404;" onclick="testGasConnection()">接続テスト</button>
+        <button type="button" class="btn btn-sm" style="background:#FFF3CD;color:#856404;border:1px solid #856404;" onclick="diagSync()">診断</button>
       </div>
       <p style="font-size:13px;color:var(--text3);margin-top:10px;">シート名は「${FAC?FAC.sheetName:'西'}」（${FAC?FAC.name:'西ユニット'}）です。南ユニット利用時は「南」シートに書き込まれます。</p>
     </div>
@@ -3377,12 +3420,28 @@ function exportDB(){
 }
 function importDB(input){
   const file=input.files[0]; if(!file) return;
-  if(!confirm('現在のデータを上書きしますか？\nこの操作は元に戻せません。')){ input.value=''; return; }
+  if(!confirm('バックアップJSONを読み込みます。\n\n【安全モード】タイムスタンプが新しいデータを優先してマージします。\n（古いデータで新しい記録を上書きしません）\n\n実行しますか？')){ input.value=''; return; }
   const reader=new FileReader();
   reader.onload=e=>{
     try{
-      db=JSON.parse(e.target.result);
-      saveDB(); alert('インポート完了しました'); startApp();
+      const imported=JSON.parse(e.target.result);
+      if(!imported||typeof imported!=='object') throw new Error('JSON形式が不正です');
+      if(!imported.residents) imported.residents=[];
+      if(!imported.records) imported.records={};
+      if(!imported.supplies) imported.supplies=[];
+      if(!imported.settings) imported.settings={};
+      imported.records=normalizeRecordsMap(imported.records||{});
+      normalizeVitalTempsInRecords(imported.records);
+      imported.settings=Object.assign(cloneDeep(DEFAULT_SETTINGS), imported.settings||{});
+      imported._setU=imported._setU||{};
+      const baseTs=Date.now()-1000;
+      Object.keys(imported.settings).forEach(k=>{
+        if(k==='logoB64') return;
+        if(_numU(imported._setU[k])>0) return;
+        if(settingHasValue(imported.settings[k])) imported._setU[k]=baseTs;
+      });
+      db=mergePulledDb(db, imported);
+      saveDB(); alert('インポート完了しました（新しいデータ優先でマージ）'); startApp();
     }catch(err){ alert('読み込みエラー: '+err.message); }
   };
   reader.readAsText(file);
