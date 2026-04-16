@@ -32,6 +32,27 @@ table{width:100%;border-collapse:collapse}
 th,td{border-bottom:1px solid var(--line);padding:8px;text-align:left;font-size:14px}
 .small{font-size:12px;color:var(--muted)}
 .pill{display:inline-block;padding:2px 8px;border-radius:999px;border:1px solid var(--line);font-size:12px}
+/* 印刷テスト: 画面ではオーバーレイ、印刷時はこれだけが対象 */
+#printCoreZone{
+  display:none;position:fixed;inset:0;z-index:999999;background:#fff;color:#111;
+  padding:16px;overflow:auto;-webkit-overflow-scrolling:touch;font-size:14px;line-height:1.5;
+}
+body.print-core-open #printCoreZone{display:block}
+body.print-core-open .wrap{visibility:hidden}
+.pc-print-doc{max-width:720px;margin:0 auto}
+.pc-print-doc h1{font-size:18px;margin:0 0 12px}
+.pc-print-table{width:100%;border-collapse:collapse;margin:12px 0}
+.pc-print-table th,.pc-print-table td{border:1px solid #333;padding:6px 8px;text-align:left;font-size:13px}
+.pc-print-table th{background:#eee}
+.pc-small{font-size:11px;color:#444;word-break:break-all}
+.no-print-core{margin-top:20px;padding-top:12px;border-top:1px dashed #ccc}
+@media print{ .no-print-core{display:none!important} }
+@media print{
+  body.print-core-open .wrap{display:none!important}
+  body.print-core-open{visibility:visible!important}
+  #printCoreZone, #printCoreZone *{visibility:visible!important}
+  #printCoreZone{display:block!important;position:static!important;inset:auto!important;overflow:visible!important;padding:0}
+}
 </style>
 </head>
 <body>
@@ -121,7 +142,29 @@ th,td{border-bottom:1px solid var(--line);padding:8px;text-align:left;font-size:
       <tbody id="previewBody"></tbody>
     </table>
   </div>
+
+  <div class="card">
+    <h2>5) 印刷テスト（iPad 切り分け）</h2>
+    <p class="small" style="margin:0 0 10px">
+      本アプリ（index.html）では印刷できないが、他ページではできる／プリンターは反応するがデータが出ない、といった場合に、
+      <strong>この Sync Core 単体で <code>window.print()</code> が通るか</strong>を確認するための最小テストです。
+      テスト1はプレーンテキスト中心、テスト2は HTML 表です（本アプリの印刷プレビューに近い負荷の目安）。
+    </p>
+    <div class="row">
+      <button class="primary" type="button" onclick="printCoreTest('minimal')">テスト1: 最小（見出し＋本文）</button>
+      <button class="primary" type="button" onclick="printCoreTest('table')">テスト2: 表（ローカルメモから最大15行）</button>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <button type="button" onclick="printCoreTest('minimal', {delayMs:600})">テスト1（遅延600ms・描画待ち）</button>
+      <button type="button" onclick="printCoreTest('table', {delayMs:600})">テスト2（遅延600ms）</button>
+    </div>
+    <p class="small" style="margin-top:10px;margin-bottom:0">
+      印刷ダイアログを閉じるとオーバーレイは自動で消えます。Safari で白紙になる場合は「遅延600ms」を試してください。
+    </p>
+  </div>
 </div>
+
+<div id="printCoreZone" aria-hidden="true"></div>
 
 <script>
 'use strict';
@@ -144,6 +187,109 @@ let autoPullTimer = null;
 function nowTs(){ return Date.now(); }
 function isoDate(d){ return (d||new Date()).toISOString().slice(0,10); }
 function esc(s){ return String(s || '').replace(/[&<>"]/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m])); }
+
+/** 印刷テスト用（print ゾーン内のテキスト用） */
+function escPrint(s){ return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+function closePrintCoreOverlay(){
+  document.body.classList.remove('print-core-open');
+  const z = document.getElementById('printCoreZone');
+  if(z){
+    z.innerHTML = '';
+    z.setAttribute('aria-hidden', 'true');
+  }
+}
+
+/**
+ * Sync Core 単体の印刷経路検証。iPad で「信号は行くがデータが出ない」切り分け用。
+ * @param {'minimal'|'table'} kind
+ * @param {{delayMs?:number}} [opts]
+ */
+function printCoreTest(kind, opts){
+  const delayMs = (opts && Number(opts.delayMs)) > 0 ? Number(opts.delayMs) : 80;
+  const z = document.getElementById('printCoreZone');
+  const ua = navigator.userAgent || '';
+  const ts = new Date().toLocaleString('ja-JP', { hour12: false });
+  const loc = (typeof location !== 'undefined' && location.href) ? location.href.split('?')[0] : '';
+
+  const footerBtn =
+    '<p class="no-print-core"><button type="button" onclick="closePrintCoreOverlay()">印刷を中止してこの画面を閉じる</button></p>';
+
+  if(kind === 'minimal'){
+    z.innerHTML =
+      '<div class="pc-print-doc">' +
+      '<h1>Sync Core 印刷テスト（最小）</h1>' +
+      '<p>この文が印字できていれば、最小の HTML → 印刷パイプは有効です。</p>' +
+      '<p><strong>日時:</strong> ' + escPrint(ts) + '</p>' +
+      '<p><strong>URL:</strong> ' + escPrint(loc) + '</p>' +
+      '<p class="pc-small">UA: ' + escPrint(ua) + '</p>' +
+      '</div>' + footerBtn;
+  }else if(kind === 'table'){
+    const ridToName = new Map((db.residents || []).map(r => [r.id, r.name]));
+    const rows = [];
+    const dates = Object.keys(db.notes || {}).sort();
+    outer: for(let di = 0; di < dates.length; di++){
+      const dk = normalizeDateKey(dates[di]);
+      const day = db.notes[dates[di]] || {};
+      const rids = Object.keys(day);
+      for(let ri = 0; ri < rids.length; ri++){
+        if(rows.length >= 15) break outer;
+        const rid = rids[ri];
+        const n = day[rid] || {};
+        const name = ridToName.get(rid) || rid;
+        const tx = String(n.text || '').slice(0, 80);
+        rows.push(
+          '<tr><td>' + escPrint(dk) + '</td><td>' + escPrint(name) + '</td><td>' + escPrint(tx) + '</td></tr>'
+        );
+      }
+    }
+    if(!rows.length){
+      rows.push(
+        '<tr><td>' + escPrint(isoDate()) + '</td><td>（ダミー）</td><td>ローカルにメモがありません。表レンダリングのみのテスト行です。</td></tr>'
+      );
+    }
+    z.innerHTML =
+      '<div class="pc-print-doc">' +
+      '<h1>Sync Core 印刷テスト（表）</h1>' +
+      '<table class="pc-print-table"><thead><tr><th>日付</th><th>利用者</th><th>メモ（先頭80文字）</th></tr></thead><tbody>' +
+      rows.join('') +
+      '</tbody></table>' +
+      '<p class="pc-small">' + escPrint(ts) + '</p>' +
+      '</div>' + footerBtn;
+  }else{
+    alert('不明な印刷テスト種別です');
+    return;
+  }
+
+  z.setAttribute('aria-hidden', 'false');
+  document.body.classList.add('print-core-open');
+
+  const fire = () => {
+    try{
+      if(typeof window.print === 'function') window.print();
+      else alert('この環境では window.print が使えません');
+    }catch(err){
+      alert('print 失敗: ' + (err && err.message));
+      closePrintCoreOverlay();
+    }
+  };
+
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      setTimeout(fire, delayMs);
+    });
+  });
+}
+
+window.addEventListener('afterprint', closePrintCoreOverlay);
+/* iOS Safari で afterprint が来ないことがあるため、印刷プレビュー終了も検知 */
+(function setupPrintMediaCleanup(){
+  try{
+    const mq = window.matchMedia && window.matchMedia('print');
+    if(!mq || !mq.addEventListener) return;
+    mq.addEventListener('change', ev => { if(!ev.matches) closePrintCoreOverlay(); });
+  }catch(_){}
+})();
 function deepClone(o){ return JSON.parse(JSON.stringify(o)); }
 function normalizeResidentName(name){ return String(name || '').trim().replace(/\s+/g, ' '); }
 function residentIdFromName(name){ return 'rname:' + encodeURIComponent(normalizeResidentName(name)); }
