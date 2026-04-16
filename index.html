@@ -663,7 +663,7 @@ const DEFAULT_SETTINGS = {
   careItems:       ['清拭','更衣','口腔ケア','体位変換','爪切り','髭剃り','洗髪','排痰','リハビリ','外出','送迎'],
   recItems:        ['体操','ストレッチ','リズム運動','転倒予防運動','計算問題','記憶ゲーム','間違い探し','漢字書き取り','しりとり','なぞなぞ','迷路','塗り絵','パズル','クロスワード','点つなぎ','折り紙','書道','ちぎり絵','壁面制作','カレンダー作り','ダーツゲーム','ビンゴ','風船バレー','トランプ','オセロ','ジェンガ','ペットボトル倒し','百人一首','カラオケ','音楽鑑賞','映画鑑賞','紙芝居','朗読','読み聞かせ','洗濯たたみ','調理補助','おやつ作り','写真整理','写真回想','花見','夏祭り','敬老会','クリスマス会','誕生日会','外食イベント','ドライブ','散歩','買い物ゲーム','昔遊び（お手玉など）'],
   dayItems:        ['穏やか','笑顔あり','活気あり','不穏','傾眠','落ち着かない','食欲あり','食欲不振','発熱','体調不良'],
-  supplyProducts:  ['リハビリパンツM','リハビリパンツL','尿取りパッド 昼用','尿取りパッド 夜用','テープ型オムツM','テープ型オムツL'],
+  supplyProducts:  ['ずれずに安心パット','尿パットレギュラー（男女兼用）','尿パット（10回吸収）','尿パット（安心夜用）','ワイドパット','ビッグパット','リハビリパンツS','リハビリパンツM','リハビリパンツL','リハビリパンツLL','オムツS','オムツM','オムツL','オムツLL'],
 };
 
 // ========== 状態 ==========
@@ -2576,6 +2576,11 @@ function buildMealPanel(){
     dinner:   {time:m.dTime||'17:30',main:m.dMain||0,side:m.dSide||0,menu:'',water:m.dWater||'',snack:''}
   };
   const d0=defData[defSec];
+  const dayIdx=curDate.getDate()-1;
+  const todayRes=residentsOnDaySorted(dayIdx);
+  const mealResChips=todayRes.map(r=>
+    `<div class="chip meal-res-chip selected" data-name="${r.name.replace(/"/g,'&quot;')}" onclick="toggleMealResChip(this)">${r.name}</div>`
+  ).join('');
   return `<div class="panel">
     <div class="panel-sec"><h3>直近の食事記録</h3><div class="hist-list">${mealHistHtml}</div></div>
     <div class="panel-sec">
@@ -2587,6 +2592,12 @@ function buildMealPanel(){
           <div class="chip meal-chip-btn${defSec==='lunch'?' selected':''}" data-section="lunch" onclick="selectMealChip('lunch')">昼食</div>
           <div class="chip meal-chip-btn${defSec==='dinner'?' selected':''}" data-section="dinner" onclick="selectMealChip('dinner')">夕食</div>
         </div>
+      </div>
+      <div class="fg">
+        <label style="display:flex;align-items:center;flex-wrap:wrap;gap:8px;">対象者（本日）
+ <button type="button" class="btn btn-sm" style="font-size:16px;background:#d4edda;color:#155724;border:1px solid #b8dacc;" onclick="selectAllMealResChips()">全員選択</button>
+        </label>
+        <div id="mealResChips" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;">${mealResChips||'<span class="text-gray" style="font-size:14px;">本日の利用者はいません</span>'}</div>
       </div>
       <input type="hidden" id="mealSection" value="${defSec}">
       <div class="fg-row">
@@ -2600,9 +2611,12 @@ function buildMealPanel(){
       </div>
       <div class="fg"><label>おやつ</label><input type="text" id="mealSnack" value="${d0.snack}"></div>
       <button class="btn btn-primary btn-block mt8" onclick="saveMealSection()">記録</button>
-      <button class="btn btn-block mt8" style="background:#F3F0FF;color:#5B3FB5;border-color:#5B3FB5;font-weight:700;" onclick="saveMealSectionAll()">全員へ反映</button>
     </div>
   </div>`;
+}
+function toggleMealResChip(el){ el.classList.toggle('selected'); }
+function selectAllMealResChips(){
+  document.querySelectorAll('#mealResChips .meal-res-chip').forEach(c=>c.classList.add('selected'));
 }
 function selectMealChip(section){
   document.querySelectorAll('.meal-chip-btn').forEach(c=>c.classList.remove('selected'));
@@ -2643,16 +2657,9 @@ function _applyMealData(resName, d){
 }
 function saveMealSection(){
   const d=_getMealFormData(); if(!d) return;
-  _applyMealData(curRes, d);
-  saveDB(); showSavedToast(); goBack();
-}
-function saveMealSectionAll(){
-  const d=_getMealFormData(); if(!d) return;
-  const label={breakfast:'朝食',lunch:'昼食',dinner:'夕食'}[d.section]||d.section;
-  const dayIdx=curDate.getDate()-1;
-  const todayRes=residentsOnDaySorted(dayIdx);
-  if(!confirm(`本日の利用者 ${todayRes.length}名 全員の${label}記録を反映します。よろしいですか？`)) return;
-  todayRes.forEach(res=>_applyMealData(res.name, d));
+  const names=[...document.querySelectorAll('#mealResChips .meal-res-chip.selected')].map(e=>e.dataset.name);
+  if(!names.length){ alert('対象者を1名以上選んでください'); return; }
+  names.forEach(n=>_applyMealData(n, d));
   saveDB(); showSavedToast(); goBack();
 }
 
@@ -3471,6 +3478,39 @@ function exportDB(){
   document.body.appendChild(a); a.click(); document.body.removeChild(a);
   URL.revokeObjectURL(url);
 }
+function stampImportedDbForMerge(imported, baseTs){
+  let ts=Math.max(_numU(baseTs), Date.now());
+  const nextTs=()=>++ts;
+  (imported.residents||[]).forEach(r=>{
+    if(_numU(r&&r._u)<=0) r._u=nextTs();
+  });
+  (imported.supplies||[]).forEach(s=>{
+    if(_numU(s&&s._u)<=0) s._u=nextTs();
+  });
+  Object.keys(imported.records||{}).forEach(dk=>{
+    Object.keys((imported.records||{})[dk]||{}).forEach(name=>{
+      const rec=(imported.records||{})[dk][name];
+      if(!rec) return;
+      ['vital','excretion','bath','care','notes'].forEach(field=>{
+        (rec[field]||[]).forEach(item=>{
+          if(!item) return;
+          if(_numU(item.sheetU||item.u)<=0) item.sheetU=nextTs();
+        });
+      });
+      rec.meal=rec.meal||{};
+      if(_numU(rec.meal._u)<=0) rec.meal._u=nextTs();
+      rec.rec=rec.rec||{};
+      if(_numU(rec.rec._u)<=0 && (rec.rec.content||rec.rec.time||(rec.rec.chips||[]).length)) rec.rec._u=nextTs();
+      rec.med=rec.med||{};
+      ['morning','lunch','dinner','bedtime'].forEach(timing=>{
+        const m=rec.med[timing];
+        if(!m) return;
+        if(_numU(m._u)<=0 && ((m.items||[]).length||m.time||m.staff)) m._u=nextTs();
+      });
+      if(_numU(rec._dayU)<=0 && (rec.day||rec.dayWriter)) rec._dayU=nextTs();
+    });
+  });
+}
 function importDB(input){
   const file=input.files[0]; if(!file) return;
   if(!confirm('バックアップJSONを読み込みます。\n\n【安全モード】タイムスタンプが新しいデータを優先してマージします。\n（古いデータで新しい記録を上書きしません）\n\n実行しますか？')){ input.value=''; return; }
@@ -3493,6 +3533,8 @@ function importDB(input){
         if(_numU(imported._setU[k])>0) return;
         if(settingHasValue(imported.settings[k])) imported._setU[k]=baseTs;
       });
+      // 旧アプリJSONは更新時刻が無いことがあり、同時刻(0)比較でローカルが勝って取り込めないため補完する
+      stampImportedDbForMerge(imported, Date.now()+1000);
       db=mergePulledDb(db, imported);
       saveDB(); alert('インポート完了しました（新しいデータ優先でマージ）'); startApp();
     }catch(err){ alert('読み込みエラー: '+err.message); }
