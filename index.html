@@ -763,8 +763,10 @@ function loadDB(){
   if(db.residents){
     const seen = new Set();
     db.residents = db.residents.filter(r=>{
-      if(seen.has(r.name)) return false;
-      seen.add(r.name); return true;
+      const nm=normalizeResidentName(r&&r.name);
+      if(!nm||seen.has(nm)) return false;
+      r.name=nm;
+      seen.add(nm); return true;
     });
   }
   normalizeResidentsOrder();
@@ -1372,8 +1374,11 @@ function normalizeVitalTempsInRecords(records){
 }
 
 /** 利用者一覧の並びを端末・同期のたびに固定（氏名→id。入力・閲覧のブレ防止） */
+function normalizeResidentName(name){
+  return String(name||'').replace(/[\s\u3000]+/g,' ').trim();
+}
 function compareResidentsStable(a,b){
-  const c=String((a&&a.name)||'').localeCompare(String((b&&b.name)||''),'ja');
+  const c=normalizeResidentName((a&&a.name)||'').localeCompare(normalizeResidentName((b&&b.name)||''),'ja');
   if(c!==0) return c;
   return String((a&&a.id)||'').localeCompare(String((b&&b.id)||''));
 }
@@ -1440,8 +1445,10 @@ function mergeResidentsLoc(a, b){
   });
   const seen=new Set();
   return [...m.values()].map(o=>o.r).filter(r=>{
-    if(!r.name||seen.has(r.name)) return false;
-    seen.add(r.name); return true;
+    const nm=normalizeResidentName(r&&r.name);
+    if(!nm||seen.has(nm)) return false;
+    r.name=nm;
+    seen.add(nm); return true;
   }).sort(compareResidentsStable);
 }
 
