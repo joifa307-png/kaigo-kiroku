@@ -2588,6 +2588,7 @@ function pctSel(cur){
 function buildMealPanel(){
   const rec=getRec(curRes);
   const m=rec.meal;
+  const todayKey=dk();
   const mealHist=[];
   for(let d=0;d<=2;d++){
     const dt=new Date(curDate); dt.setDate(dt.getDate()-d);
@@ -2606,6 +2607,8 @@ function buildMealPanel(){
       ${ml.menu?`<br>昼: ${ml.menu} 主食${ml.main||0}% 副食${ml.side||0}% ${ml.water?`水分${ml.water}ml`:''}${ml.snack?` おやつ:${ml.snack}`:''}`:''}
       <br>夕: 主食${ml.dMain||0}% 副食${ml.dSide||0}% ${ml.dWater?`水分${ml.dWater}ml`:''}
     </div>
+    <button class="hist-edit" onclick="editMealRecord('${ml._dk}')">編集</button>
+    <button class="hist-del" onclick="delMealRecord('${ml._dk}')">削除</button>
   </div>`).join(''):'<div class="text-gray" style="font-size:14px;padding:8px 0;">記録なし</div>';
   const nowH=new Date().getHours();
   const defSec=nowH<10?'breakfast':nowH<14?'lunch':'dinner';
@@ -2618,7 +2621,7 @@ function buildMealPanel(){
   const dayIdx=curDate.getDate()-1;
   const todayRes=residentsOnDaySorted(dayIdx);
   const mealResChips=todayRes.map(r=>
-    `<div class="chip meal-res-chip selected" data-name="${r.name.replace(/"/g,'&quot;')}" onclick="toggleMealResChip(this)">${r.name}</div>`
+    `<div class="chip meal-res-chip" data-name="${r.name.replace(/"/g,'&quot;')}" onclick="toggleMealResChip(this)">${r.name}</div>`
   ).join('');
   return `<div class="panel">
     <div class="panel-sec"><h3>直近の食事記録</h3><div class="hist-list">${mealHistHtml}</div></div>
@@ -2638,6 +2641,8 @@ function buildMealPanel(){
         </label>
         <div id="mealResChips" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;">${mealResChips||'<span class="text-gray" style="font-size:14px;">本日の利用者はいません</span>'}</div>
       </div>
+      <input type="hidden" id="mealEditDate" value="${todayKey}">
+      <div id="mealEditHint" class="text-gray" style="font-size:13px;margin:-2px 0 6px;">入力対象日：${recDayLabel(todayKey)}</div>
       <input type="hidden" id="mealSection" value="${defSec}">
       <div class="fg-row">
         <div class="fg"><label>時刻</label><input type="time" id="mealTime" value="${d0.time}"></div>
@@ -2661,7 +2666,8 @@ function selectMealChip(section){
   document.querySelectorAll('.meal-chip-btn').forEach(c=>c.classList.remove('selected'));
   document.querySelector(`.meal-chip-btn[data-section="${section}"]`).classList.add('selected');
   document.getElementById('mealSection').value=section;
-  const m=getRec(curRes).meal||{};
+  const dateKey=document.getElementById('mealEditDate')?.value||dk();
+  const m=getRec(curRes,dateKey).meal||{};
   const data={
     breakfast:{time:m.bTime||'07:30',main:m.bMain||0,side:m.bSide||0,menu:'',water:m.bWater||'',snack:''},
     lunch:    {time:m.time||'11:50', main:m.main||0, side:m.side||0, menu:normalizeMealFreeText(m.menu)||'',water:m.water||'',snack:normalizeMealFreeText(m.snack)||''},
@@ -2679,6 +2685,7 @@ function _getMealFormData(){
   if(!section){alert('区分を選んでください');return null;}
   return{
     section,
+    dateKey:document.getElementById('mealEditDate')?.value||dk(),
     time:document.getElementById('mealTime').value,
     main:parseInt(document.getElementById('mealMain').value)||0,
     side:parseInt(document.getElementById('mealSide').value)||0,
@@ -2687,8 +2694,8 @@ function _getMealFormData(){
     snack:document.getElementById('mealSnack').value
   };
 }
-function _applyMealData(resName, d){
-  const m=getRec(resName).meal;
+function _applyMealData(resName, d, dateKey){
+  const m=getRec(resName,dateKey).meal;
   if(d.section==='breakfast'){ m.bTime=d.time; m.bMain=d.main; m.bSide=d.side; m.bWater=d.water; }
   else if(d.section==='lunch'){ m.time=d.time; m.main=d.main; m.side=d.side; m.menu=d.menu; m.water=d.water; m.snack=d.snack; }
   else { m.dTime=d.time; m.dMain=d.main; m.dSide=d.side; m.dWater=d.water; }
@@ -2698,8 +2705,25 @@ function saveMealSection(){
   const d=_getMealFormData(); if(!d) return;
   const names=[...document.querySelectorAll('#mealResChips .meal-res-chip.selected')].map(e=>e.dataset.name);
   if(!names.length){ alert('対象者を1名以上選んでください'); return; }
-  names.forEach(n=>_applyMealData(n, d));
+  names.forEach(n=>_applyMealData(n, d, d.dateKey));
   saveDB(); showSavedToast(); goBack();
+}
+function editMealRecord(dkStr){
+  const sec=document.getElementById('mealSection')?.value||'lunch';
+  const editDate=document.getElementById('mealEditDate');
+  const hint=document.getElementById('mealEditHint');
+  if(editDate) editDate.value=dkStr;
+  if(hint) hint.textContent=`入力対象日：${recDayLabel(dkStr)}（編集中）`;
+  selectMealChip(sec);
+}
+function delMealRecord(dkStr){
+  if(!confirm('この日の食事記録を削除しますか？')) return;
+  const m=getRec(curRes,dkStr).meal;
+  m.bTime='07:30'; m.bMain=100; m.bSide=100; m.bWater='';
+  m.time='11:50'; m.menu=''; m.snack=''; m.main=100; m.side=100; m.water='';
+  m.dTime='17:30'; m.dMain=100; m.dSide=100; m.dWater='';
+  m._u=Date.now();
+  saveDB(); refreshPanel('meal');
 }
 
 // ========== レクパネル ==========
