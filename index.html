@@ -2626,7 +2626,7 @@ function buildMealPanel(){
   return `<div class="panel">
     <div class="panel-sec"><h3>直近の食事記録</h3><div class="hist-list">${mealHistHtml}</div></div>
     <div class="panel-sec">
-      <h3>食事入力</h3>
+      <h3 style="display:flex;align-items:center;gap:8px;">食事入力<span id="mealEditModeLabel" style="display:none;color:var(--red);font-size:inherit;font-weight:700;">今日の履歴編集中</span></h3>
       <div class="fg">
         <label>区分</label>
         <div style="display:flex;gap:6px;">
@@ -2643,7 +2643,6 @@ function buildMealPanel(){
       </div>
       <input type="hidden" id="mealEditDate" value="${todayKey}">
       <div id="mealEditHint" class="text-gray" style="font-size:13px;margin:-2px 0 6px;">入力対象日：${recDayLabel(todayKey)}</div>
-      <div id="mealEditModeLabel" style="display:none;color:var(--red);font-size:14px;font-weight:700;margin:-2px 0 8px;"></div>
       <input type="hidden" id="mealSection" value="${defSec}">
       <div class="fg-row">
         <div class="fg"><label>時刻</label><input type="time" id="mealTime" value="${d0.time}"></div>
@@ -2722,7 +2721,7 @@ function editMealRecord(dkStr){
   if(target) target.classList.add('selected');
   if(modeLabel){
     modeLabel.style.display='block';
-    modeLabel.textContent=`${curRes}の履歴編集中`;
+    modeLabel.textContent='今日の履歴編集中';
   }
   selectMealChip(sec);
 }
