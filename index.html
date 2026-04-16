@@ -1857,7 +1857,8 @@ function renderMain(){
     else{
       const lines=[];
       const _leWater=le.stool&&le.stool.startsWith('水様便');
-      if(le.urine&&le.urine!=='なし') lines.push(`<span style="color:#0F6E56;font-weight:600;">尿 ${le.urine}</span>`);
+      if(le.urineMl&&le.urineMl!=='なし') lines.push(`<span style="color:#0F6E56;font-weight:600;">尿 ${le.urineMl}㎖</span>`);
+      else if(le.urine&&le.urine!=='なし') lines.push(`<span style="color:#0F6E56;font-weight:600;">尿 ${le.urine}</span>`);
       if(le.pad&&le.pad!=='なし') lines.push(`パット ${le.pad}`);
       if(le.padChange) lines.push('<span style="color:var(--blue);font-weight:600;">パ交換</span>');
       if(le.rehaChange) lines.push('<span style="color:var(--blue);font-weight:600;">リハパン交換</span>');
@@ -2174,10 +2175,10 @@ function buildExPanel(){
   const hist=get48h(curRes,'excretion');
   const S=db.settings||{};
 
-  const histHtml=hist.length?hist.map(e=>{
+  const histRow=(e)=> {
     const tags=[];
     if(e.urine&&e.urine!=='なし') tags.push(`尿量:${e.urine}`);
-    if(e.urineMl) tags.push(`尿量(㎖):${e.urineMl}`);
+    if(e.urineMl&&e.urineMl!=='なし') tags.push(`尿量(㎖):${e.urineMl}`);
     if(e.pad&&e.pad!=='なし') tags.push(`パッド:${e.pad}`);
     if(e.stool&&e.stool!=='なし') tags.push(`排便:${e.stool}`);
     if(e.padChange) tags.push('パット交換');
@@ -2189,10 +2190,19 @@ function buildExPanel(){
       <button class="hist-edit" onclick="editEx('${e._dk}',${e._i})">編集</button>
       <button class="hist-del" onclick="delEx('${e._dk}',${e._i})">削除</button>
     </div>`;
-  }).join(''):'<div class="text-gray" style="font-size:14px;padding:8px 0;">記録なし</div>';
+  };
+  const histTop=hist.slice(0,3).map(histRow).join('');
+  const histMore=hist.slice(3).map(histRow).join('');
+  const histToggle=hist.length>3
+    ? `<button type="button" class="btn btn-gray btn-sm mt8" onclick="toggleExHistMore(this)">▼ さらに表示（${hist.length-3}件）</button>`
+    : '';
+  const histHtml=hist.length
+    ? `${histTop}${histMore?`<div id="exHistMore" style="display:none;">${histMore}</div>`:''}${histToggle}`
+    : '<div class="text-gray" style="font-size:14px;padding:8px 0;">記録なし</div>';
 
   const urineOpts=(S.exUrineOptions||[]).map(o=>`<option>${o}</option>`).join('');
-  const urineMlOpts=(S.exUrineMlOptions||[]).map(o=>`<option>${o}</option>`).join('');
+  const urineMlList=(S.exUrineMlOptions||[]).map(v=>String(v)).filter(v=>v&&v!=='なし');
+  const urineMlOpts=['なし',...urineMlList].map(o=>`<option>${o}</option>`).join('');
   const padOpts=(S.exPadOptions||[]).map(o=>`<option>${o}</option>`).join('');
   const stoolOpts=(S.exStoolOptions||[]).map(o=>`<option>${o}</option>`).join('');
 
@@ -2226,6 +2236,13 @@ function buildExPanel(){
   </div>`;
 }
 let _editEx=null;
+function toggleExHistMore(btn){
+  const more=document.getElementById('exHistMore');
+  if(!more||!btn) return;
+  const open=more.style.display!=='none';
+  more.style.display=open?'none':'block';
+  btn.textContent=open?'▼ さらに表示':'▲ 閉じる';
+}
 function editEx(dkStr,idx){
   const e=getRec(curRes,dkStr).excretion[idx];
   const S=db.settings||{};
