@@ -3869,7 +3869,27 @@ function splitCareContentToParts(content){
   const tokens=s.split(/[、,\n]/).map(t=>t.trim()).filter(Boolean);
   const items=[], memo=[];
   tokens.forEach(t=>{ (opts.has(t)?items:memo).push(t); });
-  return {items:items.join('、'), memo:memo.join('、')};
+  if(!items.length && !memo.length) return {items:'', memo:s};
+  return {items:items.join('、'), memo:memo.join('、')||(!items.length?s:'')};
+}
+function dedupePrintRows(list, makeKey){
+  const seen=new Set();
+  return list.filter(row=>{
+    const key=makeKey(row);
+    if(seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+function getCareContentText(c){
+  return String(c&&(
+    c.content ??
+    c.ca0 ??
+    c.memo ??
+    c.note ??
+    c.text ??
+    ''
+  )).trim();
 }
 
 function printVitalRange(){
@@ -3879,21 +3899,35 @@ function printVitalRange(){
   if(!from||!to){ alert('期間を入力してください'); return; }
   const dates=getDatesInRange(from,to);
   const targets=resName==='__all__'?[...db.residents].sort(compareResidentsStable):db.residents.filter(r=>r.name===resName);
-  let rows='';
+  const out=[];
   targets.forEach(res=>{
     dates.forEach(dk=>{
       const rec=db.records[dk]&&db.records[dk][res.name];
       if(!rec) return;
       (rec.vital||[]).forEach(v=>{
-        rows+=`<tr>
-          <td>${dk}</td><td>${res.name}</td>
+        out.push({dk,name:res.name,v});
+      });
+    });
+  });
+  const rows=dedupePrintRows(out, row=>{
+    const v=row.v||{};
+    return [
+      row.name,row.dk,
+      v.id||'',
+      normalizeTimeText(v.time)||'',
+      normalizeTempValue(v.temp)||'',
+      v.sbp||'',v.dbp||'',v.pulse||'',v.spo2||'',v.weight||'',
+      v.staff||'',v.sheetU||''
+    ].join('|');
+  }).map(row=>{
+    const v=row.v||{};
+    return `<tr>
+          <td>${row.dk}</td><td>${row.name}</td>
           <td>${normalizeTimeText(v.time)||''}</td><td>${normalizeTempValue(v.temp)||''}</td>
           <td>${v.sbp||''}/${v.dbp||''}</td><td>${v.pulse||''}</td>
           <td>${v.spo2||''}</td><td>${v.weight||''}</td><td>${v.staff||''}</td>
         </tr>`;
-      });
-    });
-  });
+  }).join('');
   const html=`
     <div class="print-title">${FAC.name} バイタル記録 ${from} ～ ${to}</div>
     <table class="print-table">
@@ -3913,16 +3947,32 @@ function printCareRange(){
   let html=`<div class="print-title">${FAC.name} ケア記録サマリー ${from} ～ ${to}</div>`;
   const targets=resName==='__all__'?[...db.residents].sort(compareResidentsStable):db.residents.filter(r=>r.name===resName);
   targets.forEach(res=>{
-    const rows=[];
+    const rawRows=[];
     dates.forEach(dk=>{
       const rec=db.records[dk]&&db.records[dk][res.name];
       if(!rec) return;
       if((rec.care||[]).length>0){
         rec.care.forEach(c=>{
-          const parts=splitCareContentToParts(c.content);
-          rows.push(`<tr><td>${dk}</td><td>${normalizeTimeText(c.time)||''}</td><td>${parts.items}</td><td>${parts.memo}</td><td>${c.staff||''}</td></tr>`);
+          rawRows.push({dk,c});
         });
       }
+    });
+    const rows=dedupePrintRows(rawRows, row=>{
+      const c=row.c||{};
+      const content=getCareContentText(c);
+      return [
+        res.name,row.dk,
+        c.id||'',
+        normalizeTimeText(c.time)||'',
+        content,
+        c.staff||'',
+        c.sheetU||''
+      ].join('|');
+    }).map(row=>{
+      const c=row.c||{};
+      const content=getCareContentText(c);
+      const parts=splitCareContentToParts(content);
+      return `<tr><td>${row.dk}</td><td>${normalizeTimeText(c.time)||''}</td><td>${parts.items}</td><td>${parts.memo}</td><td>${c.staff||''}</td></tr>`;
     });
     if(rows.length>0){
       html+=`<div class="print-subtitle">${res.name}</div>
