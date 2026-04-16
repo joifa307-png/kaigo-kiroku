@@ -665,6 +665,7 @@ const DEFAULT_SETTINGS = {
   dayItems:        ['穏やか','笑顔あり','活気あり','不穏','傾眠','落ち着かない','食欲あり','食欲不振','発熱','体調不良'],
   supplyProducts:  ['ずれずに安心パット','尿パットレギュラー（男女兼用）','尿パット（10回吸収）','尿パット（安心夜用）','ワイドパット','ビッグパット','リハビリパンツS','リハビリパンツM','リハビリパンツL','リハビリパンツLL','オムツS','オムツM','オムツL','オムツLL'],
 };
+const LEGACY_DEFAULT_SUPPLY_JSON = JSON.stringify(["リハビリパンツM", "リハビリパンツL", "尿取りパッド 昼用", "尿取りパッド 夜用", "テープ型オムツM", "テープ型オムツL"]);
 
 // ========== 状態 ==========
 let db = { residents:[], records:{}, supplies:[], settings:{...DEFAULT_SETTINGS} };
@@ -731,6 +732,26 @@ function loadDB(){
       }
     }
   });
+  let needSaveAfterMigrate=false;
+  if(JSON.stringify(db.settings.supplyProducts||[])===LEGACY_DEFAULT_SUPPLY_JSON){
+    db.settings.supplyProducts=JSON.parse(JSON.stringify(DEFAULT_SETTINGS.supplyProducts));
+    touchSetU('supplyProducts');
+    needSaveAfterMigrate=true;
+  }
+  Object.keys(db.records||{}).forEach(dk=>{
+    const day=db.records[dk]||{};
+    Object.keys(day).forEach(nm=>{
+      const meal=day[nm]&&day[nm].meal;
+      if(!meal) return;
+      const rawMenu=meal.menu==null?'':String(meal.menu);
+      const rawSnack=meal.snack==null?'':String(meal.snack);
+      const normMenu=normalizeMealFreeText(meal.menu);
+      const normSnack=normalizeMealFreeText(meal.snack);
+      if(normMenu!==rawMenu){ meal.menu=normMenu; needSaveAfterMigrate=true; }
+      if(normSnack!==rawSnack){ meal.snack=normSnack; needSaveAfterMigrate=true; }
+    });
+  });
+  if(needSaveAfterMigrate) saveDB();
   if(db.settings.facilityName) document.title = db.settings.facilityName;
   // 名前重複を排除（同期バグで汚染された既存データを修復）
   if(db.residents){
@@ -977,6 +998,24 @@ function mealRowHasData(m){
   return false;
 }
 
+/** スプレッドシートの時刻セルが誤って meal_menu / meal_snack に ISO（1899-12-30…）で入った場合に空へ正規化 */
+function normalizeMealFreeText(v){
+  if(v instanceof Date && !isNaN(v)){
+    const y=v.getUTCFullYear(), mo=v.getUTCMonth(), da=v.getUTCDate();
+    if(y===1899&&mo===11&&(da===30||da===31)) return '';
+  }
+  const s=String(v==null?'':v).trim();
+  if(!s) return '';
+  if(/^1899-12-3[01]T/i.test(s)) return '';
+  const t=Date.parse(s);
+  if(!isNaN(t)){
+    const d=new Date(t);
+    const y=d.getUTCFullYear(), mo=d.getUTCMonth(), da=d.getUTCDate();
+    if(y===1899&&mo===11&&(da===30||da===31)) return '';
+  }
+  return s;
+}
+
 function blankRecRow(){ return Array(N_RECORD_COLS).fill(''); }
 
 function dbToSheet(inDb){
@@ -1178,9 +1217,9 @@ function applyRecordRow(dbOut, row){
   }
   if(kind==='meal'){
     rec.meal={
-      bTime:row[REC.mbt]||'07:30', bMain:_numU(row[REC.mbm])||100, bSide:_numU(row[REC.mbs])||100, bWater:row[REC.mbw]||'',
-      time:row[REC.mlt]||'11:50', menu:row[REC.mm]||'', snack:row[REC.msk]||'', main:_numU(row[REC.mlmi])||100, side:_numU(row[REC.mls])||100, water:row[REC.mlw]||'',
-      dTime:row[REC.mdt]||'17:30', dMain:_numU(row[REC.mdm])||100, dSide:_numU(row[REC.mds])||100, dWater:row[REC.mdw]||'',
+      bTime:normalizeTimeText(row[REC.mbt])||'07:30', bMain:_numU(row[REC.mbm])||100, bSide:_numU(row[REC.mbs])||100, bWater:row[REC.mbw]||'',
+      time:normalizeTimeText(row[REC.mlt])||'11:50', menu:normalizeMealFreeText(row[REC.mm])||'', snack:normalizeMealFreeText(row[REC.msk])||'', main:_numU(row[REC.mlmi])||100, side:_numU(row[REC.mls])||100, water:row[REC.mlw]||'',
+      dTime:normalizeTimeText(row[REC.mdt])||'17:30', dMain:_numU(row[REC.mdm])||100, dSide:_numU(row[REC.mds])||100, dWater:row[REC.mdw]||'',
       _u:u
     };
     return;
@@ -2572,7 +2611,7 @@ function buildMealPanel(){
   const defSec=nowH<10?'breakfast':nowH<14?'lunch':'dinner';
   const defData={
     breakfast:{time:m.bTime||'07:30',main:m.bMain||0,side:m.bSide||0,menu:'',water:m.bWater||'',snack:''},
-    lunch:    {time:m.time||'11:50', main:m.main||0, side:m.side||0, menu:m.menu||'',water:m.water||'',snack:m.snack||''},
+    lunch:    {time:m.time||'11:50', main:m.main||0, side:m.side||0, menu:normalizeMealFreeText(m.menu)||'',water:m.water||'',snack:normalizeMealFreeText(m.snack)||''},
     dinner:   {time:m.dTime||'17:30',main:m.dMain||0,side:m.dSide||0,menu:'',water:m.dWater||'',snack:''}
   };
   const d0=defData[defSec];
@@ -2625,7 +2664,7 @@ function selectMealChip(section){
   const m=getRec(curRes).meal||{};
   const data={
     breakfast:{time:m.bTime||'07:30',main:m.bMain||0,side:m.bSide||0,menu:'',water:m.bWater||'',snack:''},
-    lunch:    {time:m.time||'11:50', main:m.main||0, side:m.side||0, menu:m.menu||'',water:m.water||'',snack:m.snack||''},
+    lunch:    {time:m.time||'11:50', main:m.main||0, side:m.side||0, menu:normalizeMealFreeText(m.menu)||'',water:m.water||'',snack:normalizeMealFreeText(m.snack)||''},
     dinner:   {time:m.dTime||'17:30',main:m.dMain||0,side:m.dSide||0,menu:'',water:m.dWater||'',snack:''}
   }[section];
   document.getElementById('mealTime').value=data.time;
