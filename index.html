@@ -168,6 +168,8 @@ input,select,textarea{font-family:inherit;font-size:30px;}
 .fg-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(0,1fr));gap:10px;}
 .fg-row .fg{min-width:0;}
 .fg-hint{font-size:14px;color:var(--text3);margin-top:3px;}
+.ex-stool-compact label{margin-bottom:2px;}
+.ex-stool-compact select{font-size:20px!important;padding:6px 10px!important;line-height:1.2;}
 
 /* ===== チップ ===== */
 .chip{
@@ -654,6 +656,7 @@ const DEFAULT_SETTINGS = {
   logoB64: '',
   staffList: [],
   exUrineOptions:  ['なし','少量','中量','多量'],
+  exUrineMlOptions:['20','50','100','150','200','300'],
   exPadOptions:    ['なし','1回分','2回分','3回分','4回分','5回分','6回分','7回分','8回分','9回分','10回分'],
   exStoolOptions:  ['なし','普通便 少量','普通便 中量','普通便 多量','硬便 少量','硬便 中量','軟便 少量','軟便 中量','軟便 多量','水様便 少量','水様便 中量','水様便 多量'],
   bathOptions:     ['普通浴','シャワー浴','清拭','入浴なし'],
@@ -832,11 +835,12 @@ const REC = {
   rid:0,k:1,dk:2,nm:3,uu:4,seq:5,tm:6,
   v0:7,v1:8,v2:9,v3:10,v4:11,v5:12,v6:13,
   ex0:14,ex1:15,ex2:16,ex3:17,ex4:18,ex5:19,ex6:20,
-  ba0:21,ba1:22, ca0:23,ca1:24, nt0:25,nt1:26,nt2:27,
-  mbt:28,mbm:29,mbs:30,mbw:31,mlt:32,mm:33,msk:34,mlmi:35,mls:36,mlw:37,mdt:38,mdm:39,mds:40,mdw:41,
-  mt:42,mtt:43,mts:44,mj:45, rp:46,rc:47,rk:48,rch:49, dt:50,dw:51, sr:52,sp:53,sq:54, exj:55
+  ex7:21,
+  ba0:22,ba1:23, ca0:24,ca1:25, nt0:26,nt1:27,nt2:28,
+  mbt:29,mbm:30,mbs:31,mbw:32,mlt:33,mm:34,msk:35,mlmi:36,mls:37,mlw:38,mdt:39,mdm:40,mds:41,mdw:42,
+  mt:43,mtt:44,mts:45,mj:46, rp:47,rc:48,rk:49,rch:50, dt:51,dw:52, sr:53,sp:54,sq:55, exj:56
 };
-const N_RECORD_COLS = 56;
+const N_RECORD_COLS = 57;
 
 function gasToken(){ return (localStorage.getItem('kaigo_gas_token')||'').trim(); }
 function gasUrl(){ return (localStorage.getItem('kaigo_gas_webapp_url')||'').trim(); }
@@ -942,7 +946,7 @@ function buildRecordHeaderRow(){
   const a=Array(N_RECORD_COLS).fill('');
   a[REC.rid]='record_id'; a[REC.k]='kind'; a[REC.dk]='date'; a[REC.nm]='resident'; a[REC.uu]='updatedAt'; a[REC.seq]='seq'; a[REC.tm]='time';
   a[REC.v0]='v_temp'; a[REC.v1]='v_sbp'; a[REC.v2]='v_dbp'; a[REC.v3]='v_pulse'; a[REC.v4]='v_spo2'; a[REC.v5]='v_weight'; a[REC.v6]='v_staff';
-  a[REC.ex0]='ex_urine'; a[REC.ex1]='ex_pad'; a[REC.ex2]='ex_stool'; a[REC.ex3]='ex_writer'; a[REC.ex4]='ex_padChange'; a[REC.ex5]='ex_rehaChange'; a[REC.ex6]='ex_diaperChange';
+  a[REC.ex0]='ex_urine'; a[REC.ex1]='ex_pad'; a[REC.ex2]='ex_stool'; a[REC.ex3]='ex_writer'; a[REC.ex4]='ex_padChange'; a[REC.ex5]='ex_rehaChange'; a[REC.ex6]='ex_diaperChange'; a[REC.ex7]='ex_urine_ml';
   a[REC.ba0]='ba_type'; a[REC.ba1]='ba_staff';
   a[REC.ca0]='ca_content'; a[REC.ca1]='ca_staff';
   a[REC.nt0]='nt_content'; a[REC.nt1]='nt_writer'; a[REC.nt2]='nt_ts';
@@ -1019,7 +1023,7 @@ function dbToSheet(inDb){
         a[REC.k]='excretion'; a[REC.dk]=dk; a[REC.nm]=name; a[REC.uu]=String(_numU(v.sheetU||v.u||0));
         a[REC.seq]=String(idx); a[REC.tm]=v.time||'';
         a[REC.ex0]=v.urine||''; a[REC.ex1]=v.pad||''; a[REC.ex2]=v.stool||''; a[REC.ex3]=v.writer||'';
-        a[REC.ex4]=v.padChange?1:0; a[REC.ex5]=v.rehaChange?1:0; a[REC.ex6]=v.diaperChange?1:0;
+        a[REC.ex4]=v.padChange?1:0; a[REC.ex5]=v.rehaChange?1:0; a[REC.ex6]=v.diaperChange?1:0; a[REC.ex7]=v.urineMl||'';
         pushR(a);
       });
       (rec.bath||[]).forEach((v,idx)=>{
@@ -1154,7 +1158,7 @@ function applyRecordRow(dbOut, row){
     rec.excretion.push({
       id:String(row[REC.rid]||genId('e')),
       time:tm||'',
-      urine:row[REC.ex0], pad:row[REC.ex1], stool:row[REC.ex2], writer:row[REC.ex3],
+      urine:row[REC.ex0], urineMl:row[REC.ex7], pad:row[REC.ex1], stool:row[REC.ex2], writer:row[REC.ex3],
       padChange:!!Number(row[REC.ex4]), rehaChange:!!Number(row[REC.ex5]), diaperChange:!!Number(row[REC.ex6]),
       sheetU:u
     });
@@ -1685,6 +1689,17 @@ function openMainOv(html){
   document.getElementById('ovMainBody').innerHTML=html;
   openOv('ovMain');
 }
+function calcMealIntakeTotalPercent(rec){
+  if(!rec||!rec.meal) return null;
+  const m=rec.meal||{};
+  const vals=[m.bMain,m.bSide,m.main,m.side,m.dMain,m.dSide]
+    .map(v=>Number(v))
+    .filter(v=>Number.isFinite(v));
+  if(!vals.length) return null;
+  const avg=vals.reduce((a,b)=>a+b,0)/vals.length;
+  const clamped=Math.max(0,Math.min(100,avg));
+  return Math.round(clamped);
+}
 function closeMainOv(){
   const back=document.getElementById('ovMain');
   back.style.display='none';
@@ -1735,7 +1750,7 @@ function openSummary(name){
     {label:'リハパン交換', fn:(r)=>{if(!r.excretion)return '—';return r.excretion.some(e=>e.rehaChange)?'<span style="color:#1a7fd4;font-weight:700;">交換</span>':'—';}},
     {label:'おむつ交換', fn:(r)=>{if(!r.excretion)return '—';return r.excretion.some(e=>e.diaperChange)?'<span style="color:#1a7fd4;font-weight:700;">交換</span>':'—';}},
     {label:'入浴',   fn:(r)=>{return r.bath&&r.bath.length?`<span style="color:var(--green);font-weight:700;">${r.bath[r.bath.length-1].type||'○'}</span>`:'—';}},
-    {label:'レク',   fn:(r)=>{return (r.rec&&(r.rec.content||(r.rec.chips&&r.rec.chips.length)))?'<span style="color:var(--green);font-weight:700;">✔</span>':'—';}},
+    {label:'食事摂取量', fn:(r)=>{const pct=calcMealIntakeTotalPercent(r);return pct===null?'—':`<span style="color:var(--green);font-weight:700;">${pct}%</span>`;}},
   ];
   rowDefs.forEach((row,ri)=>{
     const bg=ri%2===0?'#ffffff':'#f5f5f5';
@@ -2162,6 +2177,7 @@ function buildExPanel(){
   const histHtml=hist.length?hist.map(e=>{
     const tags=[];
     if(e.urine&&e.urine!=='なし') tags.push(`尿量:${e.urine}`);
+    if(e.urineMl) tags.push(`尿量(㎖):${e.urineMl}`);
     if(e.pad&&e.pad!=='なし') tags.push(`パッド:${e.pad}`);
     if(e.stool&&e.stool!=='なし') tags.push(`排便:${e.stool}`);
     if(e.padChange) tags.push('パット交換');
@@ -2176,6 +2192,7 @@ function buildExPanel(){
   }).join(''):'<div class="text-gray" style="font-size:14px;padding:8px 0;">記録なし</div>';
 
   const urineOpts=(S.exUrineOptions||[]).map(o=>`<option>${o}</option>`).join('');
+  const urineMlOpts=(S.exUrineMlOptions||[]).map(o=>`<option>${o}</option>`).join('');
   const padOpts=(S.exPadOptions||[]).map(o=>`<option>${o}</option>`).join('');
   const stoolOpts=(S.exStoolOptions||[]).map(o=>`<option>${o}</option>`).join('');
 
@@ -2191,10 +2208,13 @@ function buildExPanel(){
         <div class="fg"><label>記入者</label><select id="exWriter">${buildStaffOpts('')}</select></div>
       </div>
       <div class="fg-row">
-        <div class="fg"><label>尿量</label><select id="exUrine">${urineOpts}</select></div>
+        <div class="fg">
+          <label>尿量</label><select id="exUrine">${urineOpts}</select>
+          <div class="fg mt8"><label>尿量（㎖）</label><select id="exUrineMl">${urineMlOpts}</select></div>
+        </div>
         <div class="fg"><label>パッド汚染量</label><select id="exPad">${padOpts}</select></div>
       </div>
-      <div class="fg"><label>排便</label><select id="exStool">${stoolOpts}</select></div>
+      <div class="fg ex-stool-compact"><label>排便</label><select id="exStool">${stoolOpts}</select></div>
       <div class="fg" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
         <button type="button" class="chip" id="btnPadChange" onclick="this.classList.toggle('pc-on')">パット交換</button>
         <button type="button" class="chip" id="btnRehaChange" onclick="this.classList.toggle('pc-on')">リハパン交換</button>
@@ -2212,6 +2232,7 @@ function editEx(dkStr,idx){
   const setOpt=(id,val)=>{const el=document.getElementById(id);if(el){[...el.options].forEach(o=>{o.selected=o.value===val||o.text===val;});}};
   document.getElementById('exTime').value=e.time||'';
   setOpt('exUrine',e.urine||'');
+  setOpt('exUrineMl',e.urineMl||'');
   setOpt('exPad',e.pad||'');
   setOpt('exStool',e.stool||'');
   buildStaffSelect('exWriter',e.writer);
@@ -2226,6 +2247,7 @@ function saveEx(){
   const time=document.getElementById('exTime').value||nowTime();
   const writer=document.getElementById('exWriter').value;
   const urine=document.getElementById('exUrine').value;
+  const urineMl=document.getElementById('exUrineMl').value;
   const pad=document.getElementById('exPad').value;
   const stool=document.getElementById('exStool').value;
   const padChange=document.getElementById('btnPadChange').classList.contains('pc-on');
@@ -2233,10 +2255,10 @@ function saveEx(){
   const diaperChange=document.getElementById('btnDiaperChange').classList.contains('pc-on');
   if(_editEx){
     const r=getRec(curRes,_editEx.dkStr);
-    r.excretion[_editEx.idx]={...r.excretion[_editEx.idx],time,writer,urine,pad,stool,padChange,rehaChange,diaperChange,sheetU:Date.now()};
+    r.excretion[_editEx.idx]={...r.excretion[_editEx.idx],time,writer,urine,urineMl,pad,stool,padChange,rehaChange,diaperChange,sheetU:Date.now()};
     _editEx=null;
   } else {
-    getRec(curRes).excretion.push({id:genId('e'),time,writer,urine,pad,stool,padChange,rehaChange,diaperChange});
+    getRec(curRes).excretion.push({id:genId('e'),time,writer,urine,urineMl,pad,stool,padChange,rehaChange,diaperChange});
   }
   saveDB(); showSavedToast(); goBack();
 }
@@ -2961,7 +2983,7 @@ function renderSettingsPanel(id){
     case 'facility':  el.innerHTML=buildFacilitySettings(); break;
     case 'staff':     el.innerHTML=buildStaffSettings(); break;
     case 'supply':    el.innerHTML=buildSupplySettings(); break;
-    case 'ex_opts':   el.innerHTML=buildListSettings('排泄項目','exUrineOptions','尿量オプション','exPadOptions','パッド汚染オプション','exStoolOptions','排便オプション'); break;
+    case 'ex_opts':   el.innerHTML=buildListSettings('排泄項目','exUrineOptions','尿量オプション','exUrineMlOptions','尿量（㎖）オプション','exPadOptions','パッド汚染オプション','exStoolOptions','排便オプション'); break;
     case 'rec_opts':  el.innerHTML=buildSingleListSettings('レク項目','recItems'); break;
     case 'care_opts': el.innerHTML=buildSingleListSettings('ケア記録項目','careItems'); break;
     case 'day_opts':  el.innerHTML=buildSingleListSettings('1日の様子項目','dayItems'); break;
