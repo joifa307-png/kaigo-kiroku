@@ -2082,6 +2082,14 @@ function recDayLabel(dkStr){
   if(dkStr===yesterday) return '昨日';
   return `${pad(dt.getMonth()+1)}/${pad(dt.getDate())}`;
 }
+function recordEditLabelByDate(dkStr){
+  const today=dk();
+  const yesterday=dk(new Date(Date.now()-86400000));
+  if(dkStr===today) return '今日の履歴編集中';
+  if(dkStr===yesterday) return '昨日の履歴編集中';
+  const dt=new Date(dkStr+'T00:00:00');
+  return `${dt.getMonth()+1}/${dt.getDate()}の履歴編集中`;
+}
 
 // ========== スタッフ選択ビルド ==========
 function buildStaffOpts(cur){
@@ -2157,7 +2165,7 @@ function buildVitalPanel(){
       <div class="hist-list">${histHtml}</div>
     </div>
     <div class="panel-sec" id="vitalForm">
-      <h3 id="vitalFormTitle">バイタル入力</h3>
+      <h3 id="vitalFormTitle" style="display:flex;align-items:center;gap:8px;">バイタル入力<span id="vitalEditModeLabel" style="display:none;color:var(--red);font-size:inherit;font-weight:700;">今日の履歴編集中</span></h3>
       <div class="fg-row">
         <div class="fg"><label>時刻</label><input type="time" id="vTime" value="${nowTime()}"></div>
         <div class="fg"><label>担当者</label><select id="vStaff">${buildStaffOpts(lv?lv.staff:'')}</select></div>
@@ -2187,7 +2195,11 @@ function editVital(dkStr,idx){
   document.getElementById('vWeight').value=v.weight||'';
   buildStaffSelect('vStaff',v.staff);
   _editVital={dkStr,idx};
-  document.getElementById('vitalFormTitle').textContent='バイタル編集';
+  const modeLabel=document.getElementById('vitalEditModeLabel');
+  if(modeLabel){
+    modeLabel.style.display='block';
+    modeLabel.textContent=recordEditLabelByDate(dkStr);
+  }
   document.getElementById('vitalForm').scrollIntoView({behavior:'smooth'});
 }
 function saveVital(){
@@ -2257,7 +2269,7 @@ function buildExPanel(){
       <div class="hist-list">${histHtml}</div>
     </div>
     <div class="panel-sec" id="exForm">
-      <h3 id="exFormTitle">排泄入力</h3>
+      <h3 id="exFormTitle" style="display:flex;align-items:center;gap:8px;">排泄入力<span id="exEditModeLabel" style="display:none;color:var(--red);font-size:inherit;font-weight:700;">今日の履歴編集中</span></h3>
       <div class="fg-row">
         <div class="fg"><label>時刻</label><input type="time" id="exTime" value="${nowTime()}"></div>
         <div class="fg"><label>記入者</label><select id="exWriter">${buildStaffOpts('')}</select></div>
@@ -2302,7 +2314,11 @@ function editEx(dkStr,idx){
   document.getElementById('btnRehaChange').className='chip'+(e.rehaChange?' pc-on':'');
   document.getElementById('btnDiaperChange').className='chip'+(e.diaperChange?' pc-on':'');
   _editEx={dkStr,idx};
-  document.getElementById('exFormTitle').textContent='排泄編集';
+  const modeLabel=document.getElementById('exEditModeLabel');
+  if(modeLabel){
+    modeLabel.style.display='block';
+    modeLabel.textContent=recordEditLabelByDate(dkStr);
+  }
   document.getElementById('exForm').scrollIntoView({behavior:'smooth'});
 }
 function saveEx(){
@@ -2346,7 +2362,7 @@ function buildBathPanel(){
   return `<div class="panel">
     <div class="panel-sec"><h3>48時間の記録</h3><div class="hist-list">${histHtml}</div></div>
     <div class="panel-sec" id="bathForm">
-      <h3 id="bathFormTitle">入浴入力</h3>
+      <h3 id="bathFormTitle" style="display:flex;align-items:center;gap:8px;">入浴入力<span id="bathEditModeLabel" style="display:none;color:var(--red);font-size:inherit;font-weight:700;">今日の履歴編集中</span></h3>
       <div class="fg-row">
         <div class="fg"><label>時刻</label><input type="time" id="baTime" value="${nowTime()}"></div>
         <div class="fg"><label>担当者</label><select id="baStaff">${buildStaffOpts('')}</select></div>
@@ -2364,7 +2380,11 @@ function editBath(dkStr,idx){
   if(sel)[...sel.options].forEach(o=>{o.selected=o.text===b.type;});
   buildStaffSelect('baStaff',b.staff);
   _editBath={dkStr,idx};
-  document.getElementById('bathFormTitle').textContent='入浴編集';
+  const modeLabel=document.getElementById('bathEditModeLabel');
+  if(modeLabel){
+    modeLabel.style.display='block';
+    modeLabel.textContent=recordEditLabelByDate(dkStr);
+  }
   document.getElementById('bathForm').scrollIntoView({behavior:'smooth'});
 }
 function saveBath(){
@@ -2727,7 +2747,7 @@ function editMealRecord(dkStr){
   if(target) target.classList.add('selected');
   if(modeLabel){
     modeLabel.style.display='block';
-    modeLabel.textContent='今日の履歴編集中';
+    modeLabel.textContent=recordEditLabelByDate(dkStr);
   }
   selectMealChip(sec);
 }
