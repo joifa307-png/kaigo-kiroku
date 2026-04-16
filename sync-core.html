@@ -3,6 +3,10 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<!-- ブラウザが古いHTMLを長期キャッシュして「ボタンが消えた」ように見えるのを抑止（file/Dropbox 等では効果は環境依存） -->
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
 <title>介護記録 Sync Core</title>
 <style>
 :root{
@@ -70,6 +74,8 @@ body.print-core-open .wrap{visibility:hidden}
   <div class="card">
     <h1>Sync Core（検証用）</h1>
     <div class="small">既存アプリと分離した最小同期版です。まず同期の安定性だけを検証します。</div>
+    <p class="small" style="margin:8px 0 0">このHTMLの版: <strong id="syncCoreRev">-</strong>
+      <span style="margin-left:8px;color:var(--muted)">（LINEとブラウザで画面が違うときは数字を比較。再読み込みは PC: Ctrl+F5、iPhone/iPad Safari: アドレスバー左の再読み込み）</span></p>
   </div>
 
   <div class="card">
@@ -155,6 +161,11 @@ body.print-core-open .wrap{visibility:hidden}
 
   <div class="card">
     <h2>5) 印刷テスト（iPad 切り分け）</h2>
+    <p class="small" style="margin:0 0 10px;padding:8px;background:#fff7e9;border:1px solid #ebd19e;border-radius:8px">
+      <strong>LINE WORKS などアプリ内ブラウザ</strong>では、テスト1で<strong>オーバーレイの文言だけ出て、OSの印刷ダイアログが開かない</strong>ことがあります。
+      これは多くの場合 <strong>アプリ側の WebView が <code>window.print()</code> を無効にしている</strong>ためで、利用者設定だけでは直りません。
+      <strong>同じURLを Safari（または Chrome）で開き直して</strong>印刷テストしてください（LINE WORKSの「ブラウザで開く」等があればそれを利用）。
+    </p>
     <p class="small" style="margin:0 0 10px">
       本アプリ（index.html）では印刷できないが、他ページではできる／プリンターは反応するがデータが出ない、といった場合に、
       <strong>この Sync Core 単体で <code>window.print()</code> が通るか</strong>を確認するための最小テストです。
@@ -207,6 +218,14 @@ const K_DB = 'kaigo_sync_core_db_v1';
 const K_DIRTY = 'kaigo_sync_core_dirty_v1';
 const K_SNAP = 'kaigo_sync_core_cfg_snap_v1';
 const AUTO_PULL_MS = 20000;
+/** 表示の新旧確認用（HTMLを更新したらここも上げる） */
+const SYNC_CORE_HTML_REV = '2026-04-17';
+
+/** アプリ内ブラウザっぽいUA（print が無効になりやすい）。完全一致ではない */
+function shouldWarnEmbeddedBrowserPrint(){
+  const ua = navigator.userAgent || '';
+  return /Line\/|lineworks|l[\-_ ]?works|MicroMessenger|KAKAOTALK|; wv\)|FBAN|FBAV|Instagram|NAVER/i.test(ua);
+}
 
 let db = { residents: [], notes: {}, updatedAt: 0 };
 let syncDirty = false;
@@ -334,8 +353,17 @@ function printCoreTest(kind, opts){
 
   const fire = () => {
     try{
-      if(typeof window.print === 'function') window.print();
-      else alert('この環境では window.print が使えません');
+      if(typeof window.print === 'function'){
+        if(shouldWarnEmbeddedBrowserPrint() && !sessionStorage.getItem('sync_core_print_embed_warn')){
+          sessionStorage.setItem('sync_core_print_embed_warn','1');
+          alert(
+            'このブラウザ（アプリ内のWebView）では、印刷ボタンを押してもOSの印刷画面が開かないことがあります。\n\n' +
+            '同じURLを Safari や Chrome など「本体のブラウザ」で開き直してから印刷テストしてください。\n' +
+            '（LINE WORKSの利用者向け設定というより、組み込みブラウザ側の制限のことが多いです）'
+          );
+        }
+        window.print();
+      }else alert('この環境では window.print が使えません');
     }catch(err){
       alert('print 失敗: ' + (err && err.message));
       closePrintCoreOverlay();
@@ -875,6 +903,8 @@ function render(){
 
 function init(){
   document.getElementById('workDate').value = isoDate();
+  const revEl = document.getElementById('syncCoreRev');
+  if(revEl) revEl.textContent = SYNC_CORE_HTML_REV;
   loadDb();
   reloadConfig();
   render();
