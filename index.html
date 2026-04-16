@@ -2090,6 +2090,17 @@ function recordEditLabelByDate(dkStr){
   const dt=new Date(dkStr+'T00:00:00');
   return `${dt.getMonth()+1}/${dt.getDate()}の履歴編集中`;
 }
+function recordEditLabelByDateTime(dkStr,timeStr){
+  const base=recordEditLabelByDate(dkStr).replace('の履歴編集中','');
+  const t=normalizeTimeText(timeStr||'');
+  return `${base}${t||'--:--'}の履歴編集中`;
+}
+function hmFromTs(ts){
+  const n=Number(ts||0);
+  if(!n) return '';
+  const d=new Date(n);
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
 
 // ========== スタッフ選択ビルド ==========
 function buildStaffOpts(cur){
@@ -2198,7 +2209,7 @@ function editVital(dkStr,idx){
   const modeLabel=document.getElementById('vitalEditModeLabel');
   if(modeLabel){
     modeLabel.style.display='block';
-    modeLabel.textContent=recordEditLabelByDate(dkStr);
+    modeLabel.textContent=recordEditLabelByDateTime(dkStr,v.time);
   }
   document.getElementById('vitalForm').scrollIntoView({behavior:'smooth'});
 }
@@ -2317,7 +2328,7 @@ function editEx(dkStr,idx){
   const modeLabel=document.getElementById('exEditModeLabel');
   if(modeLabel){
     modeLabel.style.display='block';
-    modeLabel.textContent=recordEditLabelByDate(dkStr);
+    modeLabel.textContent=recordEditLabelByDateTime(dkStr,e.time);
   }
   document.getElementById('exForm').scrollIntoView({behavior:'smooth'});
 }
@@ -2383,7 +2394,7 @@ function editBath(dkStr,idx){
   const modeLabel=document.getElementById('bathEditModeLabel');
   if(modeLabel){
     modeLabel.style.display='block';
-    modeLabel.textContent=recordEditLabelByDate(dkStr);
+    modeLabel.textContent=recordEditLabelByDateTime(dkStr,b.time);
   }
   document.getElementById('bathForm').scrollIntoView({behavior:'smooth'});
 }
@@ -2414,13 +2425,14 @@ function buildCarePanel(){
   const histHtml=hist.length?hist.map(c=>`<div class="hist-item">
     <div class="hist-time">${recDayLabel(c._dk)} ${normalizeTimeText(c.time)}</div>
     <div class="hist-content">${c.content||''}${c.staff?`<br><span class="text-gray">${c.staff}</span>`:''}</div>
+    <button class="hist-edit" onclick="editCare('${c._dk}',${c._i})">編集</button>
     <button class="hist-del" onclick="delCare('${c._dk}',${c._i})">削除</button>
   </div>`).join(''):'<div class="text-gray" style="font-size:14px;padding:8px 0;">記録なし</div>';
 
   return `<div class="panel">
     <div class="panel-sec"><h3>48時間の記録</h3><div class="hist-list">${histHtml}</div></div>
-    <div class="panel-sec">
-      <h3>ケア記録入力</h3>
+    <div class="panel-sec" id="careForm">
+      <h3 style="display:flex;align-items:center;gap:8px;">ケア記録入力<span id="careEditModeLabel" style="display:none;color:var(--red);font-size:inherit;font-weight:700;">今日--:--の履歴編集中</span></h3>
       <div class="fg-row">
         <div class="fg"><label>時刻</label><input type="time" id="caTime" value="${nowTime()}"></div>
         <div class="fg"><label>担当者</label><select id="caStaff">${buildStaffOpts('')}</select></div>
@@ -2437,12 +2449,36 @@ function toggleChip(el,item){
   const ta=document.getElementById('caContent');
   if(ta) ta.value=sel.join('、');
 }
+let _editCare=null;
+function editCare(dkStr,idx){
+  const c=getRec(curRes,dkStr).care[idx];
+  document.getElementById('caTime').value=c.time||'';
+  buildStaffSelect('caStaff',c.staff||'');
+  document.getElementById('caContent').value=c.content||'';
+  document.querySelectorAll('#careChips .chip').forEach(el=>{
+    const txt=el.textContent;
+    el.classList.toggle('selected',(c.content||'').includes(txt));
+  });
+  _editCare={dkStr,idx};
+  const modeLabel=document.getElementById('careEditModeLabel');
+  if(modeLabel){
+    modeLabel.style.display='block';
+    modeLabel.textContent=recordEditLabelByDateTime(dkStr,c.time);
+  }
+  document.getElementById('careForm').scrollIntoView({behavior:'smooth'});
+}
 function saveCare(){
   const time=document.getElementById('caTime').value||nowTime();
   const staff=document.getElementById('caStaff').value;
   const content=document.getElementById('caContent').value.trim();
   if(!content){ alert('内容を入力してください'); return; }
-  getRec(curRes).care.push({id:genId('c'),time,content,staff,sheetU:Date.now()});
+  if(_editCare){
+    const r=getRec(curRes,_editCare.dkStr);
+    r.care[_editCare.idx]={...r.care[_editCare.idx],time,content,staff,sheetU:Date.now()};
+    _editCare=null;
+  }else{
+    getRec(curRes).care.push({id:genId('c'),time,content,staff,sheetU:Date.now()});
+  }
   saveDB(); showSavedToast(); goBack();
 }
 function delCare(dkStr,idx){
@@ -2746,8 +2782,10 @@ function editMealRecord(dkStr){
   const target=chips.find(c=>c.dataset.name===curRes);
   if(target) target.classList.add('selected');
   if(modeLabel){
+    const meal=getRec(curRes,dkStr).meal||{};
+    const t=sec==='breakfast' ? meal.bTime : sec==='dinner' ? meal.dTime : meal.time;
     modeLabel.style.display='block';
-    modeLabel.textContent=recordEditLabelByDate(dkStr);
+    modeLabel.textContent=recordEditLabelByDateTime(dkStr,t);
   }
   selectMealChip(sec);
 }
@@ -2879,17 +2917,20 @@ function buildDayPanel(){
     const dt=new Date(curDate); dt.setDate(dt.getDate()-d);
     const k=dk(dt);
     const dayData=db.records[k]&&db.records[k][curRes];
-    if(dayData&&dayData.day){ dayHist.push({text:dayData.day,writer:dayData.dayWriter||'',_dk:k}); }
+    if(dayData&&dayData.day){ dayHist.push({text:dayData.day,writer:dayData.dayWriter||'',_dk:k,_u:dayData._dayU||0}); }
     if(dayHist.length>=3) break;
   }
   const dayHistHtml=dayHist.length?dayHist.map(h=>`<div class="hist-item">
-    <div class="hist-time">${recDayLabel(h._dk)}</div>
+    <div class="hist-time">${recDayLabel(h._dk)} ${hmFromTs(h._u)}</div>
     <div class="hist-content">${h.text}${h.writer?`<br><span class="text-gray">${h.writer}</span>`:''}</div>
+    <button class="hist-edit" onclick="editDayRecord('${h._dk}')">編集</button>
+    <button class="hist-del" onclick="delDayRecord('${h._dk}')">削除</button>
   </div>`).join(''):'<div class="text-gray" style="font-size:14px;padding:8px 0;">記録なし</div>';
   return `<div class="panel">
     <div class="panel-sec"><h3>直近の記録（3回分）</h3><div class="hist-list">${dayHistHtml}</div></div>
-    <div class="panel-sec">
-      <h3>1日の様子</h3>
+    <div class="panel-sec" id="dayForm">
+      <h3 style="display:flex;align-items:center;gap:8px;">1日の様子<span id="dayEditModeLabel" style="display:none;color:var(--red);font-size:inherit;font-weight:700;">今日--:--の履歴編集中</span></h3>
+      <input type="hidden" id="dayEditDate" value="${dk()}">
       <div class="fg"><label>選択（複数可）</label><div id="dayChips" style="display:flex;flex-wrap:wrap;gap:4px;">${dayChips}</div></div>
       <div class="fg"><label>自由記入</label><textarea id="dayText" rows="3" placeholder="その他の様子">${rec.day||''}</textarea></div>
       <div class="fg"><label>記録者</label><select id="dayWriter">${buildStaffOpts(rec.dayWriter||'')}</select></div>
@@ -2907,11 +2948,36 @@ function toggleDayChip(el,item){
   }
 }
 function saveDay(){
-  const r=getRec(curRes);
+  const editDate=document.getElementById('dayEditDate')?.value||dk();
+  const r=getRec(curRes,editDate);
   r.day=document.getElementById('dayText').value.trim();
   r.dayWriter=document.getElementById('dayWriter').value;
   r._dayU=Date.now();
   saveDB(); showSavedToast(); goBack();
+}
+function editDayRecord(dkStr){
+  const r=getRec(curRes,dkStr);
+  document.getElementById('dayEditDate').value=dkStr;
+  document.getElementById('dayText').value=r.day||'';
+  buildStaffSelect('dayWriter',r.dayWriter||'');
+  document.querySelectorAll('#dayChips .chip').forEach(el=>{
+    const txt=el.textContent;
+    el.classList.toggle('selected',(r.day||'').includes(txt));
+  });
+  const modeLabel=document.getElementById('dayEditModeLabel');
+  if(modeLabel){
+    modeLabel.style.display='block';
+    modeLabel.textContent=recordEditLabelByDateTime(dkStr,hmFromTs(r._dayU));
+  }
+  document.getElementById('dayForm').scrollIntoView({behavior:'smooth'});
+}
+function delDayRecord(dkStr){
+  if(!confirm('削除しますか？')) return;
+  const r=getRec(curRes,dkStr);
+  r.day='';
+  r.dayWriter='';
+  r._dayU=Date.now();
+  saveDB(); refreshPanel('day');
 }
 
 // ========== サマリー（スタブ） ==========
