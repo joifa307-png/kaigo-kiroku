@@ -3843,16 +3843,33 @@ function buildPrintSettings(){
         <div class="fg"><label>開始日</label><input type="date" id="printCareFrom" value="${monthFirst}"></div>
         <div class="fg"><label>終了日</label><input type="date" id="printCareTo" value="${today}"></div>
       </div>
+      <div class="fg">
+        <label>対象者</label>
+        <select id="printCareRes" style="font-size:18px;padding:6px;">
+          <option value="__all__">全員</option>${resOpts}
+        </select>
+      </div>
       <button class="btn btn-primary btn-sm" onclick="printCareRange()">印刷プレビュー</button>
     </div>
   </div>`;
 }
 
 function getDatesInRange(from,to){
-  const dates=[]; let d=new Date(from);
-  const end=new Date(to);
-  while(d<=end){ dates.push(d.toISOString().slice(0,10)); d.setDate(d.getDate()+1); }
+  const dates=[];
+  const d=new Date(from+'T00:00:00');
+  const end=new Date(to+'T00:00:00');
+  while(d<=end){ dates.push(dk(d)); d.setDate(d.getDate()+1); }
   return dates;
+}
+
+function splitCareContentToParts(content){
+  const s=String(content||'').trim();
+  if(!s) return {items:'', memo:''};
+  const opts=new Set((db.settings&&db.settings.careItems)||[]);
+  const tokens=s.split(/[、,\n]/).map(t=>t.trim()).filter(Boolean);
+  const items=[], memo=[];
+  tokens.forEach(t=>{ (opts.has(t)?items:memo).push(t); });
+  return {items:items.join('、'), memo:memo.join('、')};
 }
 
 function printVitalRange(){
@@ -3872,7 +3889,7 @@ function printVitalRange(){
           <td>${dk}</td><td>${res.name}</td>
           <td>${normalizeTimeText(v.time)||''}</td><td>${normalizeTempValue(v.temp)||''}</td>
           <td>${v.sbp||''}/${v.dbp||''}</td><td>${v.pulse||''}</td>
-          <td>${v.spo2||''}</td><td>${v.staff||''}</td>
+          <td>${v.spo2||''}</td><td>${v.weight||''}</td><td>${v.staff||''}</td>
         </tr>`;
       });
     });
@@ -3880,8 +3897,8 @@ function printVitalRange(){
   const html=`
     <div class="print-title">${FAC.name} バイタル記録 ${from} ～ ${to}</div>
     <table class="print-table">
-      <thead><tr><th>日付</th><th>氏名</th><th>時刻</th><th>体温(℃)</th><th>血圧</th><th>脈拍</th><th>SpO2(%)</th><th>担当</th></tr></thead>
-      <tbody>${rows||'<tr><td colspan="8" style="text-align:center;">記録なし</td></tr>'}</tbody>
+      <thead><tr><th>日付</th><th>氏名</th><th>時刻</th><th>体温(℃)</th><th>血圧</th><th>脈拍</th><th>SpO2(%)</th><th>体重(kg)</th><th>担当</th></tr></thead>
+      <tbody>${rows||'<tr><td colspan="9" style="text-align:center;">記録なし</td></tr>'}</tbody>
     </table>`;
   document.getElementById('printArea').innerHTML=html;
   window.print();
@@ -3890,24 +3907,27 @@ function printVitalRange(){
 function printCareRange(){
   const from=document.getElementById('printCareFrom').value;
   const to=document.getElementById('printCareTo').value;
+  const resName=document.getElementById('printCareRes')?.value||'__all__';
   if(!from||!to){ alert('期間を入力してください'); return; }
   const dates=getDatesInRange(from,to);
   let html=`<div class="print-title">${FAC.name} ケア記録サマリー ${from} ～ ${to}</div>`;
-  [...db.residents].sort(compareResidentsStable).forEach(res=>{
+  const targets=resName==='__all__'?[...db.residents].sort(compareResidentsStable):db.residents.filter(r=>r.name===resName);
+  targets.forEach(res=>{
     const rows=[];
     dates.forEach(dk=>{
       const rec=db.records[dk]&&db.records[dk][res.name];
       if(!rec) return;
       if((rec.care||[]).length>0){
         rec.care.forEach(c=>{
-          rows.push(`<tr><td>${dk}</td><td>${c.time||''}</td><td>${(c.chips||[]).join('、')}</td><td>${c.content||''}</td><td>${c.staff||''}</td></tr>`);
+          const parts=splitCareContentToParts(c.content);
+          rows.push(`<tr><td>${dk}</td><td>${normalizeTimeText(c.time)||''}</td><td>${parts.items}</td><td>${parts.memo}</td><td>${c.staff||''}</td></tr>`);
         });
       }
     });
     if(rows.length>0){
       html+=`<div class="print-subtitle">${res.name}</div>
       <table class="print-table">
-        <thead><tr><th>日付</th><th>時刻</th><th>ケア内容</th><th>メモ</th><th>担当</th></tr></thead>
+        <thead><tr><th>日付</th><th>時刻</th><th>項目</th><th>ケア内容</th><th>担当</th></tr></thead>
         <tbody>${rows.join('')}</tbody>
       </table>`;
     }
