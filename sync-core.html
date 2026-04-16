@@ -44,6 +44,16 @@ body.print-core-open .wrap{visibility:hidden}
 .pc-print-table{width:100%;border-collapse:collapse;margin:12px 0}
 .pc-print-table th,.pc-print-table td{border:1px solid #333;padding:6px 8px;text-align:left;font-size:13px}
 .pc-print-table th{background:#eee}
+/* テスト2 本番: <table> を使わない（iPad+AirPrint で table のPDF化のみ落ちる事例への回避） */
+.pc-print-sheet{margin:12px 0;border:1px solid #333;font-size:13px}
+.pc-print-grid-row{
+  display:grid;grid-template-columns:22% 24% 54%;
+  border-bottom:1px solid #333;
+}
+.pc-print-grid-row:last-child{border-bottom:none}
+.pc-print-grid-head{font-weight:700;background:#eee}
+.pc-print-grid-row > div{padding:6px 8px;border-right:1px solid #333;word-break:break-word}
+.pc-print-grid-row > div:last-child{border-right:none}
 .pc-small{font-size:11px;color:#444;word-break:break-all}
 .no-print-core{margin-top:20px;padding-top:12px;border-top:1px dashed #ccc}
 @media print{ .no-print-core{display:none!important} }
@@ -148,18 +158,36 @@ body.print-core-open .wrap{visibility:hidden}
     <p class="small" style="margin:0 0 10px">
       本アプリ（index.html）では印刷できないが、他ページではできる／プリンターは反応するがデータが出ない、といった場合に、
       <strong>この Sync Core 単体で <code>window.print()</code> が通るか</strong>を確認するための最小テストです。
-      テスト1はプレーンテキスト中心、テスト2は HTML 表です（本アプリの印刷プレビューに近い負荷の目安）。
+    </p>
+    <p class="small" style="margin:0 0 10px">
+      <strong>テスト1は「常に安定する基準」とは限りません。</strong>
+      特に <strong>テスト2（とくに HTML table）が NG になった直後にテスト1も NG になる</strong>ことはよくある挙動で、
+      ブラウザや iPad の印刷パイプ、AirPrint、プリンター側の<strong>ジョブキューや内部状態が一度詰まったまま</strong>になっている可能性が高いです（ページのバグというより、<strong>失敗した印刷ジョブのあとに何かが残る</strong>イメージ）。
+      そのため「2だけが悪い」と決めつけず、<strong>詰まりを解いてから</strong>もう一度テスト1だけ試す、という順序が切り分けに向きます。
+    </p>
+    <p class="small" style="margin:0 0 10px">
+      <strong>切り分けの読み方（目安）</strong><br>
+      ・<strong>テスト1がOK・テスト2（table）だけ繰り返し NG</strong>で、かつ table のあとに必ず詰まる → <code>&lt;table&gt;</code> 経由のPDF生成やプリンター側の解釈が弱い線。<br>
+      ・<strong>詰まったあとは何を印刷してもダメ</strong> → まず <strong>1〜2分待つ／印刷ダイアログを確実に閉じる／プリンター電源再投入／必要なら Safari のタブを閉じて開き直し</strong>などでキューを空にしてから再試験。
+    </p>
+    <p class="small" style="margin:0 0 10px">
+      既定のテスト2は <strong>div＋グリッドの表風</strong>（table を使わない）です。下の「HTML table」は、table が原因か・詰まりかを分けるための<strong>比較用</strong>です。<strong>連打は避け</strong>、1回印刷するたびにプレビューで中身を確認してから次へ進むと状態が追いやすいです。
     </p>
     <div class="row">
       <button class="primary" type="button" onclick="printCoreTest('minimal')">テスト1: 最小（見出し＋本文）</button>
-      <button class="primary" type="button" onclick="printCoreTest('table')">テスト2: 表（ローカルメモから最大15行）</button>
+      <button class="primary" type="button" onclick="printCoreTest('grid')">テスト2: 表風（div・グリッド・最大15行）</button>
     </div>
     <div class="row" style="margin-top:8px">
-      <button type="button" onclick="printCoreTest('minimal', {delayMs:600})">テスト1（遅延600ms・描画待ち）</button>
-      <button type="button" onclick="printCoreTest('table', {delayMs:600})">テスト2（遅延600ms）</button>
+      <button type="button" onclick="printCoreTest('minimal', {delayMs:600})">テスト1（遅延600ms）</button>
+      <button type="button" onclick="printCoreTest('grid', {delayMs:600})">テスト2 表風（遅延600ms）</button>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <button class="warn" type="button" onclick="printCoreTest('tableHtml')">比較: テスト2（HTML table・従来）</button>
+      <button class="warn" type="button" onclick="printCoreTest('tableHtml', {delayMs:600})">比較: table＋遅延600ms</button>
     </div>
     <p class="small" style="margin-top:10px;margin-bottom:0">
-      印刷ダイアログを閉じるとオーバーレイは自動で消えます。Safari で白紙になる場合は「遅延600ms」を試してください。
+      印刷ダイアログを閉じるとオーバーレイは自動で消えます。
+      「詰まった」場合はアプリ側ではキューを掃除できないため、上記の<strong>待ち・プリンター再起動</strong>を挟んでから、<strong>テスト1のみ</strong>で復帰したか確認してください。
     </p>
   </div>
 </div>
@@ -200,9 +228,63 @@ function closePrintCoreOverlay(){
   }
 }
 
+/** 印刷テスト2用: {date,name,text}[] 最大 max 件 */
+function collectPrintCoreSampleRows(max){
+  const lim = max > 0 ? max : 15;
+  const ridToName = new Map((db.residents || []).map(r => [r.id, r.name]));
+  const out = [];
+  const dates = Object.keys(db.notes || {}).sort();
+  outer: for(let di = 0; di < dates.length; di++){
+    const dk = normalizeDateKey(dates[di]);
+    const day = db.notes[dates[di]] || {};
+    const rids = Object.keys(day);
+    for(let ri = 0; ri < rids.length; ri++){
+      if(out.length >= lim) break outer;
+      const rid = rids[ri];
+      const n = day[rid] || {};
+      const name = String(ridToName.get(rid) || rid);
+      const text = String(n.text || '').slice(0, 80);
+      out.push({ date: dk, name: name, text: text });
+    }
+  }
+  if(!out.length){
+    out.push({
+      date: isoDate(),
+      name: '（ダミー）',
+      text: 'ローカルにメモがありません。レイアウトのみのテスト行です。'
+    });
+  }
+  return out;
+}
+
+function printCoreRowsToGridHtml(rows){
+  const head =
+    '<div class="pc-print-grid-row pc-print-grid-head">' +
+    '<div>日付</div><div>利用者</div><div>メモ（先頭80文字）</div></div>';
+  const body = rows.map(r =>
+    '<div class="pc-print-grid-row">' +
+    '<div>' + escPrint(r.date) + '</div>' +
+    '<div>' + escPrint(r.name) + '</div>' +
+    '<div>' + escPrint(r.text) + '</div>' +
+    '</div>'
+  ).join('');
+  return '<div class="pc-print-sheet">' + head + body + '</div>';
+}
+
+function printCoreRowsToTableHtml(rows){
+  const trs = rows.map(r =>
+    '<tr><td>' + escPrint(r.date) + '</td><td>' + escPrint(r.name) + '</td><td>' + escPrint(r.text) + '</td></tr>'
+  ).join('');
+  return (
+    '<table class="pc-print-table"><thead><tr><th>日付</th><th>利用者</th><th>メモ（先頭80文字）</th></tr></thead><tbody>' +
+    trs +
+    '</tbody></table>'
+  );
+}
+
 /**
  * Sync Core 単体の印刷経路検証。iPad で「信号は行くがデータが出ない」切り分け用。
- * @param {'minimal'|'table'} kind
+ * @param {'minimal'|'grid'|'tableHtml'} kind
  * @param {{delayMs?:number}} [opts]
  */
 function printCoreTest(kind, opts){
@@ -224,36 +306,22 @@ function printCoreTest(kind, opts){
       '<p><strong>URL:</strong> ' + escPrint(loc) + '</p>' +
       '<p class="pc-small">UA: ' + escPrint(ua) + '</p>' +
       '</div>' + footerBtn;
-  }else if(kind === 'table'){
-    const ridToName = new Map((db.residents || []).map(r => [r.id, r.name]));
-    const rows = [];
-    const dates = Object.keys(db.notes || {}).sort();
-    outer: for(let di = 0; di < dates.length; di++){
-      const dk = normalizeDateKey(dates[di]);
-      const day = db.notes[dates[di]] || {};
-      const rids = Object.keys(day);
-      for(let ri = 0; ri < rids.length; ri++){
-        if(rows.length >= 15) break outer;
-        const rid = rids[ri];
-        const n = day[rid] || {};
-        const name = ridToName.get(rid) || rid;
-        const tx = String(n.text || '').slice(0, 80);
-        rows.push(
-          '<tr><td>' + escPrint(dk) + '</td><td>' + escPrint(name) + '</td><td>' + escPrint(tx) + '</td></tr>'
-        );
-      }
-    }
-    if(!rows.length){
-      rows.push(
-        '<tr><td>' + escPrint(isoDate()) + '</td><td>（ダミー）</td><td>ローカルにメモがありません。表レンダリングのみのテスト行です。</td></tr>'
-      );
-    }
+  }else if(kind === 'grid'){
+    const rows = collectPrintCoreSampleRows(15);
     z.innerHTML =
       '<div class="pc-print-doc">' +
-      '<h1>Sync Core 印刷テスト（表）</h1>' +
-      '<table class="pc-print-table"><thead><tr><th>日付</th><th>利用者</th><th>メモ（先頭80文字）</th></tr></thead><tbody>' +
-      rows.join('') +
-      '</tbody></table>' +
+      '<h1>Sync Core 印刷テスト（表風・divグリッド）</h1>' +
+      '<p class="pc-small">このページは &lt;table&gt; を使っていません。テスト1がOKで従来テスト2だけNGの環境向け。</p>' +
+      printCoreRowsToGridHtml(rows) +
+      '<p class="pc-small">' + escPrint(ts) + '</p>' +
+      '</div>' + footerBtn;
+  }else if(kind === 'tableHtml'){
+    const rows = collectPrintCoreSampleRows(15);
+    z.innerHTML =
+      '<div class="pc-print-doc">' +
+      '<h1>Sync Core 印刷テスト（HTML table・比較用）</h1>' +
+      '<p class="pc-small">従来実装。ここだけNGならプリンター／OSが table 描画を捨てている可能性が高いです。</p>' +
+      printCoreRowsToTableHtml(rows) +
       '<p class="pc-small">' + escPrint(ts) + '</p>' +
       '</div>' + footerBtn;
   }else{
