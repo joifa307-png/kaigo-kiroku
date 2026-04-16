@@ -2643,6 +2643,7 @@ function buildMealPanel(){
       </div>
       <input type="hidden" id="mealEditDate" value="${todayKey}">
       <div id="mealEditHint" class="text-gray" style="font-size:13px;margin:-2px 0 6px;">入力対象日：${recDayLabel(todayKey)}</div>
+      <div id="mealEditModeLabel" style="display:none;color:var(--red);font-size:14px;font-weight:700;margin:-2px 0 8px;"></div>
       <input type="hidden" id="mealSection" value="${defSec}">
       <div class="fg-row">
         <div class="fg"><label>時刻</label><input type="time" id="mealTime" value="${d0.time}"></div>
@@ -2712,8 +2713,17 @@ function editMealRecord(dkStr){
   const sec=document.getElementById('mealSection')?.value||'lunch';
   const editDate=document.getElementById('mealEditDate');
   const hint=document.getElementById('mealEditHint');
+  const modeLabel=document.getElementById('mealEditModeLabel');
+  const chips=[...document.querySelectorAll('#mealResChips .meal-res-chip')];
   if(editDate) editDate.value=dkStr;
   if(hint) hint.textContent=`入力対象日：${recDayLabel(dkStr)}（編集中）`;
+  chips.forEach(c=>c.classList.remove('selected'));
+  const target=chips.find(c=>c.dataset.name===curRes);
+  if(target) target.classList.add('selected');
+  if(modeLabel){
+    modeLabel.style.display='block';
+    modeLabel.textContent=`${curRes}の履歴編集中`;
+  }
   selectMealChip(sec);
 }
 function delMealRecord(dkStr){
@@ -2723,6 +2733,11 @@ function delMealRecord(dkStr){
   m.time='11:50'; m.menu=''; m.snack=''; m.main=100; m.side=100; m.water='';
   m.dTime='17:30'; m.dMain=100; m.dSide=100; m.dWater='';
   m._u=Date.now();
+  const modeLabel=document.getElementById('mealEditModeLabel');
+  if(modeLabel){
+    modeLabel.style.display='none';
+    modeLabel.textContent='';
+  }
   saveDB(); refreshPanel('meal');
 }
 
