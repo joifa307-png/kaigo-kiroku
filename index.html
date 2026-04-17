@@ -17,7 +17,10 @@
   --red:#A32D2D; --red2:#FCEBEB;
   --text1:#1A1916; --text2:#5C5A54; --text3:#9E9C94;
   --border1:#DDDBD4; --border2:#C8C5BC;
-  --bg:#F5F4F0; --white:#fff; --r1:7px; --r2:10px; --r3:16px;
+  --bg:#F5F4F0; --white:#fff;
+  /* 詳細画面：パネル白との差をやや強める（背景を約1段階濃く） */
+  --detail-screen-bg:#E4DFD4; --detail-screen-bg2:#D8D2C6;
+  --r1:7px; --r2:10px; --r3:16px;
   --shadow:0 2px 8px rgba(0,0,0,.10);
 }
 
@@ -64,12 +67,21 @@ input,select,textarea{font-family:inherit;font-size:30px;}
 .screen{display:none;}
 .screen.active{display:block;}
 
-/* ===== メイン画面 ===== */
-.main-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;}
+/* ===== メイン画面（表ヘッダーは縦スクロール領域内で固定） ===== */
+#mainScreen{
+  display:flex;flex-direction:column;
+  height:100vh;min-height:0;overflow:hidden;
+}
+#mainScreen .main-scroll{
+  flex:1;min-height:0;
+  overflow:auto;-webkit-overflow-scrolling:touch;
+}
 .res-table{width:100%;border-collapse:collapse;min-width:700px;}
-.res-table th{
+.res-table thead th{
+  position:sticky;top:0;z-index:30;
   background:var(--orange);color:#fff;padding:8px 6px;
   font-size:22px;white-space:nowrap;text-align:center;
+  box-shadow:0 2px 4px rgba(0,0,0,.12);
 }
 .res-table td{
   padding:10px 6px;border-bottom:1px solid var(--border1);
@@ -142,6 +154,12 @@ input,select,textarea{font-family:inherit;font-size:30px;}
 }
 .tab.active{color:var(--orange);border-bottom-color:var(--orange);font-weight:700;background:var(--orange-bg);}
 
+/* ===== 詳細画面の背後（メインより一段コントラストを上げる） ===== */
+#detailScreen{
+  background:linear-gradient(180deg,var(--detail-screen-bg) 0%,var(--detail-screen-bg2) 100%);
+  min-height:100vh;
+}
+
 /* ===== パネル ===== */
 .panel{padding:12px;}
 .panel-sec{
@@ -167,6 +185,15 @@ input,select,textarea{font-family:inherit;font-size:30px;}
 .fg textarea{min-height:100px;resize:vertical;}
 .fg-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(0,1fr));gap:10px;}
 .fg-row .fg{min-width:0;}
+/* 時刻＋記入者/担当者の2列：time の最小幅で隣列と重ならないようにする */
+.fg-row.fg-row-datetime{
+  grid-template-columns:minmax(9.5em,1fr) minmax(0,1.15fr);
+  gap:12px;align-items:start;
+}
+.fg-row.fg-row-datetime input[type="time"]{
+  min-width:0;width:100%;max-width:100%;
+  box-sizing:border-box;
+}
 .fg-hint{font-size:14px;color:var(--text3);margin-top:3px;}
 .ex-stool-compact label{margin-bottom:2px;}
 .ex-stool-compact select{font-size:20px!important;padding:6px 10px!important;line-height:1.2;}
@@ -717,6 +744,7 @@ function loadDB(){
   if(!db.records) db.records={};
   db.records=normalizeRecordsMap(db.records||{});
   normalizeVitalTempsInRecords(db.records);
+  coalesceAllRecordArrays(db.records);
   if(!db.supplies) db.supplies=[];
   if(!db.settings) db.settings={};
   restoreSettingsSnapshotIfNeeded();
@@ -1057,16 +1085,18 @@ function dbToSheet(inDb){
       if(!rec||typeof rec!=='object') return;
 
       (rec.vital||[]).forEach((v,idx)=>{
+        if(!String(v.id||'').trim()) v.id=genId('v');
         const a=blankRecRow();
-        a[REC.rid]=String(v.id||('v|'+dk+'|'+name+'|'+idx));
+        a[REC.rid]=String(v.id);
         a[REC.k]='vital'; a[REC.dk]=dk; a[REC.nm]=name; a[REC.uu]=String(_numU(v.sheetU||v.u||0));
         a[REC.seq]=String(idx); a[REC.tm]=v.time||'';
         a[REC.v0]=normalizeTempValue(v.temp??''); a[REC.v1]=v.sbp??''; a[REC.v2]=v.dbp??''; a[REC.v3]=v.pulse??''; a[REC.v4]=v.spo2??''; a[REC.v5]=v.weight??''; a[REC.v6]=v.staff||'';
         pushR(a);
       });
       (rec.excretion||[]).forEach((v,idx)=>{
+        if(!String(v.id||'').trim()) v.id=genId('e');
         const a=blankRecRow();
-        a[REC.rid]=String(v.id||('e|'+dk+'|'+name+'|'+idx));
+        a[REC.rid]=String(v.id);
         a[REC.k]='excretion'; a[REC.dk]=dk; a[REC.nm]=name; a[REC.uu]=String(_numU(v.sheetU||v.u||0));
         a[REC.seq]=String(idx); a[REC.tm]=v.time||'';
         a[REC.ex0]=v.urine||''; a[REC.ex1]=v.pad||''; a[REC.ex2]=v.stool||''; a[REC.ex3]=v.writer||'';
@@ -1074,24 +1104,27 @@ function dbToSheet(inDb){
         pushR(a);
       });
       (rec.bath||[]).forEach((v,idx)=>{
+        if(!String(v.id||'').trim()) v.id=genId('b');
         const a=blankRecRow();
-        a[REC.rid]=String(v.id||('b|'+dk+'|'+name+'|'+idx));
+        a[REC.rid]=String(v.id);
         a[REC.k]='bath'; a[REC.dk]=dk; a[REC.nm]=name; a[REC.uu]=String(_numU(v.sheetU||v.u||0));
         a[REC.seq]=String(idx); a[REC.tm]=v.time||'';
         a[REC.ba0]=v.type||''; a[REC.ba1]=v.staff||'';
         pushR(a);
       });
       (rec.care||[]).forEach((v,idx)=>{
+        if(!String(v.id||'').trim()) v.id=genId('c');
         const a=blankRecRow();
-        a[REC.rid]=String(v.id||('c|'+dk+'|'+name+'|'+idx));
+        a[REC.rid]=String(v.id);
         a[REC.k]='care'; a[REC.dk]=dk; a[REC.nm]=name; a[REC.uu]=String(_numU(v.sheetU||v.u||0));
         a[REC.seq]=String(idx); a[REC.tm]=v.time||'';
         a[REC.ca0]=v.content||''; a[REC.ca1]=v.staff||'';
         pushR(a);
       });
       (rec.notes||[]).forEach((v,idx)=>{
+        if(!String(v.id||'').trim()) v.id=genId('n');
         const a=blankRecRow();
-        a[REC.rid]=String(v.id||('n|'+dk+'|'+name+'|'+idx));
+        a[REC.rid]=String(v.id);
         a[REC.k]='notes'; a[REC.dk]=dk; a[REC.nm]=name; a[REC.uu]=String(_numU(v.sheetU||v.u||0));
         a[REC.seq]=String(idx); a[REC.tm]=v.time||'';
         a[REC.nt0]=v.content||''; a[REC.nt1]=v.writer||''; a[REC.nt2]=v.ts||'';
@@ -1335,6 +1368,7 @@ function sheetToDb(rows){
   Object.keys(dbOut.records||{}).forEach(dk=>{
     Object.keys(dbOut.records[dk]||{}).forEach(nm=>{
       const rr=dbOut.records[dk][nm];
+      coalesceDayTimedArrays(rr);
       ['vital','excretion','bath','care','notes'].forEach(f=>{
         if(rr[f]) rr[f].sort((a,b)=>(a.time||'').localeCompare(b.time||''));
       });
@@ -1387,28 +1421,121 @@ function normalizeResidentsOrder(){
   db.residents.sort(compareResidentsStable);
 }
 
-function mergeArraysById(a, b, idFn){
-  const m=new Map();
-  [...(a||[]), ...(b||[])].forEach(x=>{
-    const k=idFn(x);
-    const u=_numU(x.sheetU||x.u||0);
-    const old=m.get(k);
-    if(!old||u>old.u) m.set(k, {x:cloneDeep(x), u});
+function _recordItemU(x){
+  return _numU(x.sheetU||x.u||0);
+}
+
+/** シートの揺らぎ別ID・取込重複をまとめるための内容キー（同一時刻の別測定は値が違えば別行のまま） */
+function vitalFingerprint(v){
+  return [
+    normalizeTimeText((v&&v.time)||''),
+    normalizeTempValue((v&&v.temp)??''),
+    String((v&&v.sbp)??''),
+    String((v&&v.dbp)??''),
+    String((v&&v.pulse)??''),
+    String((v&&v.spo2)??''),
+    String((v&&v.weight)??''),
+    String((v&&v.staff)||'').trim()
+  ].join('\x1e');
+}
+function excretionFingerprint(e){
+  return [
+    normalizeTimeText((e&&e.time)||''),
+    String((e&&e.urine)||''),
+    String((e&&e.urineMl)||''),
+    String((e&&e.pad)||''),
+    String((e&&e.stool)||''),
+    String((e&&e.writer)||'').trim(),
+    e&&e.padChange?1:0,
+    e&&e.rehaChange?1:0,
+    e&&e.diaperChange?1:0
+  ].join('\x1e');
+}
+function bathFingerprint(b){
+  return [
+    normalizeTimeText((b&&b.time)||''),
+    String((b&&b.type)||''),
+    String((b&&b.staff)||'').trim()
+  ].join('\x1e');
+}
+function careFingerprint(c){
+  return [
+    normalizeTimeText((c&&c.time)||''),
+    String((c&&c.content)||''),
+    String((c&&c.staff)||'').trim()
+  ].join('\x1e');
+}
+function notesFingerprint(n){
+  return [
+    normalizeTimeText((n&&n.time)||''),
+    String((n&&n.content)||''),
+    String((n&&n.writer)||'').trim(),
+    String((n&&n.ts)||'')
+  ].join('\x1e');
+}
+
+/**
+ * 同一 id は sheetU 最大の1件にし、さらに同一フィンガープリントは1件にまとめる（同期・再取込の重複根絶）。
+ */
+function coalesceSameKindItems(items, fpFn, idPrefix){
+  const list=(items||[]).map(x=>cloneDeep(x));
+  list.forEach(x=>{
+    if(!String((x&&x.id)||'').trim()) x.id=genId(idPrefix);
   });
-  return [...m.values()].sort((p,q)=>(p.x.time||'').localeCompare(q.x.time||'')).map(p=>p.x);
+  const byId=new Map();
+  list.forEach(x=>{
+    const id=String(x.id||'').trim();
+    const u=_recordItemU(x);
+    const old=byId.get(id);
+    if(!old||u>old.u) byId.set(id,{x:cloneDeep(x),u});
+  });
+  const byFp=new Map();
+  byId.forEach(({x,u})=>{
+    const fp=fpFn(x);
+    const old=byFp.get(fp);
+    if(!old||u>old.u) byFp.set(fp,{x:cloneDeep(x),u});
+  });
+  return [...byFp.values()].map(o=>o.x).sort((a,b)=>
+    normalizeTimeText((a&&a.time)||'').localeCompare(normalizeTimeText((b&&b.time)||''))
+  );
+}
+
+function coalesceDayTimedArrays(rec){
+  if(!rec||typeof rec!=='object') return;
+  rec.vital=coalesceSameKindItems(rec.vital, vitalFingerprint, 'v');
+  rec.excretion=coalesceSameKindItems(rec.excretion, excretionFingerprint, 'e');
+  rec.bath=coalesceSameKindItems(rec.bath, bathFingerprint, 'b');
+  rec.care=coalesceSameKindItems(rec.care, careFingerprint, 'c');
+  rec.notes=coalesceSameKindItems(rec.notes, notesFingerprint, 'n');
+}
+
+function coalesceAllRecordArrays(records){
+  Object.keys(records||{}).forEach(dk=>{
+    Object.keys((records[dk]||{})).forEach(nm=>{
+      coalesceDayTimedArrays((records[dk]||{})[nm]);
+    });
+  });
 }
 
 function mergeRecordDay(L, R, dk, nm){
   if(!L && !R) return null;
-  if(!L) return cloneDeep(R);
-  if(!R) return cloneDeep(L);
+  if(!L){
+    const o=cloneDeep(R);
+    coalesceDayTimedArrays(o);
+    return o;
+  }
+  if(!R){
+    const o=cloneDeep(L);
+    coalesceDayTimedArrays(o);
+    return o;
+  }
   const out=cloneDeep(L);
 
-  out.vital=mergeArraysById(L.vital, R.vital, e=>String(e.id||e.time||''));
-  out.excretion=mergeArraysById(L.excretion, R.excretion, e=>String(e.id||e.time||''));
-  out.bath=mergeArraysById(L.bath, R.bath, e=>String(e.id||e.time||''));
-  out.care=mergeArraysById(L.care, R.care, e=>String(e.id||e.time||''));
-  out.notes=mergeArraysById(L.notes, R.notes, e=>String(e.id||e.time||''));
+  out.vital=coalesceSameKindItems([...(L.vital||[]),...(R.vital||[])], vitalFingerprint, 'v');
+  out.excretion=coalesceSameKindItems([...(L.excretion||[]),...(R.excretion||[])], excretionFingerprint, 'e');
+  out.bath=coalesceSameKindItems([...(L.bath||[]),...(R.bath||[])], bathFingerprint, 'b');
+  out.care=coalesceSameKindItems([...(L.care||[]),...(R.care||[])], careFingerprint, 'c');
+  out.notes=coalesceSameKindItems([...(L.notes||[]),...(R.notes||[])], notesFingerprint, 'n');
 
   const muL=_numU((L.meal||{})._u), muR=_numU((R.meal||{})._u);
   out.meal=cloneDeep(muR>muL?(R.meal||L.meal||{}):(L.meal||R.meal||{}));
@@ -1509,6 +1636,7 @@ function mergePulledDb(local, remote){
     });
   });
   normalizeVitalTempsInRecords(out.records);
+  coalesceAllRecordArrays(out.records);
   const logo=(local.settings||{}).logoB64;
   if(logo) out.settings.logoB64=logo;
   return out;
@@ -2184,7 +2312,7 @@ function buildVitalPanel(){
     </div>
     <div class="panel-sec" id="vitalForm">
       <h3 id="vitalFormTitle" style="display:flex;align-items:center;gap:8px;">バイタル入力<span id="vitalEditModeLabel" style="display:none;color:var(--red);font-size:inherit;font-weight:700;">今日の履歴編集中</span></h3>
-      <div class="fg-row">
+      <div class="fg-row fg-row-datetime">
         <div class="fg"><label>時刻</label><input type="time" id="vTime" value="${nowTime()}"></div>
         <div class="fg"><label>担当者</label><select id="vStaff">${buildStaffOpts(lv?lv.staff:'')}</select></div>
       </div>
@@ -2288,7 +2416,7 @@ function buildExPanel(){
     </div>
     <div class="panel-sec" id="exForm">
       <h3 id="exFormTitle" style="display:flex;align-items:center;gap:8px;">排泄入力<span id="exEditModeLabel" style="display:none;color:var(--red);font-size:inherit;font-weight:700;">今日の履歴編集中</span></h3>
-      <div class="fg-row">
+      <div class="fg-row fg-row-datetime">
         <div class="fg"><label>時刻</label><input type="time" id="exTime" value="${nowTime()}"></div>
         <div class="fg"><label>記入者</label><select id="exWriter">${buildStaffOpts('')}</select></div>
       </div>
@@ -2354,7 +2482,7 @@ function saveEx(){
     r.excretion[_editEx.idx]={...r.excretion[_editEx.idx],time,writer,urine,urineMl,pad,stool,padChange,rehaChange,diaperChange,sheetU:Date.now()};
     _editEx=null;
   } else {
-    getRec(curRes).excretion.push({id:genId('e'),time,writer,urine,urineMl,pad,stool,padChange,rehaChange,diaperChange});
+    getRec(curRes).excretion.push({id:genId('e'),time,writer,urine,urineMl,pad,stool,padChange,rehaChange,diaperChange,sheetU:Date.now()});
   }
   saveDB(); showSavedToast(); goBack();
 }
@@ -2381,7 +2509,7 @@ function buildBathPanel(){
     <div class="panel-sec"><h3>48時間の記録</h3><div class="hist-list">${histHtml}</div></div>
     <div class="panel-sec" id="bathForm">
       <h3 id="bathFormTitle" style="display:flex;align-items:center;gap:8px;">入浴入力<span id="bathEditModeLabel" style="display:none;color:var(--red);font-size:inherit;font-weight:700;">今日の履歴編集中</span></h3>
-      <div class="fg-row">
+      <div class="fg-row fg-row-datetime">
         <div class="fg"><label>時刻</label><input type="time" id="baTime" value="${nowTime()}"></div>
         <div class="fg"><label>担当者</label><select id="baStaff">${buildStaffOpts('')}</select></div>
       </div>
@@ -2440,7 +2568,7 @@ function buildCarePanel(){
     <div class="panel-sec"><h3>48時間の記録</h3><div class="hist-list">${histHtml}</div></div>
     <div class="panel-sec" id="careForm">
       <h3 style="display:flex;align-items:center;gap:8px;">ケア記録入力<span id="careEditModeLabel" style="display:none;color:var(--red);font-size:inherit;font-weight:700;">今日--:--の履歴編集中</span></h3>
-      <div class="fg-row">
+      <div class="fg-row fg-row-datetime">
         <div class="fg"><label>時刻</label><input type="time" id="caTime" value="${nowTime()}"></div>
         <div class="fg"><label>担当者</label><select id="caStaff">${buildStaffOpts('')}</select></div>
       </div>
@@ -2539,7 +2667,7 @@ function buildMedPanel(){
         <div style="display:flex;flex-wrap:wrap;gap:6px;" id="medTimingChips">${timingChipsHtml}</div>
       </div>
       <input type="hidden" id="medFormTiming" value="${defTiming}">
-      <div class="fg-row">
+      <div class="fg-row fg-row-datetime">
         <div class="fg"><label>時刻</label><input type="time" id="medFormTime" value="${defM.time||''}"></div>
         <div class="fg"><label>担当者</label><select id="medFormStaff">${buildStaffOpts(defM.staff)}</select></div>
       </div>
@@ -2840,7 +2968,7 @@ function buildRecPanel(){
     <div class="panel-sec">
       <h3>レク入力（本日）</h3>
       <div class="fg"><label>内容選択</label><div id="recChips" style="display:flex;flex-wrap:wrap;gap:4px;">${recChips}${kankenChip}</div></div>
-      <div class="fg-row">
+      <div class="fg-row fg-row-datetime">
         <div class="fg"><label>時刻</label><input type="time" id="recTime" value="${rec.rec.time||nowTime()}"></div>
         <div class="fg"><label>担当者</label><input type="text" id="recPart" value="${rec.rec.part||''}" placeholder="担当者名"></div>
       </div>
@@ -2889,7 +3017,7 @@ function buildNotesPanel(){
     <div class="panel-sec"><h3>48時間の申送り</h3><div class="hist-list">${histHtml}</div></div>
     <div class="panel-sec">
       <h3>申送り入力</h3>
-      <div class="fg-row">
+      <div class="fg-row fg-row-datetime">
         <div class="fg"><label>時刻</label><input type="time" id="ntTime" value="${nowTime()}"></div>
         <div class="fg"><label>記入者</label><select id="ntWriter">${buildStaffOpts('')}</select></div>
       </div>
