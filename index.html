@@ -2077,14 +2077,17 @@ function renderMain(){
   }
   tbody.innerHTML=todayRes.map(r=>{
     const rec=db.records[dk()]&&db.records[dk()][r.name]||{};
-    // 申送（48時間以内のメモ：複数日チェック）
-    const now=Date.now();
+    // 申送（選択日当日終了時点から72時間以内のメモ：複数日チェック／履歴と同基準）
+    const refEnd=historyRefEndMs(), winMs=72*3600000;
     const _h48chk=()=>{
       for(let d=0;d<=2;d++){
         const dt=new Date(curDate); dt.setDate(dt.getDate()-d);
         const k=dk(dt);
         const rr=db.records[k]&&db.records[k][r.name]||{};
-        if((rr.notes||[]).some(n=>(now-new Date(n.ts||0).getTime())<48*3600000)) return true;
+        if((rr.notes||[]).some(n=>{
+          const tms=recordItemTsMs(k, n);
+          return tms<=refEnd&&refEnd-tms<=winMs;
+        })) return true;
       }
       return false;
     };
@@ -2249,23 +2252,37 @@ function refreshPanel(tab){
   }
 }
 
-// ========== 48時間履歴取得 ==========
+// ========== 48時間履歴取得（選択日＝「当日」の終わりを基準に72時間以内） ==========
+/** 日付選択で選んだ日を「当日」とみなしたときの、その日の終わり（ローカル 23:59:59.999） */
+function historyRefEndMs(){
+  const t=new Date(curDate);
+  t.setHours(23,59,59,999);
+  return t.getTime();
+}
+/** 記録1件の比較用タイムスタンプ（日付キー＋時刻、または ts 文字列） */
+function recordItemTsMs(dkStr, item){
+  if(item&&item.ts){
+    const x=Date.parse(String(item.ts));
+    if(!isNaN(x)) return x;
+  }
+  return new Date(dkStr+'T'+(item&&item.time||'00:00')+':00').getTime();
+}
 function get48h(name, field){
-  const now=Date.now(), limit=72*3600000, all=[];
+  const refEnd=historyRefEndMs(), limit=72*3600000, all=[];
   for(let d=0;d<=2;d++){
     const dt=new Date(curDate); dt.setDate(dt.getDate()-d);
     const k=dk(dt);
     const dayData=db.records[k]&&db.records[k][name];
     if(!dayData||!dayData[field]) continue;
     dayData[field].forEach((item,i)=>{
-      const ts=new Date(k+'T'+(item.time||'00:00')+':00').getTime();
-      if(now-ts<=limit) all.push({...item,_dk:k,_i:i,_ts:ts});
+      const ts=recordItemTsMs(k, item);
+      if(ts<=refEnd&&refEnd-ts<=limit) all.push({...item,_dk:k,_i:i,_ts:ts});
     });
   }
   return all.sort((a,b)=>b._ts-a._ts);
 }
 function get48hMed(name){
-  const now=Date.now(),limit=72*3600000,all=[];
+  const refEnd=historyRefEndMs(), limit=72*3600000, all=[];
   const ORDER=['morning','lunch','dinner','bedtime'];
   for(let d=0;d<=2;d++){
     const dt=new Date(curDate); dt.setDate(dt.getDate()-d);
@@ -2275,22 +2292,27 @@ function get48hMed(name){
     ORDER.forEach(t=>{
       const m=dayData.med[t];
       if(!m||!m.items||!m.items.length) return;
-      const ts=new Date(k+'T'+(m.time||'00:00')+':00').getTime();
-      if(now-ts<=limit) all.push({...m,_dk:k,_timing:t,_ts:ts});
+      const ts=recordItemTsMs(k, m);
+      if(ts<=refEnd&&refEnd-ts<=limit) all.push({...m,_dk:k,_timing:t,_ts:ts});
     });
   }
   return all.sort((a,b)=>b._ts-a._ts);
 }
 function recDayLabel(dkStr){
-  const dt=new Date(dkStr+'T00:00:00');
-  const today=dk(); const yesterday=dk(new Date(Date.now()-86400000));
+  const dt=new Date(dkStr+'T12:00:00');
+  const sel=new Date(curDate); sel.setHours(0,0,0,0);
+  const y=new Date(sel); y.setDate(y.getDate()-1);
+  const today=dk(sel);
+  const yesterday=dk(y);
   if(dkStr===today) return '今日';
   if(dkStr===yesterday) return '昨日';
   return `${pad(dt.getMonth()+1)}/${pad(dt.getDate())}`;
 }
 function recordEditLabelByDate(dkStr){
-  const today=dk();
-  const yesterday=dk(new Date(Date.now()-86400000));
+  const sel=new Date(curDate); sel.setHours(0,0,0,0);
+  const y=new Date(sel); y.setDate(y.getDate()-1);
+  const today=dk(sel);
+  const yesterday=dk(y);
   if(dkStr===today) return '今日の履歴編集中';
   if(dkStr===yesterday) return '昨日の履歴編集中';
   const dt=new Date(dkStr+'T00:00:00');
