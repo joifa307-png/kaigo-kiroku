@@ -4184,38 +4184,159 @@ function printCareRange(){
   const dates=getDatesInRange(from,to);
   let html=`<div class="print-title">${FAC.name} ケア記録サマリー ${from} ～ ${to}</div>`;
   const targets=resName==='__all__'?[...db.residents].sort(compareResidentsStable):db.residents.filter(r=>r.name===resName);
-  targets.forEach(res=>{
+  targets.forEach((res,ri)=>{
     const rawRows=[];
-    dates.forEach(dk=>{
-      const rec=db.records[dk]&&db.records[dk][res.name];
+    dates.forEach(dateKey=>{
+      const rec=db.records[dateKey]&&db.records[dateKey][res.name];
       if(!rec) return;
-      if((rec.care||[]).length>0){
-        rec.care.forEach(c=>{
-          rawRows.push({dk,c});
+
+      // バイタル
+      (rec.vital||[]).forEach(v=>{
+        const parts=[];
+        const tv=normalizeTempValue(v.temp);
+        if(tv!=='' && tv!=null) parts.push('体温:'+tv+'℃');
+        if((v.sbp&&String(v.sbp).trim()) || (v.dbp&&String(v.dbp).trim())) parts.push('血圧:'+(v.sbp||'')+'/'+(v.dbp||''));
+        if(v.pulse&&String(v.pulse).trim()) parts.push('脈拍:'+v.pulse);
+        if(v.spo2&&String(v.spo2).trim()&&v.spo2!=='—') parts.push('SpO2:'+v.spo2+'%');
+        if(v.weight&&String(v.weight).trim()) parts.push('体重:'+v.weight+'kg');
+        if(!parts.length) return;
+        rawRows.push({
+          dk:dateKey,
+          t:normalizeTimeText(v.time)||'',
+          cat:'バイタル',
+          body:parts.join('、'),
+          staff:v.staff||'',
+          _key:'v:'+(v.id||(v.time+'|'+parts.join('')))
+        });
+      });
+
+      // 排泄
+      (rec.excretion||[]).forEach(e=>{
+        const parts=[];
+        if(e.urine&&e.urine!=='なし') parts.push('排尿:'+e.urine);
+        else if(e.urine==='なし') parts.push('排尿:なし');
+        if(e.pad&&e.pad!=='なし') parts.push('パット:'+e.pad);
+        if(e.stool&&e.stool!=='なし') parts.push('排便:'+e.stool);
+        else if(e.stool==='なし') parts.push('排便:なし');
+        // 交換系フラグ
+        const flags=[];
+        if(e.padChange) flags.push('パット交換');
+        if(e.rehaChange) flags.push('リハパン交換');
+        if(e.diaperChange) flags.push('おむつ交換');
+        if(flags.length) parts.push(flags.join('・'));
+        if(!parts.length) return;
+        rawRows.push({
+          dk:dateKey,
+          t:normalizeTimeText(e.time)||'',
+          cat:'排泄',
+          body:parts.join('、'),
+          staff:e.writer||e.staff||'',
+          _key:'e:'+(e.id||(e.time+'|'+parts.join('')))
+        });
+      });
+
+      // 入浴
+      (rec.bath||[]).forEach(b=>{
+        const type=b.type||'';
+        if(!type) return;
+        rawRows.push({
+          dk:dateKey,
+          t:normalizeTimeText(b.time)||'',
+          cat:'入浴',
+          body:type,
+          staff:b.staff||'',
+          _key:'b:'+(b.id||(b.time+'|'+type))
+        });
+      });
+
+      // 食事（入力があるときだけ行を出す）
+      const ml=rec.meal||{};
+      const hasMeal = (k)=>ml[k]!=null && String(ml[k]).trim()!=='';
+      // 朝食
+      if(hasMeal('bMain')||hasMeal('bSide')||hasMeal('bWater')){
+        const parts=[];
+        if(hasMeal('bMain')) parts.push('主食:'+ml.bMain+'%');
+        if(hasMeal('bSide')) parts.push('副食:'+ml.bSide+'%');
+        if(hasMeal('bWater')) parts.push('水分:'+ml.bWater+'ml');
+        rawRows.push({
+          dk:dateKey,
+          t:normalizeTimeText(ml.bTime)||'07:30',
+          cat:'朝食',
+          body:parts.join('、'),
+          staff:'',
+          _key:'mb:'+dateKey
         });
       }
+      // 昼食
+      if(hasMeal('main')||hasMeal('side')||hasMeal('water')||hasMeal('menu')||hasMeal('snack')){
+        const parts=[];
+        if(hasMeal('main')) parts.push('主食:'+ml.main+'%');
+        if(hasMeal('side')) parts.push('副食:'+ml.side+'%');
+        if(hasMeal('water')) parts.push('水分:'+ml.water+'ml');
+        if(hasMeal('menu')) parts.push('メニュー:'+ml.menu);
+        if(hasMeal('snack')) parts.push('おやつ:'+ml.snack);
+        rawRows.push({
+          dk:dateKey,
+          t:normalizeTimeText(ml.time)||'11:50',
+          cat:'昼食',
+          body:parts.join('、'),
+          staff:'',
+          _key:'ml:'+dateKey
+        });
+      }
+      // 夕食
+      if(hasMeal('dMain')||hasMeal('dSide')||hasMeal('dWater')){
+        const parts=[];
+        if(hasMeal('dMain')) parts.push('主食:'+ml.dMain+'%');
+        if(hasMeal('dSide')) parts.push('副食:'+ml.dSide+'%');
+        if(hasMeal('dWater')) parts.push('水分:'+ml.dWater+'ml');
+        rawRows.push({
+          dk:dateKey,
+          t:normalizeTimeText(ml.dTime)||'17:30',
+          cat:'夕食',
+          body:parts.join('、'),
+          staff:'',
+          _key:'md:'+dateKey
+        });
+      }
+
+      // ケア記録
+      (rec.care||[]).forEach(c=>{
+        const content=getCareContentText(c);
+        if(!content) return;
+        rawRows.push({
+          dk:dateKey,
+          t:normalizeTimeText(c.time)||'',
+          cat:'ケア記録',
+          body:content,
+          staff:c.staff||'',
+          _key:'c:'+(c.id||(c.time+'|'+content))
+        });
+      });
     });
-    const rows=dedupePrintRows(rawRows, row=>{
-      const c=row.c||{};
-      const content=getCareContentText(c);
-      return [
-        res.name,row.dk,
-        c.id||'',
-        normalizeTimeText(c.time)||'',
-        content,
-        c.staff||'',
-        c.sheetU||''
-      ].join('|');
-    }).map(row=>{
-      const c=row.c||{};
-      const content=getCareContentText(c);
-      const parts=splitCareContentToParts(content);
-      return `<tr><td>${row.dk}</td><td>${normalizeTimeText(c.time)||''}</td><td>${parts.items}</td><td>${parts.memo}</td><td>${c.staff||''}</td></tr>`;
+
+    // 重複除去（id / 内容キーで）
+    const deduped=dedupePrintRows(rawRows, row=>[res.name,row.dk,row._key,row.cat,row.t,row.body,row.staff].join('|'));
+
+    // 日付→時刻→項目順にソート
+    const catOrder={'バイタル':1,'排泄':2,'入浴':3,'朝食':4,'昼食':5,'夕食':6,'ケア記録':7};
+    deduped.sort((a,b)=>{
+      if(a.dk!==b.dk) return a.dk<b.dk?-1:1;
+      const at=a.t||'99:99', bt=b.t||'99:99';
+      if(at!==bt) return at<bt?-1:1;
+      return (catOrder[a.cat]||99)-(catOrder[b.cat]||99);
     });
+
+    // 行HTML
+    const rows=deduped.map(row=>{
+      return `<tr><td>${row.dk}</td><td>${row.t||''}</td><td>${row.cat}</td><td>${row.body||''}</td><td>${row.staff||''}</td></tr>`;
+    });
+
     if(rows.length>0){
-      html+=`<div class="print-subtitle">${res.name}</div>
+      const pageBreak=ri>0?'style="page-break-before:always;"':'';
+      html+=`<div class="print-subtitle" ${pageBreak}>${res.name}（${res.care||''}）</div>
       <table class="print-table">
-        <thead><tr><th>日付</th><th>時刻</th><th>項目</th><th>ケア内容</th><th>担当</th></tr></thead>
+        <thead><tr><th>日付</th><th>時刻</th><th>項目</th><th>内容</th><th>担当</th></tr></thead>
         <tbody>${rows.join('')}</tbody>
       </table>`;
     }
