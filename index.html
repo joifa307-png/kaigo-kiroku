@@ -1186,6 +1186,9 @@ function dbToSheet(inDb){
         a[REC.k]='care'; a[REC.dk]=dk; a[REC.nm]=name; a[REC.uu]=String(_numU(v.sheetU||v.u||0));
         a[REC.seq]=String(idx); a[REC.tm]=v.time||'';
         a[REC.ca0]=v.content||''; a[REC.ca1]=v.staff||'';
+        if(v.forwardToNotes||v.forwardNoteId){
+          a[REC.exj]=JSON.stringify({forwardToNotes:!!v.forwardToNotes,forwardNoteId:v.forwardNoteId||''});
+        }
         pushR(a);
       });
       (rec.notes||[]).forEach((v,idx)=>{
@@ -1195,6 +1198,7 @@ function dbToSheet(inDb){
         a[REC.k]='notes'; a[REC.dk]=dk; a[REC.nm]=name; a[REC.uu]=String(_numU(v.sheetU||v.u||0));
         a[REC.seq]=String(idx); a[REC.tm]=v.time||'';
         a[REC.nt0]=v.content||''; a[REC.nt1]=v.writer||''; a[REC.nt2]=v.ts||'';
+        if(v._deleted) a[REC.exj]=JSON.stringify({_deleted:1});
         pushR(a);
       });
 
@@ -1291,6 +1295,8 @@ function applyRecordRow(dbOut, row){
   const tm=normalizeTimeText(row[REC.tm]);
   if(!dk||!name||!kind) return;
   const rec=ensureDay(dbOut, dk, name);
+  let exj={};
+  try{ exj=JSON.parse(row[REC.exj]||'{}')||{}; }catch(_){ exj={}; }
 
   if(kind==='vital'){
     const o={
@@ -1316,11 +1322,27 @@ function applyRecordRow(dbOut, row){
     return;
   }
   if(kind==='care'){
-    rec.care.push({ id:String(row[REC.rid]||genId('c')), time:tm||'', content:row[REC.ca0], staff:row[REC.ca1], sheetU:u });
+    rec.care.push({
+      id:String(row[REC.rid]||genId('c')),
+      time:tm||'',
+      content:row[REC.ca0],
+      staff:row[REC.ca1],
+      forwardToNotes:!!exj.forwardToNotes,
+      forwardNoteId:exj.forwardNoteId||'',
+      sheetU:u
+    });
     return;
   }
   if(kind==='notes'){
-    rec.notes.push({ id:String(row[REC.rid]||genId('n')), time:tm||'', content:row[REC.nt0], writer:row[REC.nt1], ts:row[REC.nt2]||new Date().toISOString(), sheetU:u });
+    rec.notes.push({
+      id:String(row[REC.rid]||genId('n')),
+      time:tm||'',
+      content:row[REC.nt0],
+      writer:row[REC.nt1],
+      ts:row[REC.nt2]||new Date().toISOString(),
+      _deleted:!!Number(exj._deleted||0),
+      sheetU:u
+    });
     return;
   }
   if(kind==='meal'){
@@ -1539,6 +1561,10 @@ function notesFingerprint(n){
     String((n&&n.writer)||'').trim(),
     String((n&&n.ts)||'')
   ].join('\x1e');
+}
+function isActiveNote(n){
+  if(!n||n._deleted) return false;
+  return String(n.content||'').trim().length>0;
 }
 
 /**
@@ -2025,7 +2051,7 @@ function openSummary(name){
   html+=`<tr><td style="padding:10px 8px;border:1px solid #ccc;font-weight:600;font-size:18px;white-space:nowrap;background:${notesBg};position:sticky;left:0;z-index:1;">申送り</td>`;
   days.forEach(d=>{
     const dd=db.records[d.k]&&db.records[d.k][name];
-    const hasNote=dd&&dd.notes&&dd.notes.length>0;
+    const hasNote=!!(dd&&(dd.notes||[]).some(isActiveNote));
     const bg2=d.isToday?'background:#fffbf5;':`background:${notesBg};`;
     const cell=hasNote
       ? `<span style="color:#e53935;font-size:22px;font-weight:700;cursor:pointer;line-height:1;" onclick="jumpToSummaryNotes('${d.k}')">●</span>`
@@ -2095,6 +2121,7 @@ function renderMain(){
         const k=dk(dt);
         const rr=db.records[k]&&db.records[k][r.name]||{};
         if((rr.notes||[]).some(n=>{
+          if(!isActiveNote(n)) return false;
           const tms=recordItemTsMs(k, n);
           return tms<=refEnd&&refEnd-tms<=winMs;
         })) return true;
@@ -2285,6 +2312,7 @@ function get48h(name, field){
     const dayData=db.records[k]&&db.records[k][name];
     if(!dayData||!dayData[field]) continue;
     dayData[field].forEach((item,i)=>{
+      if(field==='notes' && !isActiveNote(item)) return;
       const ts=recordItemTsMs(k, item);
       if(ts<=refEnd&&refEnd-ts<=limit) all.push({...item,_dk:k,_i:i,_ts:ts});
     });
@@ -2720,7 +2748,7 @@ function saveCare(){
     r.care[_editCare.idx]={...prev,time,content,staff,forwardToNotes,sheetU:Date.now()};
     if(forwardToNotes){
       const noteId=prev.forwardNoteId||genId('n');
-      const notePayload={id:noteId,time,writer:staff,content,ts:new Date().toISOString(),sheetU:Date.now()};
+      const notePayload={id:noteId,time,writer:staff,content,ts:new Date().toISOString(),_deleted:false,sheetU:Date.now()};
       const ni=(r.notes||[]).findIndex(n=>n&&n.id===noteId);
       if(ni>=0) r.notes[ni]={...(r.notes[ni]||{}),...notePayload};
       else{
@@ -2735,7 +2763,7 @@ function saveCare(){
     const item={id:genId('c'),time,content,staff,forwardToNotes,sheetU:Date.now()};
     if(forwardToNotes){
       const noteId=genId('n');
-      r.notes.push({id:noteId,time,writer:staff,content,ts:new Date().toISOString(),sheetU:Date.now()});
+      r.notes.push({id:noteId,time,writer:staff,content,ts:new Date().toISOString(),_deleted:false,sheetU:Date.now()});
       item.forwardNoteId=noteId;
     }
     r.care.push(item);
@@ -2758,6 +2786,8 @@ const MED_TIMINGS=[
 function buildMedPanel(){
   const rec=getRec(curRes);
   const hist=get48hMed(curRes);
+  const dayIdx=curDate.getDate()-1;
+  const targets=residentsOnDaySorted(dayIdx);
   const timingLabels={morning:'朝食後',lunch:'昼食後',dinner:'夕食後',bedtime:'就寝前'};
   const histHtml=hist.length?hist.map(m=>`<div class="hist-item">
     <div class="hist-time">${recDayLabel(m._dk)}<br>${timingLabels[m._timing]||m._timing}</div>
@@ -2783,6 +2813,10 @@ function buildMedPanel(){
     const badge=done?'✔':none?'－':'';
     return `<div class="chip med-timing-chip${t.id===defTiming?' selected':''}" data-timing="${t.id}" onclick="selectMedTimingChip('${t.id}')">${t.label}${badge?` <small>${badge}</small>`:''}</div>`;
   }).join('');
+  const targetChipsHtml=targets.map(r=>{
+    const sel=r.name===curRes?' selected':'';
+    return `<div class="chip${sel}" data-name="${escapeAttr(r.name)}" onclick="this.classList.toggle('selected')">${escapeHtml(r.name)}</div>`;
+  }).join('');
 
   return `<div class="panel">
     <div class="panel-sec"><h3>服薬履歴</h3><div class="hist-list">${histHtml}</div></div>
@@ -2791,6 +2825,10 @@ function buildMedPanel(){
       <div class="fg">
         <label>区分</label>
         <div style="display:flex;flex-wrap:wrap;gap:6px;" id="medTimingChips">${timingChipsHtml}</div>
+      </div>
+      <div class="fg">
+        <label>対象利用者</label>
+        <div id="medTargetChips" style="display:flex;flex-wrap:wrap;gap:6px;">${targetChipsHtml}</div>
       </div>
       <input type="hidden" id="medFormTiming" value="${defTiming}">
       <div class="fg-row fg-cols-2">
@@ -2809,7 +2847,8 @@ function selectMedTimingChip(timing){
   document.querySelectorAll('.med-timing-chip').forEach(c=>c.classList.remove('selected'));
   document.querySelector(`.med-timing-chip[data-timing="${timing}"]`).classList.add('selected');
   document.getElementById('medFormTiming').value=timing;
-  const m=getRec(curRes).med[timing]||{time:'',staff:'',items:[]};
+  const targetName=document.querySelector('#medTargetChips .chip.selected')?.getAttribute('data-name')||curRes;
+  const m=getRec(targetName).med[timing]||{time:'',staff:'',items:[]};
   document.getElementById('medFormTime').value=m.time||'';
   document.getElementById('medFormStaff').value=m.staff||'';
   const medChipItems=['処方薬','漢方薬','解熱鎮痛薬','点眼薬','服薬なし'];
@@ -2841,8 +2880,15 @@ function saveMed(){
     .map(e=>e.dataset.item||e.textContent.trim());
   const other=(document.getElementById('medFormOther')?.value||'').trim();
   const items=[...chipped,...(other?other.split('、').map(s=>s.trim()).filter(Boolean):[])];
-  const r=getRec(curRes);
-  r.med[timing]={time,staff,items,_u:Date.now()};
+  const targetNames=[...document.querySelectorAll('#medTargetChips .chip.selected')]
+    .map(e=>e.getAttribute('data-name')||e.textContent.trim())
+    .filter(Boolean);
+  if(!targetNames.length){ alert('対象利用者を選択してください'); return; }
+  const ts=Date.now();
+  targetNames.forEach(name=>{
+    const r=getRec(name);
+    r.med[timing]={time,staff,items,_u:ts};
+  });
   saveDB(); showSavedToast(); goBack();
 }
 function delMed(dkStr,timing){
@@ -3157,12 +3203,15 @@ function saveNote(){
   const writer=document.getElementById('ntWriter').value;
   const content=document.getElementById('ntContent').value.trim();
   if(!content){ alert('内容を入力してください'); return; }
-  getRec(curRes).notes.push({id:genId('n'),time,writer,content,ts:new Date().toISOString(),sheetU:Date.now()});
+  getRec(curRes).notes.push({id:genId('n'),time,writer,content,ts:new Date().toISOString(),_deleted:false,sheetU:Date.now()});
   saveDB(); showSavedToast(); refreshPanel('notes');
 }
 function delNote(dkStr,idx){
   if(!confirm('削除しますか？')) return;
-  getRec(curRes,dkStr).notes.splice(idx,1);
+  const r=getRec(curRes,dkStr);
+  const n=(r.notes||[])[idx];
+  if(!n) return;
+  r.notes[idx]={...n,_deleted:true,sheetU:Date.now()};
   saveDB(); refreshPanel('notes');
 }
 
