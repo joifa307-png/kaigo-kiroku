@@ -2669,14 +2669,11 @@ function buildCarePanel(){
       </div>
       <div class="fg"><label>内容選択</label><div id="careChips" style="display:flex;flex-wrap:wrap;gap:4px;">${careOpts}</div></div>
       <div class="fg">
-        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:6px;">
-          <span style="font-size:20px;font-weight:600;color:var(--text2);">内容（手入力）</span>
-          <label for="caForwardNote" style="display:inline-flex;align-items:center;gap:6px;font-size:16px;color:var(--text2);font-weight:600;cursor:pointer;">
-            <input type="checkbox" id="caForwardNote" style="width:18px;height:18px;accent-color:#1a7fd4;cursor:pointer;">
-            申送りへ転送
-          </label>
-        </div>
+        <label>内容（手入力）</label>
         <textarea id="caContent" rows="2" placeholder="自由記入"></textarea>
+      </div>
+      <div style="margin:6px 0 10px;">
+        <div id="caForwardChip" class="chip" onclick="toggleForwardCareChip(this)" style="border-color:var(--red);color:var(--red);font-weight:700;">申送りへ転送</div>
       </div>
       <button class="btn btn-primary btn-block" onclick="saveCare()">記録</button>
     </div>
@@ -2688,14 +2685,17 @@ function toggleChip(el,item){
   const ta=document.getElementById('caContent');
   if(ta) ta.value=sel.join('、');
 }
+function toggleForwardCareChip(el){
+  el.classList.toggle('selected');
+}
 let _editCare=null;
 function editCare(dkStr,idx){
   const c=getRec(curRes,dkStr).care[idx];
   document.getElementById('caTime').value=c.time||'';
   buildStaffSelect('caStaff',c.staff||'');
   document.getElementById('caContent').value=c.content||'';
-  const fw=document.getElementById('caForwardNote');
-  if(fw) fw.checked=!!c.forwardToNotes;
+  const fw=document.getElementById('caForwardChip');
+  if(fw) fw.classList.toggle('selected', !!c.forwardToNotes);
   document.querySelectorAll('#careChips .chip').forEach(el=>{
     const txt=el.textContent;
     el.classList.toggle('selected',(c.content||'').includes(txt));
@@ -2712,7 +2712,7 @@ function saveCare(){
   const time=document.getElementById('caTime').value||nowTime();
   const staff=document.getElementById('caStaff').value;
   const content=document.getElementById('caContent').value.trim();
-  const forwardToNotes=!!document.getElementById('caForwardNote')?.checked;
+  const forwardToNotes=!!document.getElementById('caForwardChip')?.classList.contains('selected');
   if(!content){ alert('内容を入力してください'); return; }
   if(_editCare){
     const r=getRec(curRes,_editCare.dkStr);
