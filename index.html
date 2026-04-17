@@ -2300,13 +2300,7 @@ function get48hMed(name){
 }
 function recDayLabel(dkStr){
   const dt=new Date(dkStr+'T12:00:00');
-  const sel=new Date(curDate); sel.setHours(0,0,0,0);
-  const y=new Date(sel); y.setDate(y.getDate()-1);
-  const today=dk(sel);
-  const yesterday=dk(y);
-  if(dkStr===today) return '今日';
-  if(dkStr===yesterday) return '昨日';
-  return `${pad(dt.getMonth()+1)}/${pad(dt.getDate())}`;
+  return `${dt.getMonth()+1}/${pad(dt.getDate())}`;
 }
 function dateLabelWithWeek(dkStr){
   const dt=new Date(dkStr+'T12:00:00');
