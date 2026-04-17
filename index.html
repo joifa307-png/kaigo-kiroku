@@ -2140,7 +2140,7 @@ function renderMain(){
     const _mParts=[];
     [{t:'morning',th:8.5},{t:'lunch',th:12},{t:'dinner',th:18},{t:'bedtime',th:21}].forEach(({t,th})=>{
       if(_mReal(t)) _mParts.push('<span style="color:var(--blue);font-weight:700;">✔</span>');
-      else if(_mAny(t)){}
+      else if(_mAny(t)) _mParts.push('<span style="color:var(--text3);font-weight:700;">ー</span>');
       else if(_isToday&&_nowH>=th) _mParts.push('<span style="color:var(--orange2);font-weight:700;">？</span>');
     });
     const mdc=_mParts.length?`<span class="cell-val" style="font-size:18px;letter-spacing:1px;">${_mParts.join('')}</span>`:'<span class="cell-empty">—</span>';
