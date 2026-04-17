@@ -2001,7 +2001,7 @@ function openSummary(name){
         const n=Number(raw.replace(/[^\d.-]/g,''));
         return isNaN(n)?acc:acc+n;
       },0);
-      return sum>0?`<span style="color:#0F6E56;font-weight:700;">合計${sum}㎖</span>`:'—';
+      return sum>0?`<span style="color:#1a7fd4;font-weight:700;">${sum}㎖</span>`:'—';
     }},
     {label:'パット交換', fn:(r)=>{if(!r.excretion)return '—';return r.excretion.some(e=>e.padChange)?'<span style="color:#1a7fd4;font-weight:700;">交換</span>':'—';}},
     {label:'リハパン交換', fn:(r)=>{if(!r.excretion)return '—';return r.excretion.some(e=>e.rehaChange)?'<span style="color:#1a7fd4;font-weight:700;">交換</span>':'—';}},
@@ -2669,13 +2669,13 @@ function buildCarePanel(){
       </div>
       <div class="fg"><label>内容選択</label><div id="careChips" style="display:flex;flex-wrap:wrap;gap:4px;">${careOpts}</div></div>
       <div class="fg">
-        <label style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;">
-          <span>内容（手入力）</span>
-          <span style="display:inline-flex;align-items:center;gap:6px;font-size:16px;color:var(--text2);font-weight:600;">
-            <input type="checkbox" id="caForwardNote" style="width:18px;height:18px;">
-            ☑申送りへ転送
-          </span>
-        </label>
+        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:6px;">
+          <span style="font-size:20px;font-weight:600;color:var(--text2);">内容（手入力）</span>
+          <label for="caForwardNote" style="display:inline-flex;align-items:center;gap:6px;font-size:16px;color:var(--text2);font-weight:600;cursor:pointer;">
+            <input type="checkbox" id="caForwardNote" style="width:18px;height:18px;accent-color:#1a7fd4;cursor:pointer;">
+            申送りへ転送
+          </label>
+        </div>
         <textarea id="caContent" rows="2" placeholder="自由記入"></textarea>
       </div>
       <button class="btn btn-primary btn-block" onclick="saveCare()">記録</button>
