@@ -175,6 +175,9 @@ input,select,textarea{font-family:inherit;font-size:30px;}
 #detailScreen{
   background:linear-gradient(180deg,var(--detail-screen-bg) 0%,var(--detail-screen-bg2) 100%);
   min-height:100vh;
+  /* 3列フォームの列ピッチ（時刻・体温・収縮期…はすべて同じトラック定義） */
+  --fg-cols3-gap:10px;
+  --fg-cols3-track:minmax(0,1fr);
 }
 
 /* ===== パネル ===== */
@@ -202,22 +205,45 @@ input,select,textarea{font-family:inherit;font-size:30px;}
 .fg textarea{min-height:100px;resize:vertical;}
 .fg-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(0,1fr));gap:10px;}
 .fg-row .fg{min-width:0;}
-/* 詳細タブ：体温・収縮期・拡張期と同一の3列グリッド（時刻行は2枠+空欄で同ピッチ） */
+/* 詳細タブ：3列とも var(--fg-cols3-track)。実ピクセル幅 ≒ (行の利用可能幅 − gap×2) ÷ 3 */
 #detailScreen .fg-row-cols3{
   display:grid;
-  grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(0,1fr);
-  gap:10px;
+  grid-template-columns:var(--fg-cols3-track) var(--fg-cols3-track) var(--fg-cols3-track);
+  gap:var(--fg-cols3-gap);
   align-items:start;
 }
-#detailScreen .fg-row-cols3 > .fg{min-width:0;}
+#detailScreen .fg-row-cols3 > .fg{
+  min-width:0;
+  max-width:100%;
+  overflow:hidden;
+}
 #detailScreen .fg-row-cols3 .fg-col-spacer{
   min-width:0;
+  max-width:100%;
   visibility:hidden;
   pointer-events:none;
   min-height:1px;
 }
+#detailScreen .fg-row-cols3 input[type="time"],
+#detailScreen .fg-row-cols3 .fg select{
+  min-width:0;
+  max-width:100%;
+  box-sizing:border-box;
+}
 #detailScreen .fg-row-cols3 input[type="time"]{
-  min-width:0;width:100%;max-width:100%;
+  width:100%;
+  display:block;
+}
+/* WebKit：時刻コントロールの内在最小幅で隣列と重なるのを防ぐ */
+#detailScreen .fg-row-cols3 input[type="time"]::-webkit-datetime-edit-fields-wrapper{
+  min-width:0;
+}
+#detailScreen .fg-row-cols3 input[type="time"]::-webkit-calendar-picker-indicator{
+  margin-inline-start:0;
+}
+#detailScreen .fg-row-cols3 .fg input[type="text"]{
+  min-width:0;
+  max-width:100%;
   box-sizing:border-box;
 }
 .fg-hint{font-size:14px;color:var(--text3);margin-top:3px;}
