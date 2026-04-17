@@ -2133,14 +2133,18 @@ function renderMain(){
     const rc=(rec.rec&&(rec.rec.content||(rec.rec.chips&&rec.rec.chips.length)))?'<span class="cell-ok">○</span>':'<span class="cell-empty">—</span>';
     // 服薬
     const med=rec.med||{};
-    const _mReal=t=>med[t]&&med[t].items&&med[t].items.some(i=>i!=='服薬なし');
-    const _mAny=t=>med[t]&&med[t].items&&med[t].items.length>0;
+    const _mItems=t=>((med[t]&&med[t].items)||[]).map(s=>String(s||'').trim()).filter(Boolean);
+    const _mReal=t=>_mItems(t).some(i=>i!=='服薬なし');
+    const _mNone=t=>{
+      const it=_mItems(t);
+      return it.length>0 && it.every(i=>i==='服薬なし');
+    };
     const _isToday=dk()===dk(new Date());
     const _nowH=new Date().getHours()+new Date().getMinutes()/60;
     const _mParts=[];
-    [{t:'morning',th:8.5},{t:'lunch',th:12},{t:'dinner',th:18},{t:'bedtime',th:21}].forEach(({t,th})=>{
+    [{t:'morning',th:8},{t:'lunch',th:12},{t:'dinner',th:18},{t:'bedtime',th:21}].forEach(({t,th})=>{
       if(_mReal(t)) _mParts.push('<span style="color:var(--blue);font-weight:700;">✔</span>');
-      else if(_mAny(t)) _mParts.push('<span style="color:var(--text3);font-weight:700;">ー</span>');
+      else if(_mNone(t)) _mParts.push('<span style="color:var(--text3);font-weight:700;">ー</span>');
       else if(_isToday&&_nowH>=th) _mParts.push('<span style="color:var(--orange2);font-weight:700;">？</span>');
     });
     const mdc=_mParts.length?`<span class="cell-val" style="font-size:18px;letter-spacing:1px;">${_mParts.join('')}</span>`:'<span class="cell-empty">—</span>';
