@@ -1993,6 +1993,16 @@ function openSummary(name){
     {label:'脈拍',   fn:(r)=>{const lv=r.vital&&r.vital.length?r.vital[r.vital.length-1]:null;return lv?String(lv.pulse):'—';}},
     {label:'SpO2',   fn:(r)=>{const lv=r.vital&&r.vital.length?r.vital[r.vital.length-1]:null;return lv&&lv.spo2?lv.spo2+'%':'—';}},
     {label:'排便',   fn:(r)=>{if(!r.excretion)return '—';const ex=r.excretion.filter(e=>e.stool&&e.stool!=='なし');return ex.length?`<span style="color:#8B4513;">${ex[ex.length-1].stool}</span>`:'—';}},
+    {label:'尿量（㎖）', fn:(r)=>{
+      if(!r.excretion||!r.excretion.length) return '—';
+      const sum=r.excretion.reduce((acc,e)=>{
+        const raw=String((e&&e.urineMl)!=null?e.urineMl:'').trim();
+        if(!raw||raw==='なし') return acc;
+        const n=Number(raw.replace(/[^\d.-]/g,''));
+        return isNaN(n)?acc:acc+n;
+      },0);
+      return sum>0?`<span style="color:#0F6E56;font-weight:700;">合計${sum}㎖</span>`:'—';
+    }},
     {label:'パット交換', fn:(r)=>{if(!r.excretion)return '—';return r.excretion.some(e=>e.padChange)?'<span style="color:#1a7fd4;font-weight:700;">交換</span>':'—';}},
     {label:'リハパン交換', fn:(r)=>{if(!r.excretion)return '—';return r.excretion.some(e=>e.rehaChange)?'<span style="color:#1a7fd4;font-weight:700;">交換</span>':'—';}},
     {label:'おむつ交換', fn:(r)=>{if(!r.excretion)return '—';return r.excretion.some(e=>e.diaperChange)?'<span style="color:#1a7fd4;font-weight:700;">交換</span>':'—';}},
@@ -2658,7 +2668,16 @@ function buildCarePanel(){
         <div class="fg"><label>担当者</label><select id="caStaff">${buildStaffOpts('')}</select></div>
       </div>
       <div class="fg"><label>内容選択</label><div id="careChips" style="display:flex;flex-wrap:wrap;gap:4px;">${careOpts}</div></div>
-      <div class="fg"><label>内容（手入力）</label><textarea id="caContent" rows="2" placeholder="自由記入"></textarea></div>
+      <div class="fg">
+        <label style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;">
+          <span>内容（手入力）</span>
+          <span style="display:inline-flex;align-items:center;gap:6px;font-size:16px;color:var(--text2);font-weight:600;">
+            <input type="checkbox" id="caForwardNote" style="width:18px;height:18px;">
+            ☑申送りへ転送
+          </span>
+        </label>
+        <textarea id="caContent" rows="2" placeholder="自由記入"></textarea>
+      </div>
       <button class="btn btn-primary btn-block" onclick="saveCare()">記録</button>
     </div>
   </div>`;
@@ -2675,6 +2694,8 @@ function editCare(dkStr,idx){
   document.getElementById('caTime').value=c.time||'';
   buildStaffSelect('caStaff',c.staff||'');
   document.getElementById('caContent').value=c.content||'';
+  const fw=document.getElementById('caForwardNote');
+  if(fw) fw.checked=!!c.forwardToNotes;
   document.querySelectorAll('#careChips .chip').forEach(el=>{
     const txt=el.textContent;
     el.classList.toggle('selected',(c.content||'').includes(txt));
@@ -2691,13 +2712,33 @@ function saveCare(){
   const time=document.getElementById('caTime').value||nowTime();
   const staff=document.getElementById('caStaff').value;
   const content=document.getElementById('caContent').value.trim();
+  const forwardToNotes=!!document.getElementById('caForwardNote')?.checked;
   if(!content){ alert('内容を入力してください'); return; }
   if(_editCare){
     const r=getRec(curRes,_editCare.dkStr);
-    r.care[_editCare.idx]={...r.care[_editCare.idx],time,content,staff,sheetU:Date.now()};
+    const prev=r.care[_editCare.idx]||{};
+    r.care[_editCare.idx]={...prev,time,content,staff,forwardToNotes,sheetU:Date.now()};
+    if(forwardToNotes){
+      const noteId=prev.forwardNoteId||genId('n');
+      const notePayload={id:noteId,time,writer:staff,content,ts:new Date().toISOString(),sheetU:Date.now()};
+      const ni=(r.notes||[]).findIndex(n=>n&&n.id===noteId);
+      if(ni>=0) r.notes[ni]={...(r.notes[ni]||{}),...notePayload};
+      else{
+        r.notes=r.notes||[];
+        r.notes.push(notePayload);
+      }
+      r.care[_editCare.idx].forwardNoteId=noteId;
+    }
     _editCare=null;
   }else{
-    getRec(curRes).care.push({id:genId('c'),time,content,staff,sheetU:Date.now()});
+    const r=getRec(curRes);
+    const item={id:genId('c'),time,content,staff,forwardToNotes,sheetU:Date.now()};
+    if(forwardToNotes){
+      const noteId=genId('n');
+      r.notes.push({id:noteId,time,writer:staff,content,ts:new Date().toISOString(),sheetU:Date.now()});
+      item.forwardNoteId=noteId;
+    }
+    r.care.push(item);
   }
   saveDB(); showSavedToast(); goBack();
 }
