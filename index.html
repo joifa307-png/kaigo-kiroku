@@ -67,30 +67,47 @@ input,select,textarea{font-family:inherit;font-size:30px;}
 .screen{display:none;}
 .screen.active{display:block;}
 
-/* ===== メイン画面（表ヘッダーは縦スクロール領域内で固定） ===== */
-#mainScreen{
+/* ===== メイン画面（表示中のみ flex。ID 単体の display は .screen 非表示を壊すため禁止） ===== */
+#mainScreen.screen.active{
   display:flex;flex-direction:column;
-  height:100vh;min-height:0;overflow:hidden;
+  height:100vh;max-height:100vh;
+  height:100dvh;max-height:100dvh;
+  min-height:0;overflow:hidden;
 }
-#mainScreen .main-scroll{
+#mainScreen.screen.active .main-scroll{
   flex:1;min-height:0;
   overflow:auto;-webkit-overflow-scrolling:touch;
+  overscroll-behavior:contain;
+  touch-action:pan-x pan-y;
 }
-.res-table{width:100%;border-collapse:collapse;min-width:700px;}
-.res-table thead th{
+/* collapse は sticky と相性が悪く、ヘッダーが tbody のタップを奪うことがある → separate */
+.res-table{width:100%;border-collapse:separate;border-spacing:0;min-width:700px;}
+#mainScreen .res-table thead{
+  pointer-events:none;
+}
+#mainScreen .res-table thead th[onclick]{
+  pointer-events:auto;
+}
+#mainScreen .res-table thead th{
   position:sticky;top:0;z-index:30;
   background:var(--orange);color:#fff;padding:8px 6px;
   font-size:22px;white-space:nowrap;text-align:center;
   box-shadow:0 2px 4px rgba(0,0,0,.12);
+  border-bottom:2px solid #c55a0f;
+  border-right:1px solid rgba(255,255,255,.35);
+}
+#mainScreen .res-table thead th:last-child{
+  border-right:none;
 }
 .res-table td{
   padding:10px 6px;border-bottom:1px solid var(--border1);
   border-right:1px solid var(--border1);
   text-align:center;font-size:14px;vertical-align:middle;cursor:pointer;
 }
-.res-table tr:nth-child(odd) td{background:var(--white);}
-.res-table tr:nth-child(even) td{background:#F7F6F2;}
-.res-table tr:active td{background:var(--blue2)!important;}
+.res-table td:last-child{border-right:none;}
+.res-table tbody tr:nth-child(odd) td{background:var(--white);}
+.res-table tbody tr:nth-child(even) td{background:#F7F6F2;}
+.res-table tbody tr:active td{background:var(--blue2)!important;}
 .name-cell{text-align:left !important;padding-left:6px !important;padding-right:4px !important;cursor:default;}
 .name-cell-inner{display:flex;align-items:center;gap:4px;}
 .name-cell-text{flex:1;}
