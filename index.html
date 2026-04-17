@@ -2308,18 +2308,16 @@ function recDayLabel(dkStr){
   if(dkStr===yesterday) return '昨日';
   return `${pad(dt.getMonth()+1)}/${pad(dt.getDate())}`;
 }
+function dateLabelWithWeek(dkStr){
+  const dt=new Date(dkStr+'T12:00:00');
+  const wd=['日','月','火','水','木','金','土'][dt.getDay()];
+  return `${dt.getMonth()+1}/${pad(dt.getDate())}（${wd}）`;
+}
 function recordEditLabelByDate(dkStr){
-  const sel=new Date(curDate); sel.setHours(0,0,0,0);
-  const y=new Date(sel); y.setDate(y.getDate()-1);
-  const today=dk(sel);
-  const yesterday=dk(y);
-  if(dkStr===today) return '今日の履歴編集中';
-  if(dkStr===yesterday) return '昨日の履歴編集中';
-  const dt=new Date(dkStr+'T00:00:00');
-  return `${dt.getMonth()+1}/${dt.getDate()}の履歴編集中`;
+  return `${dateLabelWithWeek(dkStr)}の履歴編集中`;
 }
 function recordEditLabelByDateTime(dkStr,timeStr){
-  const base=recordEditLabelByDate(dkStr).replace('の履歴編集中','');
+  const base=dateLabelWithWeek(dkStr);
   const t=normalizeTimeText(timeStr||'');
   return `${base}${t||'--:--'}の履歴編集中`;
 }
