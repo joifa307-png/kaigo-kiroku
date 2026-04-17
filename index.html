@@ -233,6 +233,11 @@ input,select,textarea{font-family:inherit;font-size:30px;}
 }
 .chip.on,.chip.pc-on{background:var(--orange);color:#fff;border-color:var(--orange);}
 .chip.selected{background:var(--orange);color:#fff;border-color:var(--orange);}
+/* 1日の様子：長文チップは折り返し・横幅いっぱいで読みやすく */
+#dayChips .chip{
+  flex:1 1 100%;max-width:100%;white-space:normal;text-align:left;
+  font-size:16px;line-height:1.35;padding:8px 12px;border-radius:12px;
+}
 
 /* ===== ボタン ===== */
 .btn{
@@ -705,6 +710,35 @@ const DEFAULT_RESIDENTS_MINAMI = [
   // ※ minami の利用者は設定画面から追加
 ];
 
+/** 1日の様子チップの初期定型文（設定の「1日の様子項目」で編集可） */
+const DEFAULT_DAY_ITEMS = [
+  'お元気に笑顔で来所されました。',
+  'お元気に来所され、自ら皆さんに挨拶をされていました。',
+  'バイタル、安定されています。',
+  '到着後、早速塗り絵を始められました。',
+  '午前中は塗り絵を熱心にされていました。',
+  '入浴は問題なく気持ちよさそうに入られていました。',
+  '入浴はスッキリされたようで、「気持ちよかった」と言われていました。',
+  '午後からの体操ではいつも以上に元気に手足を動かされました。',
+  '午後からの体操では、マイペースで手足を動かされていました。',
+  '午後からの体操では、できる範囲で手足を動かされていました。',
+  '午後からの体操では、いつもより動きが鈍いように感じました。',
+  'カラオケでは、興奮しながら楽しまれていました。',
+  'カラオケでは最初は照れながらもしっかりと歌われていました。',
+  'カラオケでは、皆さんの歌を手拍子しながら真剣に聴かれていました。',
+  'その後は、来月カレンダー作りを真剣にされていました。',
+  'その後は皆さんでトランプをしました、真剣にカードを見つめられていました。',
+  '今日は足の浮腫があり、立位や歩行時にややふらつきがありました。',
+  'おやつの　を喜んで食べておられました。',
+  'おやつの　は、何度もおいしいと言って頂きました。',
+  '他利用者と協力し、パズルをされていました。',
+  '他利用者や職員と昔話で盛り上がり、大笑いされていました。',
+  'その後は、テレビ鑑賞や団らんでゆっくり過ごして頂きました。',
+  '1日を通して、退屈なく過ごされています。',
+  '1日を通して笑顔がよく見られました。',
+  '1日を通して、いつもよりやや元気がないように感じられました。',
+];
+
 const DEFAULT_SETTINGS = {
   facilityName: '',
   logoB64: '',
@@ -716,11 +750,12 @@ const DEFAULT_SETTINGS = {
   bathOptions:     ['普通浴','シャワー浴','清拭','入浴なし'],
   careItems:       ['巡回、良眠されている様子','巡回、体動あり','巡回、ベッド上にて臥床中、呼吸状態安定している','トイレ誘導、その後速やかに入眠される','ありがとうの声あり','覚醒見られるも声掛けにて再入眠される','声出しあり','寝言、独語がしばらく続く','時間帯の混乱見られ、起きようとされるも声掛けにて対応','体位変換実施、苦痛訴えなく入眠される','トイレ行きたいと発声あり、誘導','コールあり訪室、トイレの訴えあり誘導','コールあり訪室、のどの渇き訴えり、水分補給して頂く','軽度の咳見られるも状態変化なく、経過観察とする','体温測定、','バイタル測定、','安定されている','不穏な動き見られるも声掛けにて落ち着かれる','水分摂取促し少量摂取、その後安眠される','巡視時、離床動作なく経過している','入眠浅い様子、転倒リスクに留意し巡視強化','軽度の不穏見られ離床動作あり、声掛け、見守り強化','微熱傾向見られるも全身状態安定しており経過観察'],
   recItems:        ['体操','ストレッチ','リズム運動','転倒予防運動','計算問題','記憶ゲーム','間違い探し','漢字書き取り','しりとり','なぞなぞ','迷路','塗り絵','パズル','クロスワード','点つなぎ','折り紙','書道','ちぎり絵','壁面制作','カレンダー作り','ダーツゲーム','ビンゴ','風船バレー','トランプ','オセロ','ジェンガ','ペットボトル倒し','百人一首','カラオケ','音楽鑑賞','映画鑑賞','紙芝居','朗読','読み聞かせ','洗濯たたみ','調理補助','おやつ作り','写真整理','写真回想','花見','夏祭り','敬老会','クリスマス会','誕生日会','外食イベント','ドライブ','散歩','買い物ゲーム','昔遊び（お手玉など）'],
-  dayItems:        ['穏やか','笑顔あり','活気あり','不穏','傾眠','落ち着かない','食欲あり','食欲不振','発熱','体調不良'],
+  dayItems:        [...DEFAULT_DAY_ITEMS],
   supplyProducts:  ['ずれずに安心パット','尿パットレギュラー（男女兼用）','尿パット（10回吸収）','尿パット（安心夜用）','ワイドパット','ビッグパット','リハビリパンツS','リハビリパンツM','リハビリパンツL','リハビリパンツLL','オムツS','オムツM','オムツL','オムツLL'],
 };
 const LEGACY_DEFAULT_SUPPLY_JSON = JSON.stringify(["リハビリパンツM", "リハビリパンツL", "尿取りパッド 昼用", "尿取りパッド 夜用", "テープ型オムツM", "テープ型オムツL"]);
 const LEGACY_DEFAULT_CARE_JSON = JSON.stringify(['清拭','更衣','口腔ケア','体位変換','爪切り','髭剃り','洗髪','排痰','リハビリ','外出','送迎']);
+const LEGACY_DEFAULT_DAY_JSON = JSON.stringify(['穏やか','笑顔あり','活気あり','不穏','傾眠','落ち着かない','食欲あり','食欲不振','発熱','体調不良']);
 
 // ========== 状態 ==========
 let db = { residents:[], records:{}, supplies:[], settings:{...DEFAULT_SETTINGS} };
@@ -797,6 +832,11 @@ function loadDB(){
   if(JSON.stringify(db.settings.careItems||[])===LEGACY_DEFAULT_CARE_JSON){
     db.settings.careItems=JSON.parse(JSON.stringify(DEFAULT_SETTINGS.careItems));
     touchSetU('careItems');
+    needSaveAfterMigrate=true;
+  }
+  if(JSON.stringify(db.settings.dayItems||[])===LEGACY_DEFAULT_DAY_JSON){
+    db.settings.dayItems=JSON.parse(JSON.stringify(DEFAULT_SETTINGS.dayItems));
+    touchSetU('dayItems');
     needSaveAfterMigrate=true;
   }
   Object.keys(db.records||{}).forEach(dk=>{
@@ -3068,12 +3108,45 @@ function delNote(dkStr,idx){
 }
 
 // ========== 1日の様子パネル ==========
+function escapeHtml(s){
+  return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+function escapeAttr(s){
+  return String(s??'').replace(/&/g,'&amp;').replace(/"/g,'&quot;');
+}
+/** テキストエリア先頭の「登録チップ行」と残りの自由記入を分離 */
+function parseDayTextarea(dayText, dayItems){
+  const set=new Set((dayItems||[]).map(x=>String(x)));
+  const lines=String(dayText||'').split(/\r?\n/);
+  const chips=[];
+  let i=0;
+  for(;i<lines.length;i++){
+    const L=lines[i];
+    if(set.has(L)){ chips.push(L); continue; }
+    if(L==='' && chips.length){ i++; break; }
+    break;
+  }
+  const free=lines.slice(i).join('\n').replace(/^\n+/,'').trim();
+  return {chips,free};
+}
+function composeDayTextarea(sel, free){
+  const f=String(free||'').trim();
+  const arr=Array.isArray(sel)?sel:[];
+  if(!arr.length) return f;
+  const body=arr.join('\n');
+  return f?(body+'\n\n'+f):body;
+}
 function buildDayPanel(){
   const rec=getRec(curRes);
   const S=db.settings||{};
-  const dayChips=(S.dayItems||[]).map(o=>
-    `<div class="chip${rec.day&&rec.day.includes(o)?' selected':''}" onclick="toggleDayChip(this,'${o}')">${o}</div>`
-  ).join('');
+  const dayItems=S.dayItems||[];
+  const {chips:dayChipLines}=parseDayTextarea(rec.day||'', dayItems);
+  const chipSel=new Set(dayChipLines);
+  const dayChips=dayItems.map(o=>{
+    const phrase=String(o);
+    const sel=chipSel.has(phrase);
+    return `<div class="chip${sel?' selected':''}" data-day-phrase="${escapeAttr(phrase)}" onclick="toggleDayChip(this)">${escapeHtml(phrase)}</div>`;
+  }).join('');
   const dayHist=[];
   for(let d=0;d<=29;d++){
     const dt=new Date(curDate); dt.setDate(dt.getDate()-d);
@@ -3100,14 +3173,14 @@ function buildDayPanel(){
     </div>
   </div>`;
 }
-function toggleDayChip(el,item){
+function toggleDayChip(el){
   el.classList.toggle('selected');
-  const sel=[...document.querySelectorAll('#dayChips .chip.selected')].map(e=>e.textContent);
   const ta=document.getElementById('dayText');
-  if(ta){
-    const free=ta.value.replace(/^[^。！？\n]*/, '').trim();
-    ta.value=sel.join('、')+(free?`\n${free}`:'');
-  }
+  if(!ta) return;
+  const dayItems=(db.settings&&db.settings.dayItems)||[];
+  const sel=[...document.querySelectorAll('#dayChips .chip.selected')].map(e=>e.getAttribute('data-day-phrase')||e.textContent);
+  const {free}=parseDayTextarea(ta.value, dayItems);
+  ta.value=composeDayTextarea(sel, free);
 }
 function saveDay(){
   const editDate=document.getElementById('dayEditDate')?.value||dk();
@@ -3122,9 +3195,12 @@ function editDayRecord(dkStr){
   document.getElementById('dayEditDate').value=dkStr;
   document.getElementById('dayText').value=r.day||'';
   buildStaffSelect('dayWriter',r.dayWriter||'');
+  const dayItems=db.settings.dayItems||[];
+  const {chips}=parseDayTextarea(r.day||'', dayItems);
+  const chipSet=new Set(chips);
   document.querySelectorAll('#dayChips .chip').forEach(el=>{
-    const txt=el.textContent;
-    el.classList.toggle('selected',(r.day||'').includes(txt));
+    const txt=el.getAttribute('data-day-phrase')||el.textContent;
+    el.classList.toggle('selected',chipSet.has(txt));
   });
   const modeLabel=document.getElementById('dayEditModeLabel');
   if(modeLabel){
@@ -3624,7 +3700,7 @@ function delSupplyProduct(idx){
 function buildSingleListSettings(title, key){
   const list=db.settings[key]||[];
   const items=list.map((s,i)=>`<div class="settings-list-item">
-    <div class="item-name">${s}</div>
+    <div class="item-name">${escapeHtml(s)}</div>
     <button class="item-del" onclick="delListItem('${key}',${i})">削除</button>
   </div>`).join('');
   return `<div class="settings-panel active">
@@ -3646,7 +3722,7 @@ function buildListSettings(title, ...pairs){
     const key=pairs[i], label=pairs[i+1];
     const list=db.settings[key]||[];
     const items=list.map((s,j)=>`<div class="settings-list-item">
-      <div class="item-name">${s}</div>
+      <div class="item-name">${escapeHtml(s)}</div>
       <button class="item-del" onclick="delListItem('${key}',${j})">削除</button>
     </div>`).join('');
     html+=`<div class="panel-sec">
