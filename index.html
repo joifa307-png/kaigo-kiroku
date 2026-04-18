@@ -338,6 +338,12 @@ input,select,textarea{font-family:inherit;font-size:30px;}
   background:var(--white);
 }
 .settings-list-item .item-name{flex:1;font-size:14px;}
+.settings-list-item .settings-list-actions{display:flex;gap:4px;flex-shrink:0;align-items:center;}
+.settings-list-item .item-move{
+  font-size:12px;padding:3px 8px;border:1px solid var(--border2);border-radius:var(--r1);
+  background:var(--white);cursor:pointer;color:var(--text2);min-width:34px;
+}
+.settings-list-item .item-move:disabled{opacity:.45;cursor:not-allowed;}
 .settings-list-item .item-del{
   color:var(--red);font-size:12px;padding:3px 8px;
   border:1px solid var(--red);border-radius:var(--r1);background:none;cursor:pointer;
@@ -864,7 +870,6 @@ function loadDB(){
       seen.add(nm); return true;
     });
   }
-  normalizeResidentsOrder();
   if(!db._setU) db._setU={};
   initializeSetUForExistingSettings();
   saveSettingsSnapshot();
@@ -873,7 +878,6 @@ function loadDB(){
 function saveDB(){
   if(!FAC) return;
   initializeSetUForExistingSettings();
-  normalizeResidentsOrder();
   localStorage.setItem(FAC.storageKey, JSON.stringify(db));
   saveSettingsSnapshot();
   syncDirty = true;
@@ -2827,13 +2831,15 @@ function buildMedPanel(){
         <div style="display:flex;flex-wrap:wrap;gap:6px;" id="medTimingChips">${timingChipsHtml}</div>
       </div>
       <div class="fg">
-        <label>対象利用者</label>
+        <label>対象利用者
+          <button type="button" class="btn btn-sm" style="font-size:16px;margin-left:8px;background:#d4edda;color:#155724;border:1px solid #b8dacc;" onclick="document.querySelectorAll('#medTargetChips .chip').forEach(c=>c.classList.add('selected'))">全員選択</button>
+        </label>
         <div id="medTargetChips" style="display:flex;flex-wrap:wrap;gap:6px;">${targetChipsHtml}</div>
       </div>
       <input type="hidden" id="medFormTiming" value="${defTiming}">
       <div class="fg-row fg-cols-2">
         <div class="fg"><label>時刻</label><input type="time" id="medFormTime" value="${defM.time||''}"></div>
-        <div class="fg"><label>担当者</label><select id="medFormStaff">${buildStaffOpts(defM.staff)}</select></div>
+        <div class="fg"><label>担当者</label><select id="medFormStaff">${buildStaffOpts('')}</select></div>
       </div>
       <div class="fg">
         <div style="display:flex;flex-wrap:wrap;gap:6px;" id="medFormChips">${medChipsHtml}</div>
@@ -3572,15 +3578,18 @@ function clearLogo(){
 }
 
 function buildResidentSettings(){
-  normalizeResidentsOrder();
   const list=db.residents;
   const items=list.map((r,i)=>{
     const onDays=(r.sched||[]).filter(v=>v===1).length;
     return `<div class="settings-list-item">
       <div class="item-name">${r.name} <span class="text-gray" style="font-size:12px;">${r.care||''}</span>
         <span style="font-size:12px;color:var(--blue);margin-left:6px;">(月${onDays}日)</span></div>
-      <button style="font-size:12px;padding:3px 8px;border:1px solid var(--blue);border-radius:var(--r1);background:none;color:var(--blue);cursor:pointer;margin-right:4px;" onclick="openSchedEditor(${i})">予定</button>
-      <button class="item-del" onclick="delResident(${i})">削除</button>
+      <div class="settings-list-actions">
+        <button type="button" class="item-move" onclick="moveResident(${i},-1)" ${i===0?'disabled':''} title="上へ">↑</button>
+        <button type="button" class="item-move" onclick="moveResident(${i},1)" ${i===list.length-1?'disabled':''} title="下へ">↓</button>
+        <button style="font-size:12px;padding:3px 8px;border:1px solid var(--blue);border-radius:var(--r1);background:none;color:var(--blue);cursor:pointer;" onclick="openSchedEditor(${i})">予定</button>
+        <button class="item-del" onclick="delResident(${i})">削除</button>
+      </div>
     </div>`;
   }).join('');
   return `<div class="settings-panel active">
@@ -3742,8 +3751,12 @@ function handleXlsx(file){
 function buildStaffSettings(){
   const list=db.settings.staffList||[];
   const items=list.map((s,i)=>`<div class="settings-list-item">
-    <div class="item-name">${s}</div>
-    <button class="item-del" onclick="delStaff(${i})">削除</button>
+    <div class="item-name">${escapeHtml(s)}</div>
+    <div class="settings-list-actions">
+      <button type="button" class="item-move" onclick="moveSettingsArrayItem('staffList',${i},-1)" ${i===0?'disabled':''} title="上へ">↑</button>
+      <button type="button" class="item-move" onclick="moveSettingsArrayItem('staffList',${i},1)" ${i===list.length-1?'disabled':''} title="下へ">↓</button>
+      <button class="item-del" onclick="delStaff(${i})">削除</button>
+    </div>
   </div>`).join('');
   return `<div class="settings-panel active">
     <div class="panel-sec">
@@ -3771,12 +3784,27 @@ function delStaff(idx){
   touchSetU('staffList');
   saveDB(); renderSettingsPanel('staff');
 }
+function moveResident(idx, delta){
+  const list=db.residents;
+  if(!Array.isArray(list)) return;
+  const j=idx+delta;
+  if(j<0||j>=list.length) return;
+  const a=list[idx], b=list[j];
+  list[idx]=b; list[j]=a;
+  if(a) a._u=Date.now();
+  if(b) b._u=Date.now();
+  saveDB(); renderSettingsPanel('residents');
+}
 
 function buildSupplySettings(){
   const list=db.settings.supplyProducts||[];
   const items=list.map((s,i)=>`<div class="settings-list-item">
-    <div class="item-name">${s}</div>
-    <button class="item-del" onclick="delSupplyProduct(${i})">削除</button>
+    <div class="item-name">${escapeHtml(s)}</div>
+    <div class="settings-list-actions">
+      <button type="button" class="item-move" onclick="moveSettingsArrayItem('supplyProducts',${i},-1)" ${i===0?'disabled':''} title="上へ">↑</button>
+      <button type="button" class="item-move" onclick="moveSettingsArrayItem('supplyProducts',${i},1)" ${i===list.length-1?'disabled':''} title="下へ">↓</button>
+      <button class="item-del" onclick="delSupplyProduct(${i})">削除</button>
+    </div>
   </div>`).join('');
   return `<div class="settings-panel active">
     <div class="panel-sec">
@@ -3809,7 +3837,11 @@ function buildSingleListSettings(title, key){
   const list=db.settings[key]||[];
   const items=list.map((s,i)=>`<div class="settings-list-item">
     <div class="item-name">${escapeHtml(s)}</div>
-    <button class="item-del" onclick="delListItem('${key}',${i})">削除</button>
+    <div class="settings-list-actions">
+      <button type="button" class="item-move" onclick="moveSettingsArrayItem('${key}',${i},-1)" ${i===0?'disabled':''} title="上へ">↑</button>
+      <button type="button" class="item-move" onclick="moveSettingsArrayItem('${key}',${i},1)" ${i===list.length-1?'disabled':''} title="下へ">↓</button>
+      <button class="item-del" onclick="delListItem('${key}',${i})">削除</button>
+    </div>
   </div>`).join('');
   return `<div class="settings-panel active">
     <div class="panel-sec">
@@ -3831,7 +3863,11 @@ function buildListSettings(title, ...pairs){
     const list=db.settings[key]||[];
     const items=list.map((s,j)=>`<div class="settings-list-item">
       <div class="item-name">${escapeHtml(s)}</div>
-      <button class="item-del" onclick="delListItem('${key}',${j})">削除</button>
+      <div class="settings-list-actions">
+        <button type="button" class="item-move" onclick="moveSettingsArrayItem('${key}',${j},-1)" ${j===0?'disabled':''} title="上へ">↑</button>
+        <button type="button" class="item-move" onclick="moveSettingsArrayItem('${key}',${j},1)" ${j===list.length-1?'disabled':''} title="下へ">↓</button>
+        <button class="item-del" onclick="delListItem('${key}',${j})">削除</button>
+      </div>
     </div>`).join('');
     html+=`<div class="panel-sec">
       <h3>${label}</h3>
@@ -3849,6 +3885,17 @@ function addListItem(key){
   if(!val) return;
   if(!db.settings[key]) db.settings[key]=[];
   db.settings[key].push(val);
+  touchSetU(key);
+  saveDB(); renderSettingsPanel(curSettingsTab);
+}
+function moveSettingsArrayItem(key, idx, delta){
+  const list=db.settings[key];
+  if(!Array.isArray(list)) return;
+  const j=idx+delta;
+  if(j<0||j>=list.length) return;
+  const tmp=list[idx];
+  list[idx]=list[j];
+  list[j]=tmp;
   touchSetU(key);
   saveDB(); renderSettingsPanel(curSettingsTab);
 }
