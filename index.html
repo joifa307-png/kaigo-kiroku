@@ -681,6 +681,7 @@ function syncFacilityIntoUrl(facId){
 
 function selectFacility(facId){
   localStorage.setItem('kaigo_last_facility', facId);
+  gasMirrorToCookies();
   if(initFacility(facId)){
     syncFacilityIntoUrl(facId);
     startApp();
@@ -690,6 +691,7 @@ function selectFacility(facId){
 function startApp(){
   showScreen('mainScreen');
   loadDB();
+  gasMirrorToCookies();
   setSyncStatus('--','var(--text3)');
   renderDate();
   renderMain();
@@ -974,6 +976,65 @@ function gasToken(){ return (localStorage.getItem('kaigo_gas_token')||'').trim()
 function gasUrl(){ return (localStorage.getItem('kaigo_gas_webapp_url')||'').trim(); }
 function gasConfigured(){ return !!(gasUrl() && gasToken() && FAC); }
 
+/**
+ * iOS「ホーム画面に追加」スタンドアロンは、Safari 本体と localStorage が分離することがある。
+ * 同一オリジンでは Cookie が共有されることが多いため、GAS URL／トークン／施設IDを Cookie にもミラーし、
+ * 起動時に localStorage が空なら Cookie から復元する。
+ */
+function gasCookieSuffix(){
+  const sec=location.protocol==='https:'?';Secure':'';
+  return ';path=/;max-age=34560000;SameSite=Lax'+sec;
+}
+function gasReadCookie(name){
+  try{
+    const cs=document.cookie?document.cookie.split('; '):[];
+    for(let i=0;i<cs.length;i++){
+      const p=cs[i].indexOf('=');
+      if(p<1) continue;
+      const k=cs[i].slice(0,p).trim();
+      if(k!==name) continue;
+      return decodeURIComponent(cs[i].slice(p+1).trim());
+    }
+    return '';
+  }catch(_){ return ''; }
+}
+function gasWriteCookie(name, val){
+  try{
+    const v=val==null?'':String(val).trim();
+    const sec=location.protocol==='https:'?';Secure':'';
+    if(!v){
+      document.cookie=name+'=;path=/;max-age=0;SameSite=Lax'+sec;
+      return;
+    }
+    document.cookie=name+'='+encodeURIComponent(v)+gasCookieSuffix();
+  }catch(_){}
+}
+function gasMirrorToCookies(){
+  try{
+    gasWriteCookie('kaigo_gas_url', (localStorage.getItem('kaigo_gas_webapp_url')||'').trim());
+    gasWriteCookie('kaigo_gas_tok', (localStorage.getItem('kaigo_gas_token')||'').trim());
+    gasWriteCookie('kaigo_fac', (localStorage.getItem('kaigo_last_facility')||'').trim());
+  }catch(_){}
+}
+function gasRepairFromCookieMirror(){
+  try{
+    const u=gasReadCookie('kaigo_gas_url').trim();
+    const t=gasReadCookie('kaigo_gas_tok').trim();
+    const f=gasReadCookie('kaigo_fac').trim();
+    let any=false;
+    if(u&&!(localStorage.getItem('kaigo_gas_webapp_url')||'').trim()){
+      localStorage.setItem('kaigo_gas_webapp_url',u); any=true;
+    }
+    if(t&&!(localStorage.getItem('kaigo_gas_token')||'').trim()){
+      localStorage.setItem('kaigo_gas_token',t); any=true;
+    }
+    if(f&&!(localStorage.getItem('kaigo_last_facility')||'').trim()){
+      localStorage.setItem('kaigo_last_facility',f); any=true;
+    }
+    if(any) gasSnapshotBootstrapIfNeeded();
+  }catch(_){}
+}
+
 /** GAS credentials backup key (same origin). Repairs missing primary keys on load. */
 const KAIGO_GAS_SNAP_KEY='kaigo_gas_cred_v1';
 function gasSnapshotRead(){
@@ -1037,10 +1098,13 @@ function gasRestoreFromSessionIfNeeded(){
   }catch(_){}
 }
 function gasCredentialsInit(){
+  gasRepairFromCookieMirror();
   gasRestoreFromSessionIfNeeded();
   gasSnapshotBootstrapIfNeeded();
   gasSnapshotRepairFromPrimary();
+  gasRepairFromCookieMirror();
   if(gasUrl()&&gasToken()) gasMirrorToSession();
+  if(gasUrl()||gasToken()||(localStorage.getItem('kaigo_last_facility')||'').trim()) gasMirrorToCookies();
 }
 
 /** iPad等で「GAS未設定」だけだと分かりづらいので、足りない項目を表示 */
@@ -4012,6 +4076,7 @@ function saveGasConfig(){
     }
     if(t) localStorage.setItem('kaigo_gas_token',t);
     gasMirrorToSession();
+    gasMirrorToCookies();
     alert('保存しました');
   }catch(err){
     alert('保存できませんでした: '+err.message+'\n（ストレージ容量・プライベートブラウズ・サイトデータ削除を確認してください）');
@@ -4027,6 +4092,7 @@ function testGasConnection(){
   gasPost({action:'ping', sheetName:FAC.sheetName})
     .then(()=>{
       gasMirrorToSession();
+      gasMirrorToCookies();
       alert('接続成功（シート: '+FAC.sheetName+'）');
     })
     .catch(e=>alert('接続失敗: '+e.message));
@@ -4646,6 +4712,11 @@ function init(){
 }
 
 document.addEventListener('DOMContentLoaded', init);
+document.addEventListener('visibilitychange', ()=>{
+  if(document.visibilityState!=='visible') return;
+  gasRepairFromCookieMirror();
+  gasSnapshotRepairFromPrimary();
+});
 </script>
 </body>
 </html>
