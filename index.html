@@ -99,12 +99,27 @@ input,select,textarea{font-family:inherit;font-size:30px;}
 #mainScreen .res-table thead th:last-child{
   border-right:none;
 }
+/* メイン表：列ジャンプ時の目印（体温左・SpO2右・最終排便右を約20%濃い線で強調） */
+#mainScreen .res-table thead th.res-div-l{
+  border-left:2px solid rgba(0,0,0,.26);
+}
+#mainScreen .res-table thead th.res-div-r{
+  border-right:2px solid rgba(0,0,0,.26);
+}
 .res-table td{
   padding:10px 6px;border-bottom:1px solid var(--border1);
   border-right:1px solid var(--border1);
   text-align:center;font-size:14px;vertical-align:middle;cursor:pointer;
 }
 .res-table td:last-child{border-right:none;}
+.res-table td.res-div-l{
+  border-left:2px solid #b5b3a8;
+  border-left-color:color-mix(in srgb,var(--border1) 78%,var(--text1) 22%);
+}
+.res-table td.res-div-r{
+  border-right:2px solid #b5b3a8;
+  border-right-color:color-mix(in srgb,var(--border1) 78%,var(--text1) 22%);
+}
 .res-table tbody tr:nth-child(odd) td{background:var(--white);}
 .res-table tbody tr:nth-child(even) td{background:#F7F6F2;}
 .res-table tbody tr:active td{background:var(--blue2)!important;}
@@ -425,12 +440,12 @@ input,select,textarea{font-family:inherit;font-size:30px;}
         <tr>
           <th style="width:32px;min-width:32px;">申送</th>
           <th style="min-width:80px;">氏名</th>
-          <th>体温</th>
+          <th class="res-div-l">体温</th>
           <th>血圧</th>
           <th>脈拍</th>
-          <th>SpO2</th>
+          <th class="res-div-r">SpO2</th>
           <th>排泄</th>
-          <th style="white-space:nowrap;">最終排便</th>
+          <th class="res-div-r" style="white-space:nowrap;">最終排便</th>
           <th>入浴</th>
           <th>食事</th>
           <th>レク</th>
@@ -2268,12 +2283,12 @@ function renderMain(){
           <button class="res-del-btn no-print" onclick="delResidentByName('${r.name}')">×</button>
         </div>
       </td>
-      <td onclick="openDetail('${r.name}','vital')">${tc}</td>
+      <td class="res-div-l" onclick="openDetail('${r.name}','vital')">${tc}</td>
       <td onclick="openDetail('${r.name}','vital')">${bc}</td>
       <td onclick="openDetail('${r.name}','vital')">${pc}</td>
-      <td onclick="openDetail('${r.name}','vital')">${sc}</td>
+      <td class="res-div-r" onclick="openDetail('${r.name}','vital')">${sc}</td>
       <td onclick="openDetail('${r.name}','excretion')">${ec}</td>
-      <td onclick="openDetail('${r.name}','excretion')">${lsc}</td>
+      <td class="res-div-r" onclick="openDetail('${r.name}','excretion')">${lsc}</td>
       <td onclick="openDetail('${r.name}','bath')">${bac}</td>
       <td onclick="openDetail('${r.name}','meal')">${mc}</td>
       <td onclick="openDetail('${r.name}','rec')">${rc}</td>
