@@ -482,10 +482,9 @@ input,select,textarea{font-family:inherit;font-size:30px;}
       <div class="hdr-date" id="detDate" onclick="openCal()"></div>
       <button class="hdr-btn nav" onclick="moveDayDet(1)">▶</button>
     </div>
-    <!-- 右: サマリー・期間印刷 -->
+    <!-- 右: サマリー -->
     <div style="display:flex;align-items:center;gap:6px;justify-content:flex-end;">
       <button class="hdr-btn no-print" onclick="openCareSummary()" style="font-size:13px;padding:6px 10px;">📋</button>
-      <button class="hdr-btn no-print" onclick="openVitalPrint()" style="font-size:13px;padding:6px 10px;">📅</button>
     </div>
   </div>
   <div class="tabs no-print" id="detTabs"></div>
@@ -3615,19 +3614,107 @@ function delDayRecord(dkStr){
   saveDB(); refreshPanel('day');
 }
 
-// ========== サマリー（スタブ） ==========
-function openCareSummary(){
-  openMainOv(`
-    <div class="ov-title">ケア記録サマリー<button class="ov-close" onclick="closeMainOv()">✕</button></div>
-    <div style="padding:20px;color:var(--text3);text-align:center;">（今後実装）</div>
-  `);
-}
+// ========== サマリー ==========
+function buildResidentDailySummaryRows(name, dateKey){
+  const rec=getRec(name,dateKey);
+  const rows=[];
+  const push=(t,cat,body,staff='')=>{
+    const b=String(body||'').trim();
+    if(!b) return;
+    rows.push({t:normalizeTimeText(t)||'',cat,body:b,staff:staff||''});
+  };
 
-// ========== バイタル期間印刷（スタブ） ==========
-function openVitalPrint(){
+  (rec.vital||[]).forEach(v=>{
+    const parts=[];
+    const tv=normalizeTempValue(v.temp);
+    if(tv!==''&&tv!=null) parts.push('体温:'+tv+'℃');
+    if((v.sbp&&String(v.sbp).trim())||(v.dbp&&String(v.dbp).trim())) parts.push('血圧:'+(v.sbp||'')+'/'+(v.dbp||''));
+    if(v.pulse&&String(v.pulse).trim()) parts.push('脈拍:'+v.pulse);
+    if(v.spo2&&String(v.spo2).trim()&&v.spo2!=='—') parts.push('SpO2:'+v.spo2+'%');
+    if(v.weight&&String(v.weight).trim()) parts.push('体重:'+v.weight+'kg');
+    push(v.time,'バイタル',parts.join('、'),v.staff||'');
+  });
+  (rec.excretion||[]).forEach(e=>{
+    const parts=[];
+    if(e.urine&&e.urine!=='なし') parts.push('排尿:'+e.urine);
+    else if(e.urine==='なし') parts.push('排尿:なし');
+    if(e.pad&&e.pad!=='なし') parts.push('パット:'+e.pad);
+    if(e.stool&&e.stool!=='なし') parts.push('排便:'+e.stool);
+    else if(e.stool==='なし') parts.push('排便:なし');
+    const flags=[];
+    if(e.padChange) flags.push('パット交換');
+    if(e.rehaChange) flags.push('リハパン交換');
+    if(e.diaperChange) flags.push('おむつ交換');
+    if(flags.length) parts.push(flags.join('・'));
+    push(e.time,'排泄',parts.join('、'),e.writer||e.staff||'');
+  });
+  (rec.bath||[]).forEach(b=>push(b.time,'入浴',b.type||'',b.staff||''));
+  (rec.care||[]).forEach(c=>push(c.time,'ケア記録',getCareContentText(c),c.staff||''));
+  (rec.notes||[]).filter(n=>!n._deleted).forEach(n=>push(n.time||'','申送り',n.content||'',n.writer||''));
+  if(rec.rec&&String(rec.rec.content||'').trim()){
+    push(rec.rec.time||'','レク',String(rec.rec.content||'').trim(),rec.rec.staff||'');
+  }
+  if(String(rec.day||'').trim()){
+    push('', '1日の様子', String(rec.day||'').trim(), rec.dayWriter||'');
+  }
+  const m=rec.meal||{};
+  const hasMeal=(k)=>m[k]!=null&&String(m[k]).trim()!=='';
+  if(hasMeal('bMain')||hasMeal('bSide')||hasMeal('bWater')){
+    const parts=[];
+    if(hasMeal('bMain')) parts.push('主食:'+m.bMain+'%');
+    if(hasMeal('bSide')) parts.push('副食:'+m.bSide+'%');
+    if(hasMeal('bWater')) parts.push('水分:'+m.bWater+'ml');
+    push(m.bTime||'07:30','朝食',parts.join('、'),'');
+  }
+  if(hasMeal('main')||hasMeal('side')||hasMeal('water')||hasMeal('menu')||hasMeal('snack')){
+    const parts=[];
+    if(hasMeal('main')) parts.push('主食:'+m.main+'%');
+    if(hasMeal('side')) parts.push('副食:'+m.side+'%');
+    if(hasMeal('water')) parts.push('水分:'+m.water+'ml');
+    if(hasMeal('menu')) parts.push('メニュー:'+m.menu);
+    if(hasMeal('snack')) parts.push('おやつ:'+m.snack);
+    push(m.time||'11:50','昼食',parts.join('、'),'');
+  }
+  if(hasMeal('dMain')||hasMeal('dSide')||hasMeal('dWater')){
+    const parts=[];
+    if(hasMeal('dMain')) parts.push('主食:'+m.dMain+'%');
+    if(hasMeal('dSide')) parts.push('副食:'+m.dSide+'%');
+    if(hasMeal('dWater')) parts.push('水分:'+m.dWater+'ml');
+    push(m.dTime||'17:30','夕食',parts.join('、'),'');
+  }
+  MED_TIMINGS.forEach(t=>{
+    const md=(rec.med&&rec.med[t.id])||{};
+    const items=(md.items||[]).filter(Boolean);
+    if(!items.length && !String(md.time||'').trim() && !String(md.staff||'').trim()) return;
+    push(md.time||'', '服薬', `${t.label}：${items.join('、')||'（内容未入力）'}`, md.staff||'');
+  });
+  const catOrder={'バイタル':1,'排泄':2,'入浴':3,'朝食':4,'昼食':5,'夕食':6,'服薬':7,'ケア記録':8,'申送り':9,'レク':10,'1日の様子':11};
+  rows.sort((a,b)=>{
+    const at=a.t||'99:99', bt=b.t||'99:99';
+    if(at!==bt) return at<bt?-1:1;
+    return (catOrder[a.cat]||99)-(catOrder[b.cat]||99);
+  });
+  return rows;
+}
+function openCareSummary(){
+  const dateKey=dk();
+  const rows=buildResidentDailySummaryRows(curRes,dateKey);
+  const dayLabel=jpDate(dateKey);
+  const tableRows=rows.map(r=>`<tr>
+    <td style="white-space:nowrap;">${escapeHtml(r.t||'')}</td>
+    <td style="white-space:nowrap;">${escapeHtml(r.cat||'')}</td>
+    <td style="white-space:pre-wrap;">${escapeHtml(r.body||'')}</td>
+    <td style="white-space:nowrap;">${escapeHtml(r.staff||'')}</td>
+  </tr>`).join('');
   openMainOv(`
-    <div class="ov-title">バイタル期間印刷<button class="ov-close" onclick="closeMainOv()">✕</button></div>
-    <div style="padding:20px;color:var(--text3);text-align:center;">（今後実装）</div>
+    <div class="ov-title">記録サマリー（${escapeHtml(curRes)}）<button class="ov-close" onclick="closeMainOv()">✕</button></div>
+    <div style="padding:14px 16px 4px;color:var(--text2);font-size:13px;">表示日: ${escapeHtml(dayLabel)}（上部の日付選択で切替）</div>
+    <div style="padding:10px 16px 16px;">
+      <table class="print-table" style="margin-bottom:0;">
+        <thead><tr><th>時刻</th><th>項目</th><th>内容</th><th>担当</th></tr></thead>
+        <tbody>${tableRows||'<tr><td colspan="4" style="text-align:center;color:var(--text3);">記録なし</td></tr>'}</tbody>
+      </table>
+    </div>
   `);
 }
 
@@ -4807,6 +4894,22 @@ function printCareRange(){
         });
       }
 
+      // 服薬
+      MED_TIMINGS.forEach(mt=>{
+        const mm=(rec.med&&rec.med[mt.id])||{};
+        const items=(mm.items||[]).filter(Boolean);
+        const hasData=items.length||String(mm.time||'').trim()||String(mm.staff||'').trim();
+        if(!hasData) return;
+        rawRows.push({
+          dk:dateKey,
+          t:normalizeTimeText(mm.time)||'',
+          cat:'服薬',
+          body:`${mt.label}：${items.join('、')||'（内容未入力）'}`,
+          staff:mm.staff||'',
+          _key:'m:'+mt.id+':'+(mm._u||'')+':'+(mm.time||'')+':'+(items.join('|'))
+        });
+      });
+
       // ケア記録
       (rec.care||[]).forEach(c=>{
         const content=getCareContentText(c);
@@ -4826,7 +4929,7 @@ function printCareRange(){
     const deduped=dedupePrintRows(rawRows, row=>[res.name,row.dk,row._key,row.cat,row.t,row.body,row.staff].join('|'));
 
     // 日付→時刻→項目順にソート
-    const catOrder={'バイタル':1,'排泄':2,'入浴':3,'朝食':4,'昼食':5,'夕食':6,'ケア記録':7};
+    const catOrder={'バイタル':1,'排泄':2,'入浴':3,'朝食':4,'昼食':5,'夕食':6,'服薬':7,'ケア記録':8};
     deduped.sort((a,b)=>{
       if(a.dk!==b.dk) return a.dk<b.dk?-1:1;
       const at=a.t||'99:99', bt=b.t||'99:99';
