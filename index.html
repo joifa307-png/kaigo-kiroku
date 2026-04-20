@@ -1838,10 +1838,21 @@ function mergeResidentDelMaps(x,y){
   });
   return out;
 }
-function residentDroppedByTombstone(r,resDel){
+function residentDelMaxTs(resDel, r){
+  const del=resDel&&typeof resDel==='object'&&!Array.isArray(resDel)?resDel:{};
   const id=String(r&&r.id||'').trim();
-  if(!id||!resDel) return false;
-  const delAt=_numU(resDel[id]);
+  const nm=normalizeResidentName(r&&r.name||'');
+  const cands=[];
+  if(id){
+    cands.push(_numU(del[id])); // 旧形式（後方互換）
+    cands.push(_numU(del['id:'+id]));
+  }
+  if(nm) cands.push(_numU(del['name:'+nm]));
+  return Math.max(0,...cands);
+}
+function residentDroppedByTombstone(r,resDel){
+  if(!resDel) return false;
+  const delAt=residentDelMaxTs(resDel,r);
   if(!delAt) return false;
   return _numU(r._u)<=delAt;
 }
@@ -3071,14 +3082,22 @@ function buildMedPanel(){
   const dayIdx=curDate.getDate()-1;
   const targets=residentsOnDaySorted(dayIdx);
   const timingLabels={morning:'朝食後',lunch:'昼食後',dinner:'夕食後',bedtime:'就寝前'};
-  const histHtml=hist.length?hist.map(m=>`<div class="hist-item">
+  const histRow=(m)=>`<div class="hist-item">
     <div class="hist-time">${recDayLabel(m._dk)}<br>${timingLabels[m._timing]||m._timing}</div>
     <div class="hist-content">
       ${m.time?`${m.time}　`:''}${m.staff?`${m.staff}　`:''}
       ${m.items&&m.items.length?m.items.join('、'):''}
     </div>
     <button class="hist-del" onclick="delMed('${m._dk}','${m._timing}')">削除</button>
-  </div>`).join(''):'<div class="text-gray" style="font-size:13px;padding:8px 0;">記録なし</div>';
+  </div>`;
+  const histTop=hist.slice(0,3).map(histRow).join('');
+  const histMore=hist.slice(3).map(histRow).join('');
+  const histToggle=hist.length>3
+    ? `<button type="button" class="btn btn-gray btn-sm mt8" onclick="toggleMedHistMore(this)">▼ さらに表示（${hist.length-3}件）</button>`
+    : '';
+  const histHtml=hist.length
+    ? `${histTop}${histMore?`<div id="medHistMore" style="display:none;">${histMore}</div>`:''}${histToggle}`
+    : '<div class="text-gray" style="font-size:13px;padding:8px 0;">記録なし</div>';
 
   const defTiming='morning';
   const defM=rec.med[defTiming]||{time:'',staff:'',items:[]};
@@ -3127,6 +3146,15 @@ function buildMedPanel(){
       <button class="btn btn-primary btn-block mt8" onclick="saveMed()">記録</button>
     </div>
   </div>`;
+}
+function toggleMedHistMore(btn){
+  const more=document.getElementById('medHistMore');
+  if(!more||!btn) return;
+  const open=more.style.display!=='none';
+  more.style.display=open?'none':'block';
+  btn.textContent=open
+    ? btn.textContent.replace('▲ 閉じる','▼ さらに表示')
+    : '▲ 閉じる';
 }
 function selectMedTimingChip(timing){
   document.querySelectorAll('.med-timing-chip').forEach(c=>c.classList.remove('selected'));
@@ -4008,19 +4036,25 @@ function addResident(){
   db.residents.push({id:genId('r'),name,care,sched:Array(31).fill(0),_u:Date.now(),serviceType:'resident'});
   saveDB(); renderSettingsPanel('residents');
 }
-function markResidentTombstone(id){
-  const sid=String(id||'').trim();
-  if(!sid) return;
+function markResidentTombstone(resident){
+  const sid=String(resident&&resident.id||'').trim();
+  const nm=normalizeResidentName(resident&&resident.name||'');
+  if(!sid&&!nm) return;
   db.settings=db.settings||{};
   if(!db.settings._residentDel||typeof db.settings._residentDel!=='object'||Array.isArray(db.settings._residentDel))
     db.settings._residentDel={};
-  db.settings._residentDel[sid]=Date.now();
+  const ts=Date.now();
+  if(sid){
+    db.settings._residentDel[sid]=ts; // 旧形式を維持
+    db.settings._residentDel['id:'+sid]=ts;
+  }
+  if(nm) db.settings._residentDel['name:'+nm]=ts;
   touchSetU('_residentDel');
 }
 function delResident(idx){
   if(!confirm(`「${db.residents[idx].name}」を削除しますか？\n記録データは残ります`)) return;
-  const id=db.residents[idx]&&db.residents[idx].id;
-  markResidentTombstone(id);
+  const target=db.residents[idx];
+  markResidentTombstone(target);
   db.residents.splice(idx,1);
   saveDB(); renderSettingsPanel('residents');
 }
@@ -4029,8 +4063,8 @@ function delResidentByName(name){
   const idx=db.residents.findIndex(r=>r.name===name);
   if(idx<0) return;
   if(!confirm(`「${name}」を削除しますか？\n記録データは残ります`)) return;
-  const id=db.residents[idx]&&db.residents[idx].id;
-  markResidentTombstone(id);
+  const target=db.residents[idx];
+  markResidentTombstone(target);
   db.residents.splice(idx,1);
   saveDB(); renderMain();
 }
