@@ -4134,9 +4134,11 @@ function delSupplyProduct(idx){
 
 function buildSingleListSettings(title, key){
   const list=db.settings[key]||[];
+  const canEditItem=key==='careItems'||key==='dayItems';
   const items=list.map((s,i)=>`<div class="settings-list-item">
     <div class="item-name">${escapeHtml(s)}</div>
     <div class="settings-list-actions">
+      ${canEditItem?`<button type="button" class="btn btn-sm" style="padding:3px 8px;font-size:12px;border:1px solid var(--blue);background:var(--blue2);color:var(--blue);" onclick="openSettingsListItemEdit('${key}',${i})" title="文言を編集">編集</button>`:''}
       <button type="button" class="item-move" onclick="moveSettingsArrayItem('${key}',${i},-1)" ${i===0?'disabled':''} title="上へ">↑</button>
       <button type="button" class="item-move" onclick="moveSettingsArrayItem('${key}',${i},1)" ${i===list.length-1?'disabled':''} title="下へ">↓</button>
       <button class="item-del" onclick="delListItem('${key}',${i})">削除</button>
@@ -4186,6 +4188,41 @@ function addListItem(key){
   db.settings[key].push(val);
   touchSetU(key);
   saveDB(); renderSettingsPanel(curSettingsTab);
+}
+/** 設定の「1日の様子項目」「ケア記録項目」の1行を編集 */
+function openSettingsListItemEdit(key,idx){
+  if(key!=='careItems'&&key!=='dayItems') return;
+  const list=db.settings[key];
+  if(!Array.isArray(list)||idx<0||idx>=list.length) return;
+  const head=key==='dayItems'?'1日の様子':'ケア記録';
+  const cur=String(list[idx]||'');
+  openMainOv(`
+    <div class="ov-title">${head} 項目を編集<button class="ov-close" onclick="closeMainOv()">✕</button></div>
+    <div style="padding:16px;">
+      <textarea id="settingsListItemEditTa" rows="8" style="width:100%;box-sizing:border-box;font-size:15px;line-height:1.45;padding:10px;border:1px solid var(--border2);border-radius:var(--r1);"></textarea>
+      <p style="font-size:12px;color:var(--text3);margin-top:8px;">過去の記録に付いたチップの文言は自動では変わりません。</p>
+      <div style="margin-top:14px;display:flex;gap:10px;flex-wrap:wrap;">
+        <button type="button" class="btn btn-primary btn-sm" onclick="saveSettingsListItemEdit('${key}',${idx})">保存</button>
+        <button type="button" class="btn btn-gray btn-sm" onclick="closeMainOv()">キャンセル</button>
+      </div>
+    </div>
+  `);
+  const ta=document.getElementById('settingsListItemEditTa');
+  if(ta) ta.value=cur;
+}
+function saveSettingsListItemEdit(key,idx){
+  if(key!=='careItems'&&key!=='dayItems') return;
+  const ta=document.getElementById('settingsListItemEditTa');
+  if(!ta) return;
+  const val=ta.value.trim();
+  if(!val){ alert('空にはできません'); return; }
+  const list=db.settings[key];
+  if(!Array.isArray(list)||idx<0||idx>=list.length) return;
+  list[idx]=val;
+  touchSetU(key);
+  saveDB();
+  closeMainOv();
+  renderSettingsPanel(curSettingsTab);
 }
 function moveSettingsArrayItem(key, idx, delta){
   const list=db.settings[key];
