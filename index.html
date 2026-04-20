@@ -426,7 +426,6 @@ input,select,textarea{font-family:inherit;font-size:30px;}
 
 <!-- ========== メイン画面 ========== -->
 <div id="mainScreen" class="screen">
-  <div id="standaloneHintBar" class="no-print" style="display:none;" aria-live="polite"></div>
   <div class="hdr no-print">
     <img id="mainLogo" class="hdr-logo" src="" alt="" style="display:none;">
     <div style="flex:1;"></div>
@@ -1032,23 +1031,6 @@ function isStandaloneWebApp(){
   }catch(_){}
   return false;
 }
-/** iOS ホーム画面版：Safari とは別ストレージのため注意喚起 */
-function updateStandaloneHintBar(){
-  const el=document.getElementById('standaloneHintBar');
-  if(!el) return;
-  if(!isStandaloneWebApp()){
-    el.style.display='none';
-    el.textContent='';
-    return;
-  }
-  el.style.display='block';
-  const gas=gasConfigured();
-  const msg=gas
-    ? 'ホーム画面版：このアプリ専用の保存領域です。Safariと内容が違うときは「🔄同期」を押してください。'
-    : 'ホーム画面版：Safariとは別の保存領域です。⚙️→データ管理で GAS の URL・トークンをこちらでも保存してください。';
-  el.innerHTML='<div style="font-size:14px;padding:8px 12px;background:#FFF8E6;color:#5c4d03;border-bottom:1px solid #e8d4a8;line-height:1.45;">'+msg+'</div>';
-}
-
 function gasToken(){ return (localStorage.getItem('kaigo_gas_token')||'').trim(); }
 function gasUrl(){ return (localStorage.getItem('kaigo_gas_webapp_url')||'').trim(); }
 function gasConfigured(){ return !!(gasUrl() && gasToken() && FAC); }
@@ -2400,7 +2382,6 @@ function residentsOnDaySorted(dayIdx, opts){
 
 function renderMain(){
   if(!FAC) return;
-  updateStandaloneHintBar();
   renderDate();
   renderFacilityHeader();
   const day=curDate.getDate()-1;
