@@ -3061,6 +3061,10 @@ const MED_TIMINGS=[
   {id:'dinner', label:'夕食後'},
   {id:'bedtime',label:'就寝前'},
 ];
+function medDefaultTimeByTiming(timing){
+  const map={morning:'07:50',lunch:'12:10',dinner:'17:50',bedtime:'20:00'};
+  return map[timing]||'';
+}
 function buildMedPanel(){
   const rec=getRec(curRes);
   const hist=get48hMed(curRes);
@@ -3078,6 +3082,7 @@ function buildMedPanel(){
 
   const defTiming='morning';
   const defM=rec.med[defTiming]||{time:'',staff:'',items:[]};
+  const defTime=defM.time||medDefaultTimeByTiming(defTiming);
   const medChipItems=['処方薬','漢方薬','解熱鎮痛薬','点眼薬','服薬なし'];
   const medChipsHtml=medChipItems.map(item=>{
     const cls=item==='服薬なし'?(defM.items&&defM.items.includes(item)?'none-on':''):(defM.items&&defM.items.includes(item)?'on':'');
@@ -3112,8 +3117,8 @@ function buildMedPanel(){
       </div>
       <input type="hidden" id="medFormTiming" value="${defTiming}">
       <div class="fg-row fg-cols-2">
-        <div class="fg"><label>時刻</label><input type="time" id="medFormTime" value="${defM.time||''}"></div>
-        <div class="fg"><label>担当者</label><select id="medFormStaff">${buildStaffOpts('')}</select></div>
+        <div class="fg"><label>時刻</label><input type="time" id="medFormTime" value="${defTime}" style="width:100%;font-size:20px;padding:10px 12px;"></div>
+        <div class="fg"><label>担当者</label><select id="medFormStaff" style="width:100%;font-size:20px;padding:10px 12px;">${buildStaffOpts('')}</select></div>
       </div>
       <div class="fg">
         <div style="display:flex;flex-wrap:wrap;gap:6px;" id="medFormChips">${medChipsHtml}</div>
@@ -3135,7 +3140,7 @@ function selectMedTimingChip(timing){
   });
   const targetName=document.querySelector('#medTargetChips .chip.selected')?.getAttribute('data-name')||curRes;
   const m=getRec(targetName).med[timing]||{time:'',staff:'',items:[]};
-  document.getElementById('medFormTime').value=m.time||'';
+  document.getElementById('medFormTime').value=m.time||medDefaultTimeByTiming(timing);
   document.getElementById('medFormStaff').value=m.staff||'';
   const medChipItems=['処方薬','漢方薬','解熱鎮痛薬','点眼薬','服薬なし'];
   document.querySelectorAll('#medFormChips .med-chip').forEach(el=>{
