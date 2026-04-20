@@ -2532,6 +2532,7 @@ const TAB_LIST = [
   {id:'rec',      label:'レク'},
   {id:'day',      label:'1日の様子'},
   {id:'care',     label:'ケア記録'},
+  {id:'summary',  label:'サマリー'},
 ];
 
 function openDetail(name, tab){
@@ -2571,6 +2572,7 @@ function refreshPanel(tab){
     case 'meal':      el.innerHTML=buildMealPanel(); break;
     case 'rec':       el.innerHTML=buildRecPanel(); break;
     case 'day':       el.innerHTML=buildDayPanel(); break;
+    case 'summary':   el.innerHTML=buildSummaryPanel(); break;
   }
 }
 
@@ -3697,25 +3699,38 @@ function buildResidentDailySummaryRows(name, dateKey){
   return rows;
 }
 function openCareSummary(){
+  // オーバーレイではなく詳細タブで表示（ヘッダーの日付操作をそのまま使う）
+  switchTab('summary');
+}
+function buildSummaryPanel(){
   const dateKey=dk();
   const rows=buildResidentDailySummaryRows(curRes,dateKey);
-  const dayLabel=recDayLabel(dateKey);
+  const dayLabel=dateLabelWithWeek(dateKey);
   const tableRows=rows.map(r=>`<tr>
-    <td style="white-space:nowrap;">${escapeHtml(r.t||'')}</td>
-    <td style="white-space:nowrap;">${escapeHtml(r.cat||'')}</td>
-    <td style="white-space:pre-wrap;">${escapeHtml(r.body||'')}</td>
-    <td style="white-space:nowrap;">${escapeHtml(r.staff||'')}</td>
+    <td style="white-space:nowrap;border:1px solid var(--border2);padding:8px 10px;font-size:18px;">${escapeHtml(r.t||'')}</td>
+    <td style="white-space:nowrap;border:1px solid var(--border2);padding:8px 10px;font-size:18px;">${escapeHtml(r.cat||'')}</td>
+    <td style="white-space:pre-wrap;border:1px solid var(--border2);padding:8px 10px;font-size:18px;line-height:1.45;">${escapeHtml(r.body||'')}</td>
+    <td style="white-space:nowrap;border:1px solid var(--border2);padding:8px 10px;font-size:18px;">${escapeHtml(r.staff||'')}</td>
   </tr>`).join('');
-  openMainOv(`
-    <div class="ov-title">記録サマリー（${escapeHtml(curRes)}）<button class="ov-close" onclick="closeMainOv()">✕</button></div>
-    <div style="padding:14px 16px 4px;color:var(--text2);font-size:13px;">表示日: ${escapeHtml(dayLabel)}（上部の日付選択で切替）</div>
-    <div style="padding:10px 16px 16px;">
-      <table class="print-table" style="margin-bottom:0;">
-        <thead><tr><th>時刻</th><th>項目</th><th>内容</th><th>担当</th></tr></thead>
-        <tbody>${tableRows||'<tr><td colspan="4" style="text-align:center;color:var(--text3);">記録なし</td></tr>'}</tbody>
-      </table>
+  return `<div class="panel">
+    <div class="panel-sec">
+      <h3>記録サマリー</h3>
+      <div style="color:var(--text2);font-size:14px;margin-bottom:8px;">表示日: ${escapeHtml(dayLabel)}</div>
+      <div style="overflow:auto;">
+        <table style="width:100%;border-collapse:collapse;table-layout:fixed;">
+          <thead>
+            <tr>
+              <th style="border:1px solid var(--border2);padding:8px 10px;font-size:18px;background:#f7f7f7;width:90px;">時刻</th>
+              <th style="border:1px solid var(--border2);padding:8px 10px;font-size:18px;background:#f7f7f7;width:110px;">項目</th>
+              <th style="border:1px solid var(--border2);padding:8px 10px;font-size:18px;background:#f7f7f7;">内容</th>
+              <th style="border:1px solid var(--border2);padding:8px 10px;font-size:18px;background:#f7f7f7;width:120px;">担当</th>
+            </tr>
+          </thead>
+          <tbody>${tableRows||'<tr><td colspan="4" style="text-align:center;color:var(--text3);border:1px solid var(--border2);padding:14px;font-size:18px;">記録なし</td></tr>'}</tbody>
+        </table>
+      </div>
     </div>
-  `);
+  </div>`;
 }
 
 // ========== パット等卸記録 ==========
