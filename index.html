@@ -6,6 +6,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="介護記録">
+<meta http-equiv="Cache-Control" content="max-age=0, must-revalidate">
 <title id="pageTitle">介護記録</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
@@ -425,6 +426,7 @@ input,select,textarea{font-family:inherit;font-size:30px;}
 
 <!-- ========== メイン画面 ========== -->
 <div id="mainScreen" class="screen">
+  <div id="standaloneHintBar" class="no-print" style="display:none;" aria-live="polite"></div>
   <div class="hdr no-print">
     <img id="mainLogo" class="hdr-logo" src="" alt="" style="display:none;">
     <div style="flex:1;"></div>
@@ -1001,6 +1003,32 @@ const REC = {
   mt:43,mtt:44,mts:45,mj:46, rp:47,rc:48,rk:49,rch:50, dt:51,dw:52, sr:53,sp:54,sq:55, exj:56
 };
 const N_RECORD_COLS = 57;
+
+/** 表示用（スタンドアロンと Safari で同じHTMLを読めているか確認） */
+const KAIGO_APP_BUILD='2026-02-09';
+function isStandaloneWebApp(){
+  try{
+    if(window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches) return true;
+    if(window.navigator&&window.navigator.standalone===true) return true;
+  }catch(_){}
+  return false;
+}
+/** iOS ホーム画面版：Safari とは別ストレージのため注意喚起 */
+function updateStandaloneHintBar(){
+  const el=document.getElementById('standaloneHintBar');
+  if(!el) return;
+  if(!isStandaloneWebApp()){
+    el.style.display='none';
+    el.textContent='';
+    return;
+  }
+  el.style.display='block';
+  const gas=gasConfigured();
+  const msg=gas
+    ? 'ホーム画面版（ビルド '+KAIGO_APP_BUILD+'）：このアプリ専用の保存領域です。Safariと内容が違うときは「🔄同期」を押してください。'
+    : 'ホーム画面版（ビルド '+KAIGO_APP_BUILD+'）：Safariとは別の保存領域です。⚙️→データ管理で GAS の URL・トークンをこちらでも保存してください。';
+  el.innerHTML='<div style="font-size:14px;padding:8px 12px;background:#FFF8E6;color:#5c4d03;border-bottom:1px solid #e8d4a8;line-height:1.45;">'+msg+'</div>';
+}
 
 function gasToken(){ return (localStorage.getItem('kaigo_gas_token')||'').trim(); }
 function gasUrl(){ return (localStorage.getItem('kaigo_gas_webapp_url')||'').trim(); }
@@ -2353,6 +2381,7 @@ function residentsOnDaySorted(dayIdx, opts){
 
 function renderMain(){
   if(!FAC) return;
+  updateStandaloneHintBar();
   renderDate();
   renderFacilityHeader();
   const day=curDate.getDate()-1;
@@ -4221,7 +4250,13 @@ function buildDataSettings(){
   const hasTok=!!(typeof localStorage!=='undefined'&&localStorage.getItem('kaigo_gas_token'));
   const hasUrl=!!String(gUrl||'').trim();
   const gasOk=hasUrl&&hasTok;
+  const pwaNote=isStandaloneWebApp()
+    ? `<p style="font-size:14px;margin-bottom:10px;padding:10px;border-radius:var(--r2);background:#FFF8E6;color:#5c4d03;border:1px solid #E8D4A8;">
+      <b>ホーム画面アプリ</b>で開いています（ビルド <code>${KAIGO_APP_BUILD}</code>）。<b>Safari 本体とは保存領域が別</b>のため、ここでも GAS URL・トークンを保存し、必要なら「🔄同期」で取得してください。Safari の「Webサイトデータを削除」では<b>このアプリ側のデータは消えません</b>（別アプリ扱い）。
+    </p>`
+    : '';
   return `<div class="settings-panel active">
+    ${pwaNote}
     <div class="panel-sec">
       <h3>☁ Google スプレッドシート同期（GAS）</h3>
       <p style="font-size:14px;margin-bottom:10px;padding:10px;border-radius:var(--r2);${gasOk?'background:var(--green2);color:var(--green);':'background:#FFF8E6;color:#856404;border:1px solid #E8D4A8;'}">
@@ -4922,6 +4957,14 @@ document.addEventListener('visibilitychange', ()=>{
   if(document.visibilityState!=='visible') return;
   gasRepairFromCookieMirror();
   gasSnapshotRepairFromPrimary();
+});
+/** iOS：戻る／スワイプでキャッシュ復帰したとき Cookie ミラー復元・必要なら再取得 */
+window.addEventListener('pageshow', (ev)=>{
+  try{
+    gasRepairFromCookieMirror();
+    gasSnapshotRepairFromPrimary();
+    if(ev.persisted&&FAC&&gasConfigured()) syncPullOnly();
+  }catch(_){}
 });
 </script>
 </body>
