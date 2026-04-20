@@ -2214,10 +2214,59 @@ function getLastStool(name){
   return null;
 }
 
-/** 本日スケジュールの利用者を氏名順に（同期マージで residents 配列順が端末でずれるため） */
-function residentsOnDaySorted(dayIdx){
-  return db.residents.filter(r=>r.sched&&r.sched[dayIdx]===1)
-    .sort(compareResidentsStable);
+/** メイン表用：その日の記録に中身があるか（空の ensureDay だけは除外） */
+function recordDayHasMainListData(rec){
+  if(!rec||typeof rec!=='object') return false;
+  if((rec.vital||[]).length) return true;
+  if((rec.excretion||[]).length) return true;
+  if((rec.bath||[]).length) return true;
+  if((rec.care||[]).length) return true;
+  if((rec.notes||[]).some(n=>isActiveNote(n))) return true;
+  if(rec.meal&&mealRowHasData(rec.meal)) return true;
+  const med=rec.med||{};
+  if(['morning','lunch','dinner','bedtime'].some(t=>{
+    const x=med[t];
+    if(!x) return false;
+    if((x.items||[]).length) return true;
+    return !!(String(x.time||'').trim()||String(x.staff||'').trim());
+  })) return true;
+  if(rec.rec&&(String(rec.rec.content||'').trim()||(rec.rec.chips||[]).length||String(rec.rec.part||'').trim()||String(rec.rec.time||'').trim()))
+    return true;
+  if(String(rec.day||'').trim()) return true;
+  return false;
+}
+
+/**
+ * 利用者を氏名順に。
+ * @param dayIdx カレンダー上の日（0始まり＝1日）
+ * @param opts.forMainTable true のとき、選択日が「今日」より前なら、スケジュール外・削除済みでもその日の記録があれば一覧に含める（メイン画面の履歴表示用）
+ */
+function residentsOnDaySorted(dayIdx, opts){
+  const fromSched=(db.residents||[]).filter(r=>r.sched&&r.sched[dayIdx]===1);
+  if(!opts||!opts.forMainTable){
+    return fromSched.slice().sort(compareResidentsStable);
+  }
+  const selKey=dk();
+  const todayKey=dk(new Date());
+  if(selKey>=todayKey){
+    return fromSched.slice().sort(compareResidentsStable);
+  }
+  const byName=new Map();
+  fromSched.forEach(r=>{
+    const nm=normalizeResidentName(r.name);
+    if(nm) byName.set(nm,Object.assign({},r,{_mainGhost:false}));
+  });
+  const dayRec=db.records[selKey]||{};
+  Object.keys(dayRec).forEach(rawName=>{
+    const nm=normalizeResidentName(rawName);
+    if(!nm||byName.has(nm)) return;
+    const rec=dayRec[rawName];
+    if(!recordDayHasMainListData(rec)) return;
+    const rr=(db.residents||[]).find(x=>normalizeResidentName(x.name)===nm);
+    if(rr) byName.set(nm,Object.assign({},rr,{_mainGhost:false}));
+    else byName.set(nm,{id:'',name:String(rawName).trim(),care:'',sched:[],_u:0,_mainGhost:true});
+  });
+  return [...byName.values()].sort(compareResidentsStable);
 }
 
 function renderMain(){
@@ -2225,7 +2274,7 @@ function renderMain(){
   renderDate();
   renderFacilityHeader();
   const day=curDate.getDate()-1;
-  const todayRes=residentsOnDaySorted(day);
+  const todayRes=residentsOnDaySorted(day,{forMainTable:true});
   const tbody=document.getElementById('resBody');
   if(!tbody) return;
   if(todayRes.length===0){
@@ -2319,7 +2368,7 @@ function renderMain(){
             <div class="name-txt" onclick="openSummary('${r.name}')">${r.name}</div>
             <div class="name-sub">${r.care||''}</div>
           </div>
-          <button class="res-del-btn no-print" onclick="delResidentByName('${r.name}')">×</button>
+          ${r._mainGhost?'':`<button class="res-del-btn no-print" onclick="delResidentByName('${r.name}')">×</button>`}
         </div>
       </td>
       <td class="res-div-l" onclick="openDetail('${r.name}','vital')">${tc}</td>
