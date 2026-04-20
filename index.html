@@ -830,6 +830,16 @@ const dayStr = (d) => ['日','月','火','水','木','金','土'][(d||curDate).g
 const fmtTs = ts => { const d=new Date(ts); return `${dk(d)} ${pad(d.getHours())}:${pad(d.getMinutes())}`; };
 
 // ========== DB操作 ==========
+/** ホーム画面版の更新直後など、メインJSONが一瞬空でもロゴを残すための補助キー */
+function syncLogoMirror(){
+  if(!FAC||!db||!db.settings) return;
+  try{
+    const k=FAC.storageKey+'_logo_b64_v1';
+    const b64=String(db.settings.logoB64||'').trim();
+    if(b64.length>20) localStorage.setItem(k,b64);
+    else localStorage.removeItem(k);
+  }catch(_){}
+}
 function loadDB(){
   if(!FAC){ showScreen('selectScreen'); return; }
   try{
@@ -861,6 +871,13 @@ function loadDB(){
     }
   });
   let needSaveAfterMigrate=false;
+  try{
+    const cur=String(db.settings.logoB64||'').trim();
+    if(cur.length<=20){
+      const side=(localStorage.getItem(FAC.storageKey+'_logo_b64_v1')||'').trim();
+      if(side.length>20){ db.settings.logoB64=side; needSaveAfterMigrate=true; }
+    }
+  }catch(_){}
   if(JSON.stringify(db.settings.supplyProducts||[])===LEGACY_DEFAULT_SUPPLY_JSON){
     db.settings.supplyProducts=JSON.parse(JSON.stringify(DEFAULT_SETTINGS.supplyProducts));
     touchSetU('supplyProducts');
@@ -906,6 +923,7 @@ function loadDB(){
   if(!db.settings._residentDel||typeof db.settings._residentDel!=='object'||Array.isArray(db.settings._residentDel))
     db.settings._residentDel={};
   initializeSetUForExistingSettings();
+  syncLogoMirror();
   saveSettingsSnapshot();
 }
 
@@ -913,6 +931,7 @@ function saveDB(){
   if(!FAC) return;
   initializeSetUForExistingSettings();
   localStorage.setItem(FAC.storageKey, JSON.stringify(db));
+  syncLogoMirror();
   saveSettingsSnapshot();
   syncDirty = true;
   localStorage.setItem(FAC.storageKey+'_dirty','1'); // ページ再読込後も未送信フラグを保持
@@ -1004,8 +1023,8 @@ const REC = {
 };
 const N_RECORD_COLS = 57;
 
-/** 表示用（スタンドアロンと Safari で同じHTMLを読めているか確認） */
-const KAIGO_APP_BUILD='2026-02-09';
+/** デプロイのたびに上げる（設定→データ管理の「アプリ情報」で表示） */
+const APP_VERSION='1.0.2';
 function isStandaloneWebApp(){
   try{
     if(window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches) return true;
@@ -1025,8 +1044,8 @@ function updateStandaloneHintBar(){
   el.style.display='block';
   const gas=gasConfigured();
   const msg=gas
-    ? 'ホーム画面版（ビルド '+KAIGO_APP_BUILD+'）：このアプリ専用の保存領域です。Safariと内容が違うときは「🔄同期」を押してください。'
-    : 'ホーム画面版（ビルド '+KAIGO_APP_BUILD+'）：Safariとは別の保存領域です。⚙️→データ管理で GAS の URL・トークンをこちらでも保存してください。';
+    ? 'ホーム画面版：このアプリ専用の保存領域です。Safariと内容が違うときは「🔄同期」を押してください。'
+    : 'ホーム画面版：Safariとは別の保存領域です。⚙️→データ管理で GAS の URL・トークンをこちらでも保存してください。';
   el.innerHTML='<div style="font-size:14px;padding:8px 12px;background:#FFF8E6;color:#5c4d03;border-bottom:1px solid #e8d4a8;line-height:1.45;">'+msg+'</div>';
 }
 
@@ -4252,7 +4271,7 @@ function buildDataSettings(){
   const gasOk=hasUrl&&hasTok;
   const pwaNote=isStandaloneWebApp()
     ? `<p style="font-size:14px;margin-bottom:10px;padding:10px;border-radius:var(--r2);background:#FFF8E6;color:#5c4d03;border:1px solid #E8D4A8;">
-      <b>ホーム画面アプリ</b>で開いています（ビルド <code>${KAIGO_APP_BUILD}</code>）。<b>Safari 本体とは保存領域が別</b>のため、ここでも GAS URL・トークンを保存し、必要なら「🔄同期」で取得してください。Safari の「Webサイトデータを削除」では<b>このアプリ側のデータは消えません</b>（別アプリ扱い）。
+      <b>ホーム画面アプリ</b>で開いています。<b>Safari 本体とは保存領域が別</b>のため、ここでも GAS URL・トークンを保存し、必要なら「🔄同期」で取得してください。Safari の「Webサイトデータを削除」では<b>このアプリ側のデータは消えません</b>（別アプリ扱い）。
     </p>`
     : '';
   return `<div class="settings-panel active">
@@ -4292,6 +4311,14 @@ function buildDataSettings(){
         <input type="file" accept=".json" style="display:none;" onchange="importDB(this)">
       </label>
     </div>
+    <details class="panel-sec" style="margin-top:4px;">
+      <summary style="cursor:pointer;font-size:14px;color:var(--text2);user-select:none;">アプリ情報（普段は閉じておいてください）</summary>
+      <p style="font-size:13px;color:var(--text3);margin:10px 0 0;line-height:1.5;">
+        バージョン <code>${APP_VERSION}</code>。<br>
+        表示モード：${isStandaloneWebApp()?'ホーム画面アプリ（スタンドアロン）':'ブラウザ'}。<br>
+        <span style="font-size:12px;">旧「2026-02-09」は開発用のデプロイ日メモでした（機能名ではありません）。</span>
+      </p>
+    </details>
   </div>`;
 }
 function saveGasConfig(){
