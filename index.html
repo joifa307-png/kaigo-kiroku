@@ -896,6 +896,7 @@ function loadDB(){
       const nm=normalizeResidentName(r&&r.name);
       if(!nm||seen.has(nm)) return false;
       r.name=nm;
+      r.serviceType=residentServiceTypeOrDefault(r);
       seen.add(nm); return true;
     });
   }
@@ -1157,10 +1158,26 @@ function syncFrom(){ syncNow(true); }
 function _numU(x){ const n=Number(x); return isNaN(n)?0:n; }
 function cloneDeep(o){ return JSON.parse(JSON.stringify(o==null?{}:o)); }
 
+/**
+ * 利用者のサービス種別（シート列 serviceType・内部のみ。画面に種別は出さない）
+ * resident: 入所・常時利用（Excel取込の isDaily 相当）
+ * day: デイサービス（宿泊なし想定。最終排便列は常に —）
+ */
+function normalizeResidentServiceType(v){
+  const s=String(v==null?'':v).trim().toLowerCase();
+  if(s==='day'||s==='ds'||s==='デイ'||s==='デイサービス') return 'day';
+  return 'resident';
+}
+function residentServiceTypeOrDefault(r){
+  if(!r||r.serviceType==null||String(r.serviceType).trim()==='') return 'resident';
+  return normalizeResidentServiceType(r.serviceType);
+}
+
 function buildResidentHeaderRow(){
   const h=['id','氏名','要介護度'];
   for(let d=1;d<=31;d++) h.push('d'+d);
   h.push('updatedAt');
+  h.push('serviceType');
   return h;
 }
 function buildRecordHeaderRow(){
@@ -1233,6 +1250,7 @@ function dbToSheet(inDb){
     const sch=r.sched||[];
     for(let di=0;di<31;di++) row.push(sch[di]===1?1:0);
     row.push(_numU(r._u));
+    row.push(residentServiceTypeOrDefault(r));
     rows.push(PR(row));
   });
   rows.push(PR([]));
@@ -1508,7 +1526,11 @@ function sheetToDb(rows){
     const sched=[];
     for(let c=3;c<34;c++) sched.push(Number(r[c])===1?1:0);
     while(sched.length<31) sched.push(0);
-    dbOut.residents.push({ id:id||genId('r'), name, care, sched, _u:_numU(r[34]) });
+    const svcRaw=r[35];
+    dbOut.residents.push({
+      id:id||genId('r'), name, care, sched, _u:_numU(r[34]),
+      serviceType:normalizeResidentServiceType(svcRaw)
+    });
     i++;
   }
   while(i<rows.length && String(rows[i][0])!==SEC_REC) i++;
@@ -2325,16 +2347,20 @@ function renderMain(){
       if(lines.length===0) lines.push('空振り');
       ec=`<span class="cell-ex">${normalizeTimeText(le.time)}<br>${lines.join('<br>')}</span>`;
     }
-    // 最終排便
-    const _ls=getLastStool(r.name);
+    // 最終排便（デイサービス利用者は管理対象外のため常に —）
     let lsc;
-    if(!_ls){lsc='<span class="cell-empty">—</span>';}
-    else{
-      const _ha=(Date.now()-_ls.dt)/3600000;
-      if(_ha<48) lsc=`<span class="cell-val" style="font-size:14px;">${_ls.dayStr}曜 ${normalizeTimeText(_ls.time)}</span>`;
-      else if(_ha<60) lsc='<span class="cell-warn">－3日</span>';
-      else if(_ha<72) lsc='<span class="cell-warn">－4日</span>';
-      else lsc='<span class="cell-warn">－5日</span>';
+    if(residentServiceTypeOrDefault(r)==='day'){
+      lsc='<span class="cell-empty">—</span>';
+    }else{
+      const _ls=getLastStool(r.name);
+      if(!_ls){lsc='<span class="cell-empty">—</span>';}
+      else{
+        const _ha=(Date.now()-_ls.dt)/3600000;
+        if(_ha<48) lsc=`<span class="cell-val" style="font-size:14px;">${_ls.dayStr}曜 ${normalizeTimeText(_ls.time)}</span>`;
+        else if(_ha<60) lsc='<span class="cell-warn">－3日</span>';
+        else if(_ha<72) lsc='<span class="cell-warn">－4日</span>';
+        else lsc='<span class="cell-warn">－5日</span>';
+      }
     }
     // 入浴
     const bac=(rec.bath||[]).length?'<span class="cell-ok">○</span>':'<span class="cell-empty">—</span>';
@@ -3770,7 +3796,7 @@ function addResident(){
   const name=document.getElementById('newResName').value.trim();
   const care=document.getElementById('newResCare').value;
   if(!name){ alert('氏名を入力してください'); return; }
-  db.residents.push({id:genId('r'),name,care,sched:Array(31).fill(0),_u:Date.now()});
+  db.residents.push({id:genId('r'),name,care,sched:Array(31).fill(0),_u:Date.now(),serviceType:'resident'});
   saveDB(); renderSettingsPanel('residents');
 }
 function markResidentTombstone(id){
@@ -3832,7 +3858,7 @@ function addResidentFromMain(){
   const care=document.getElementById('addResCare').value;
   if(!name){ alert('氏名を入力してください'); return; }
   if((db.residents||[]).find(r=>r.name===name)){ alert('同名の利用者が既に存在します'); return; }
-  db.residents.push({id:genId('r'),name,care,sched:Array(31).fill(0)});
+  db.residents.push({id:genId('r'),name,care,sched:Array(31).fill(0),serviceType:'resident'});
   saveDB(); closeOv('ovAddRes'); renderMain();
 }
 
@@ -3895,7 +3921,8 @@ function handleXlsx(file){
         // 既存利用者のIDを引き継ぐ（同期時に重複しないよう）
         const existing=db.residents.find(r=>r.name===n);
         const id=existing?existing.id:genId('r');
-        newRes.push({id,name:n,care:v.care,sched:sched});
+        const serviceType=isDaily?'resident':'day';
+        newRes.push({id,name:n,care:v.care,sched:sched,serviceType});
       });
       if(newRes.length>0){
         db.residents=newRes;
