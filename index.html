@@ -3699,7 +3699,7 @@ function buildResidentDailySummaryRows(name, dateKey){
 function openCareSummary(){
   const dateKey=dk();
   const rows=buildResidentDailySummaryRows(curRes,dateKey);
-  const dayLabel=jpDate(dateKey);
+  const dayLabel=recDayLabel(dateKey);
   const tableRows=rows.map(r=>`<tr>
     <td style="white-space:nowrap;">${escapeHtml(r.t||'')}</td>
     <td style="white-space:nowrap;">${escapeHtml(r.cat||'')}</td>
