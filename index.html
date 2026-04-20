@@ -1168,9 +1168,34 @@ function normalizeResidentServiceType(v){
   if(s==='day'||s==='ds'||s==='デイ'||s==='デイサービス') return 'day';
   return 'resident';
 }
+/** 予定が全日1なら入所扱い、それ以外（デイの〇のみ等）はデイ扱い（旧シートで serviceType 列が無いときの推定） */
+function inferServiceTypeFromSched(sched){
+  if(!Array.isArray(sched)||sched.length===0) return 'resident';
+  if(sched.every(v=>Number(v)===1)) return 'resident';
+  return 'day';
+}
+/** シート列 serviceType（あれば優先）＋無ければ sched から推定 */
+function residentServiceTypeFromSheet(svcRaw, sched){
+  if(svcRaw!==undefined&&svcRaw!==null&&String(svcRaw).trim()!=='')
+    return normalizeResidentServiceType(svcRaw);
+  return inferServiceTypeFromSched(sched);
+}
 function residentServiceTypeOrDefault(r){
-  if(!r||r.serviceType==null||String(r.serviceType).trim()==='') return 'resident';
-  return normalizeResidentServiceType(r.serviceType);
+  if(!r) return 'resident';
+  if(r.serviceType!=null&&String(r.serviceType).trim()!=='')
+    return normalizeResidentServiceType(r.serviceType);
+  return inferServiceTypeFromSched(r.sched);
+}
+/** 食事の対象者チップ：デイは昼のみ既定選択、入所は全区分で既定選択 */
+function mealResChipSelectedByDefault(r, mealSection){
+  if(residentServiceTypeOrDefault(r)!=='day') return true;
+  return mealSection==='lunch';
+}
+/** 服薬の対象者チップ（既定は詳細の本人のみ）：デイは昼食後タイミングのときだけ本人を選択 */
+function medTargetChipSelectedByDefault(r, timingId){
+  if(!r||r.name!==curRes) return false;
+  if(residentServiceTypeOrDefault(r)!=='day') return true;
+  return timingId==='lunch';
 }
 
 function buildResidentHeaderRow(){
@@ -1526,10 +1551,9 @@ function sheetToDb(rows){
     const sched=[];
     for(let c=3;c<34;c++) sched.push(Number(r[c])===1?1:0);
     while(sched.length<31) sched.push(0);
-    const svcRaw=r[35];
     dbOut.residents.push({
       id:id||genId('r'), name, care, sched, _u:_numU(r[34]),
-      serviceType:normalizeResidentServiceType(svcRaw)
+      serviceType:residentServiceTypeFromSheet(r[35], sched)
     });
     i++;
   }
@@ -3002,7 +3026,7 @@ function buildMedPanel(){
     return `<div class="chip med-timing-chip${t.id===defTiming?' selected':''}" data-timing="${t.id}" onclick="selectMedTimingChip('${t.id}')">${t.label}${badge?` <small>${badge}</small>`:''}</div>`;
   }).join('');
   const targetChipsHtml=targets.map(r=>{
-    const sel=r.name===curRes?' selected':'';
+    const sel=medTargetChipSelectedByDefault(r, defTiming)?' selected':'';
     return `<div class="chip${sel}" data-name="${escapeAttr(r.name)}" onclick="this.classList.toggle('selected')">${escapeHtml(r.name)}</div>`;
   }).join('');
 
@@ -3037,6 +3061,12 @@ function selectMedTimingChip(timing){
   document.querySelectorAll('.med-timing-chip').forEach(c=>c.classList.remove('selected'));
   document.querySelector(`.med-timing-chip[data-timing="${timing}"]`).classList.add('selected');
   document.getElementById('medFormTiming').value=timing;
+  document.querySelectorAll('#medTargetChips .chip').forEach(c=>{
+    const name=c.getAttribute('data-name');
+    const res=(db.residents||[]).find(x=>x.name===name);
+    const on=res&&medTargetChipSelectedByDefault(res, timing);
+    c.classList.toggle('selected', !!on);
+  });
   const targetName=document.querySelector('#medTargetChips .chip.selected')?.getAttribute('data-name')||curRes;
   const m=getRec(targetName).med[timing]||{time:'',staff:'',items:[]};
   document.getElementById('medFormTime').value=m.time||'';
@@ -3179,9 +3209,10 @@ function buildMealPanel(){
   const d0=defData[defSec];
   const dayIdx=curDate.getDate()-1;
   const todayRes=residentsOnDaySorted(dayIdx);
-  const mealResChips=todayRes.map(r=>
-    `<div class="chip meal-res-chip" data-name="${r.name.replace(/"/g,'&quot;')}" onclick="toggleMealResChip(this)">${r.name}</div>`
-  ).join('');
+  const mealResChips=todayRes.map(r=>{
+    const sel=mealResChipSelectedByDefault(r, defSec)?' selected':'';
+    return `<div class="chip meal-res-chip${sel}" data-name="${r.name.replace(/"/g,'&quot;')}" onclick="toggleMealResChip(this)">${r.name}</div>`;
+  }).join('');
   return `<div class="panel">
     <div class="panel-sec"><h3>直近の食事記録</h3><div class="hist-list">${mealHistHtml}</div></div>
     <div class="panel-sec">
@@ -3238,6 +3269,12 @@ function selectMealChip(section){
   document.getElementById('mealMenu').value=data.menu;
   document.getElementById('mealWater').value=String(data.water);
   document.getElementById('mealSnack').value=data.snack;
+  document.querySelectorAll('#mealResChips .meal-res-chip').forEach(c=>{
+    const name=c.dataset.name;
+    const res=(db.residents||[]).find(x=>x.name===name);
+    const on=mealResChipSelectedByDefault(res||{name,sched:[]}, section);
+    c.classList.toggle('selected', on);
+  });
 }
 function _getMealFormData(){
   const section=document.getElementById('mealSection')?.value;
