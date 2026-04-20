@@ -787,6 +787,8 @@ const DEFAULT_SETTINGS = {
   supplyProducts:  ['ずれずに安心パット','尿パットレギュラー（男女兼用）','尿パット（10回吸収）','尿パット（安心夜用）','ワイドパット','ビッグパット','リハビリパンツS','リハビリパンツM','リハビリパンツL','リハビリパンツLL','オムツS','オムツM','オムツL','オムツLL'],
   /** 利用者削除の墓石 { [id]: 削除時刻ms }。同期でシートから復活させない */
   _residentDel: {},
+  /** 記録行・服薬枠・消耗品などの削除墓石 { [キー]: 削除時刻ms }。pull→マージでシート側の古い行が復活しないようにする */
+  _recordItemDel: {},
 };
 const LEGACY_DEFAULT_SUPPLY_JSON = JSON.stringify(["リハビリパンツM", "リハビリパンツL", "尿取りパッド 昼用", "尿取りパッド 夜用", "テープ型オムツM", "テープ型オムツL"]);
 const LEGACY_DEFAULT_CARE_JSON = JSON.stringify(['清拭','更衣','口腔ケア','体位変換','爪切り','髭剃り','洗髪','排痰','リハビリ','外出','送迎']);
@@ -800,6 +802,8 @@ let curDate = new Date(); curDate.setHours(0,0,0,0);
 let curRes = null;
 let curTab = 'vital';
 let calY, calM;
+/** mergePulledDb 中のみ参照。同期マージ時に削除墓石を確実に適用する */
+let _mergeItemDelActive = null;
 
 // ========== ユーティリティ ==========
 const pad = n => String(n).padStart(2,'0');
@@ -920,6 +924,8 @@ function loadDB(){
   if(!db._setU) db._setU={};
   if(!db.settings._residentDel||typeof db.settings._residentDel!=='object'||Array.isArray(db.settings._residentDel))
     db.settings._residentDel={};
+  if(!db.settings._recordItemDel||typeof db.settings._recordItemDel!=='object'||Array.isArray(db.settings._recordItemDel))
+    db.settings._recordItemDel={};
   initializeSetUForExistingSettings();
   syncLogoMirror();
   saveSettingsSnapshot();
@@ -1747,8 +1753,10 @@ function isActiveNote(n){
 /**
  * 同一 id は sheetU 最大の1件にし、さらに同一フィンガープリントは1件にまとめる（同期・再取込の重複根絶）。
  */
-function coalesceSameKindItems(items, fpFn, idPrefix){
-  const list=(items||[]).map(x=>cloneDeep(x));
+function coalesceSameKindItems(items, fpFn, idPrefix, delKind){
+  const delMap=recordItemDelMapActive();
+  let list=(items||[]).map(x=>cloneDeep(x));
+  if(delKind) list=list.filter(x=>!shouldDropMergedRecordItem(delKind, x, delMap));
   list.forEach(x=>{
     if(!String((x&&x.id)||'').trim()) x.id=genId(idPrefix);
   });
@@ -1772,11 +1780,11 @@ function coalesceSameKindItems(items, fpFn, idPrefix){
 
 function coalesceDayTimedArrays(rec){
   if(!rec||typeof rec!=='object') return;
-  rec.vital=coalesceSameKindItems(rec.vital, vitalFingerprint, 'v');
-  rec.excretion=coalesceSameKindItems(rec.excretion, excretionFingerprint, 'e');
-  rec.bath=coalesceSameKindItems(rec.bath, bathFingerprint, 'b');
-  rec.care=coalesceSameKindItems(rec.care, careFingerprint, 'c');
-  rec.notes=coalesceSameKindItems(rec.notes, notesFingerprint, 'n');
+  rec.vital=coalesceSameKindItems(rec.vital, vitalFingerprint, 'v', 'v');
+  rec.excretion=coalesceSameKindItems(rec.excretion, excretionFingerprint, 'e', 'e');
+  rec.bath=coalesceSameKindItems(rec.bath, bathFingerprint, 'b', 'b');
+  rec.care=coalesceSameKindItems(rec.care, careFingerprint, 'c', 'c');
+  rec.notes=coalesceSameKindItems(rec.notes, notesFingerprint, 'n', null);
 }
 
 function coalesceAllRecordArrays(records){
@@ -1801,20 +1809,27 @@ function mergeRecordDay(L, R, dk, nm){
   }
   const out=cloneDeep(L);
 
-  out.vital=coalesceSameKindItems([...(L.vital||[]),...(R.vital||[])], vitalFingerprint, 'v');
-  out.excretion=coalesceSameKindItems([...(L.excretion||[]),...(R.excretion||[])], excretionFingerprint, 'e');
-  out.bath=coalesceSameKindItems([...(L.bath||[]),...(R.bath||[])], bathFingerprint, 'b');
-  out.care=coalesceSameKindItems([...(L.care||[]),...(R.care||[])], careFingerprint, 'c');
-  out.notes=coalesceSameKindItems([...(L.notes||[]),...(R.notes||[])], notesFingerprint, 'n');
+  out.vital=coalesceSameKindItems([...(L.vital||[]),...(R.vital||[])], vitalFingerprint, 'v', 'v');
+  out.excretion=coalesceSameKindItems([...(L.excretion||[]),...(R.excretion||[])], excretionFingerprint, 'e', 'e');
+  out.bath=coalesceSameKindItems([...(L.bath||[]),...(R.bath||[])], bathFingerprint, 'b', 'b');
+  out.care=coalesceSameKindItems([...(L.care||[]),...(R.care||[])], careFingerprint, 'c', 'c');
+  out.notes=coalesceSameKindItems([...(L.notes||[]),...(R.notes||[])], notesFingerprint, 'n', null);
 
   const muL=_numU((L.meal||{})._u), muR=_numU((R.meal||{})._u);
   out.meal=cloneDeep(muR>muL?(R.meal||L.meal||{}):(L.meal||R.meal||{}));
 
   out.med={ morning:{time:'',staff:'',items:[]}, lunch:{time:'',staff:'',items:[]}, dinner:{time:'',staff:'',items:[]}, bedtime:{time:'',staff:'',items:[]} };
+  const delMap=recordItemDelMapActive();
   ['morning','lunch','dinner','bedtime'].forEach(t=>{
     const a=L.med&&L.med[t], b=R.med&&R.med[t];
     const au=_numU(a&&a._u), bu=_numU(b&&b._u);
-    out.med[t]= bu>au ? cloneDeep(b||{time:'',staff:'',items:[]}) : cloneDeep(a||{time:'',staff:'',items:[]});
+    const delAt=medSlotDeletedAt(dk, nm, t, delMap);
+    const mx=Math.max(au, bu);
+    if(delAt>0 && mx<=delAt){
+      out.med[t]={time:'',staff:'',items:[],_u:delAt};
+    }else{
+      out.med[t]= bu>au ? cloneDeep(b||{time:'',staff:'',items:[]}) : cloneDeep(a||{time:'',staff:'',items:[]});
+    }
     if(!out.med[t].items) out.med[t].items=[];
   });
 
@@ -1837,6 +1852,72 @@ function mergeResidentDelMaps(x,y){
     out[k]=Math.max(_numU(A[k]),_numU(B[k]));
   });
   return out;
+}
+/** バイタル等の行削除墓石キー（例 v:abc123） */
+function recordItemDelKey(kind, id){
+  return `${kind}:${String(id||'').trim()}`;
+}
+/** 服薬枠削除墓石キー */
+function medSlotDelKey(dk, name, timing){
+  const k=normalizeDateKey(dk);
+  const nm=normalizeResidentName(name);
+  const t=String(timing||'').trim()||'morning';
+  return `m:${k}|${nm}|${t}`;
+}
+function supplyDelKey(id){
+  return `s:${String(id||'').trim()}`;
+}
+function markRecordItemDeleted(kind, id){
+  const kid=String(id||'').trim();
+  if(!kid) return;
+  db.settings=db.settings||{};
+  if(!db.settings._recordItemDel||typeof db.settings._recordItemDel!=='object'||Array.isArray(db.settings._recordItemDel))
+    db.settings._recordItemDel={};
+  const k=recordItemDelKey(kind, kid);
+  const ts=Date.now();
+  db.settings._recordItemDel[k]=Math.max(_numU(db.settings._recordItemDel[k]), ts);
+  touchSetU('_recordItemDel');
+}
+function markMedSlotDeleted(dk, name, timing){
+  db.settings=db.settings||{};
+  if(!db.settings._recordItemDel||typeof db.settings._recordItemDel!=='object'||Array.isArray(db.settings._recordItemDel))
+    db.settings._recordItemDel={};
+  const k=medSlotDelKey(dk, name, timing);
+  const ts=Date.now();
+  db.settings._recordItemDel[k]=Math.max(_numU(db.settings._recordItemDel[k]), ts);
+  touchSetU('_recordItemDel');
+}
+function markSupplyDeleted(id){
+  const sid=String(id||'').trim();
+  if(!sid) return;
+  db.settings=db.settings||{};
+  if(!db.settings._recordItemDel||typeof db.settings._recordItemDel!=='object'||Array.isArray(db.settings._recordItemDel))
+    db.settings._recordItemDel={};
+  const k=supplyDelKey(sid);
+  const ts=Date.now();
+  db.settings._recordItemDel[k]=Math.max(_numU(db.settings._recordItemDel[k]), ts);
+  touchSetU('_recordItemDel');
+}
+function recordItemDelMapActive(){
+  return _mergeItemDelActive||(typeof db!=='undefined'&&db&&db.settings&&db.settings._recordItemDel)||{};
+}
+function shouldDropMergedRecordItem(delKind, item, delMap){
+  if(!delKind||!item) return false;
+  const id=String(item.id||'').trim();
+  if(!id) return false;
+  const delAt=_numU((delMap||{})[recordItemDelKey(delKind, id)]);
+  if(!delAt) return false;
+  return _recordItemU(item)<=delAt;
+}
+function medSlotDeletedAt(dk, name, timing, delMap){
+  return _numU((delMap||{})[medSlotDelKey(dk, name, timing)]);
+}
+function shouldDropMergedSupply(s, delMap){
+  const id=String(s&&s.id||'').trim();
+  if(!id) return false;
+  const delAt=_numU((delMap||{})[supplyDelKey(id)]);
+  if(!delAt) return false;
+  return _numU(s._u)<=delAt;
 }
 function residentDelMaxTs(resDel, r){
   const del=resDel&&typeof resDel==='object'&&!Array.isArray(resDel)?resDel:{};
@@ -1911,71 +1992,83 @@ function mergeResidentsLoc(a, b, resDel){
 }
 
 function mergeSuppliesLoc(a, b){
+  const delMap=recordItemDelMapActive();
   const m=new Map();
-  (a||[]).forEach(s=>{
-    if(!s.id) return;
-    m.set(s.id,{x:cloneDeep(s),u:_numU(s._u)});
-  });
-  (b||[]).forEach(s=>{
-    if(!s.id) return;
-    const u=_numU(s._u);
-    const old=m.get(s.id);
-    if(!old||u>old.u) m.set(s.id,{x:cloneDeep(s),u});
-  });
+  const addList=(list)=>{
+    (list||[]).forEach(s=>{
+      if(!s||!s.id) return;
+      if(shouldDropMergedSupply(s, delMap)) return;
+      const u=_numU(s._u);
+      const old=m.get(s.id);
+      if(!old||u>old.u) m.set(s.id,{x:cloneDeep(s),u});
+    });
+  };
+  addList(a);
+  addList(b);
   return [...m.values()].map(o=>o.x).sort((p,q)=>(p.date||'').localeCompare(q.date||''));
 }
 
 function mergePulledDb(local, remote){
-  const out={};
-  const mergedResDel=mergeResidentDelMaps(
-    (local.settings||{})._residentDel,
-    (remote.settings||{})._residentDel
+  const mergedItemDel=mergeResidentDelMaps(
+    (local.settings||{})._recordItemDel,
+    (remote.settings||{})._recordItemDel
   );
-  out.residents=mergeResidentsLoc(local.residents, remote.residents, mergedResDel);
-  out.supplies=mergeSuppliesLoc(local.supplies, remote.supplies);
-  out.settings=cloneDeep(local.settings||{});
-  const ru=remote._setU||{}, lu=local._setU||{};
-  out._setU={};
-  [...new Set([...Object.keys(lu),...Object.keys(ru)])].forEach(k=>{
-    out._setU[k]=Math.max(_numU(lu[k]),_numU(ru[k]));
-  });
-  Object.keys(remote.settings||{}).forEach(k=>{
-    if(k==='logoB64') return;
-    if(_numU(ru[k])>_numU(lu[k])) out.settings[k]=cloneDeep(remote.settings[k]);
-  });
-  Object.keys(DEFAULT_SETTINGS).forEach(k=>{
-    if(k==='logoB64') return;
-    const cur=out.settings[k], def=DEFAULT_SETTINGS[k], cloud=(remote.settings||{})[k];
-    if(cur===undefined||cur===null||cur===''){
-      const cloudOk=cloud!==undefined&&cloud!==null&&cloud!=='';
-      out.settings[k]=cloudOk?cloneDeep(cloud):cloneDeep(def);
-    } else if(Array.isArray(def)&&def.length>0&&Array.isArray(cur)&&cur.length===0){
-      if(Array.isArray(cloud)&&cloud.length>0) out.settings[k]=cloneDeep(cloud);
-      else if(!['staffList','supplyProducts'].includes(k)&&Array.isArray(def)&&def.length>0)
-        out.settings[k]=cloneDeep(def);
-    }
-  });
-  const lrec=normalizeRecordsMap(local.records||{});
-  const rrec=normalizeRecordsMap(remote.records||{});
-  const dates=new Set([...Object.keys(lrec), ...Object.keys(rrec)]);
-  out.records={};
-  dates.forEach(dk=>{
-    out.records[dk]={};
-    const names=new Set([...Object.keys((lrec||{})[dk]||{}), ...Object.keys((rrec||{})[dk]||{})]);
-    names.forEach(nm=>{
-      out.records[dk][nm]=mergeRecordDay(
-        (lrec[dk]||{})[nm],
-        (rrec[dk]||{})[nm],
-        dk,nm
-      );
+  _mergeItemDelActive=mergedItemDel;
+  try{
+    const out={};
+    const mergedResDel=mergeResidentDelMaps(
+      (local.settings||{})._residentDel,
+      (remote.settings||{})._residentDel
+    );
+    out.residents=mergeResidentsLoc(local.residents, remote.residents, mergedResDel);
+    out.supplies=mergeSuppliesLoc(local.supplies, remote.supplies);
+    out.settings=cloneDeep(local.settings||{});
+    const ru=remote._setU||{}, lu=local._setU||{};
+    out._setU={};
+    [...new Set([...Object.keys(lu),...Object.keys(ru)])].forEach(k=>{
+      out._setU[k]=Math.max(_numU(lu[k]),_numU(ru[k]));
     });
-  });
-  normalizeVitalTempsInRecords(out.records);
-  coalesceAllRecordArrays(out.records);
-  out.settings._residentDel=mergeResidentDelMaps(mergedResDel, out.settings._residentDel||{});
-  const logo=(local.settings||{}).logoB64;
-  if(logo) out.settings.logoB64=logo;
-  return out;
+    Object.keys(remote.settings||{}).forEach(k=>{
+      if(k==='logoB64') return;
+      if(_numU(ru[k])>_numU(lu[k])) out.settings[k]=cloneDeep(remote.settings[k]);
+    });
+    Object.keys(DEFAULT_SETTINGS).forEach(k=>{
+      if(k==='logoB64') return;
+      const cur=out.settings[k], def=DEFAULT_SETTINGS[k], cloud=(remote.settings||{})[k];
+      if(cur===undefined||cur===null||cur===''){
+        const cloudOk=cloud!==undefined&&cloud!==null&&cloud!=='';
+        out.settings[k]=cloudOk?cloneDeep(cloud):cloneDeep(def);
+      } else if(Array.isArray(def)&&def.length>0&&Array.isArray(cur)&&cur.length===0){
+        if(Array.isArray(cloud)&&cloud.length>0) out.settings[k]=cloneDeep(cloud);
+        else if(!['staffList','supplyProducts'].includes(k)&&Array.isArray(def)&&def.length>0)
+          out.settings[k]=cloneDeep(def);
+      }
+    });
+    const lrec=normalizeRecordsMap(local.records||{});
+    const rrec=normalizeRecordsMap(remote.records||{});
+    const dates=new Set([...Object.keys(lrec), ...Object.keys(rrec)]);
+    out.records={};
+    dates.forEach(dk=>{
+      out.records[dk]={};
+      const names=new Set([...Object.keys((lrec||{})[dk]||{}), ...Object.keys((rrec||{})[dk]||{})]);
+      names.forEach(nm=>{
+        out.records[dk][nm]=mergeRecordDay(
+          (lrec[dk]||{})[nm],
+          (rrec[dk]||{})[nm],
+          dk,nm
+        );
+      });
+    });
+    normalizeVitalTempsInRecords(out.records);
+    coalesceAllRecordArrays(out.records);
+    out.settings._residentDel=mergeResidentDelMaps(mergedResDel, out.settings._residentDel||{});
+    out.settings._recordItemDel=mergeResidentDelMaps(mergedItemDel, out.settings._recordItemDel||{});
+    const logo=(local.settings||{}).logoB64;
+    if(logo) out.settings.logoB64=logo;
+    return out;
+  }finally{
+    _mergeItemDelActive=null;
+  }
 }
 
 function touchSetU(key){
@@ -2784,7 +2877,11 @@ function saveVital(){
 }
 function delVital(dkStr,idx){
   if(!confirm('削除しますか？')) return;
-  getRec(curRes,dkStr).vital.splice(idx,1);
+  const r=getRec(curRes,dkStr);
+  const row=r.vital&&r.vital[idx];
+  const id=row&&row.id;
+  if(id) markRecordItemDeleted('v', id);
+  r.vital.splice(idx,1);
   saveDB(); refreshPanel('vital');
 }
 
@@ -2904,7 +3001,11 @@ function saveEx(){
 }
 function delEx(dkStr,idx){
   if(!confirm('削除しますか？')) return;
-  getRec(curRes,dkStr).excretion.splice(idx,1);
+  const r=getRec(curRes,dkStr);
+  const row=r.excretion&&r.excretion[idx];
+  const id=row&&row.id;
+  if(id) markRecordItemDeleted('e', id);
+  r.excretion.splice(idx,1);
   saveDB(); refreshPanel('excretion');
 }
 
@@ -2964,7 +3065,11 @@ function saveBath(){
 }
 function delBath(dkStr,idx){
   if(!confirm('削除しますか？')) return;
-  getRec(curRes,dkStr).bath.splice(idx,1);
+  const r=getRec(curRes,dkStr);
+  const row=r.bath&&r.bath[idx];
+  const id=row&&row.id;
+  if(id) markRecordItemDeleted('b', id);
+  r.bath.splice(idx,1);
   saveDB(); refreshPanel('bath');
 }
 
@@ -3061,7 +3166,11 @@ function saveCare(){
 }
 function delCare(dkStr,idx){
   if(!confirm('削除しますか？')) return;
-  getRec(curRes,dkStr).care.splice(idx,1);
+  const r=getRec(curRes,dkStr);
+  const row=r.care&&r.care[idx];
+  const id=row&&row.id;
+  if(id) markRecordItemDeleted('c', id);
+  r.care.splice(idx,1);
   saveDB(); refreshPanel('care');
 }
 
@@ -3213,7 +3322,8 @@ function saveMed(){
 function delMed(dkStr,timing){
   if(!confirm('削除しますか？')) return;
   const r=getRec(curRes,dkStr);
-  if(r.med&&r.med[timing]) r.med[timing]={time:'',staff:'',items:[]};
+  markMedSlotDeleted(dkStr, curRes, timing);
+  if(r.med&&r.med[timing]) r.med[timing]={time:'',staff:'',items:[],_u:Date.now()};
   saveDB(); refreshPanel('med');
 }
 function openBulkMed(){
@@ -3902,6 +4012,7 @@ function addSupply(){
 
 function delSupply(id){
   if(!confirm('この記録を削除しますか？')) return;
+  markSupplyDeleted(id);
   db.supplies=(db.supplies||[]).filter(s=>s.id!==id);
   saveDB();
   renderSupplyList();
