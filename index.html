@@ -1648,6 +1648,12 @@ function compareResidentsStable(a,b){
   if(c!==0) return c;
   return String((a&&a.id)||'').localeCompare(String((b&&b.id)||''));
 }
+/** チップ data-name 等と db.residents の突き合わせ（空白差で find 失敗→誤って入所扱いになるのを防ぐ） */
+function dbResidentByNameLoose(name){
+  const nm=normalizeResidentName(name);
+  if(!nm) return null;
+  return (db.residents||[]).find(x=>normalizeResidentName(x.name)===nm)||null;
+}
 function normalizeResidentsOrder(){
   if(!db||!Array.isArray(db.residents)) return;
   db.residents.sort(compareResidentsStable);
@@ -1811,28 +1817,58 @@ function residentDroppedByTombstone(r,resDel){
   if(!delAt) return false;
   return _numU(r._u)<=delAt;
 }
+/**
+ * 同一利用者の複数バージョン（ローカル・リモート等）を1件にまとめる。
+ * - sched / care / id / 氏名などは _u が最大の行をベースにする
+ * - serviceType は「いずれかのバージョンが day なら day」（同期で片方だけ古い／推定違いで day が消えるのを防ぐ）
+ */
+function mergeResidentGroup(versions){
+  if(!versions||!versions.length) return null;
+  const v0=versions.map(r=>cloneDeep(r));
+  if(v0.length===1){
+    const x=v0[0];
+    x.serviceType=residentServiceTypeOrDefault(x);
+    return x;
+  }
+  let best=cloneDeep(v0[0]);
+  let bestU=_numU(v0[0]._u);
+  for(let i=1;i<v0.length;i++){
+    const u=_numU(v0[i]._u);
+    if(u>bestU){ best=cloneDeep(v0[i]); bestU=u; }
+  }
+  let st='resident';
+  v0.forEach(r=>{
+    if(residentServiceTypeOrDefault(r)==='day') st='day';
+  });
+  best._u=Math.max(...v0.map(r=>_numU(r._u)));
+  best.serviceType=st;
+  return best;
+}
 function mergeResidentsLoc(a, b, resDel){
   resDel=resDel||{};
-  const m=new Map();
-  (a||[]).forEach(r=>{
-    if(residentDroppedByTombstone(r,resDel)) return;
-    const key=String(r.name||r.id||'');
-    m.set(key,{r:cloneDeep(r),u:_numU(r._u)});
-  });
-  (b||[]).forEach(r=>{
-    if(residentDroppedByTombstone(r,resDel)) return;
-    const key=String(r.name||r.id||'');
-    const u=_numU(r._u);
-    const old=m.get(key);
-    if(!old||u>old.u) m.set(key,{r:cloneDeep(r),u});
-  });
+  const groups=new Map();
+  const add=(list)=>{
+    (list||[]).forEach(r=>{
+      if(residentDroppedByTombstone(r,resDel)) return;
+      const key=String(r.name||r.id||'');
+      if(!groups.has(key)) groups.set(key,[]);
+      groups.get(key).push(r);
+    });
+  };
+  add(a);
+  add(b);
   const seen=new Set();
-  return [...m.values()].map(o=>o.r).filter(r=>{
-    const nm=normalizeResidentName(r&&r.name);
-    if(!nm||seen.has(nm)) return false;
+  const out=[];
+  groups.forEach(versions=>{
+    const r=mergeResidentGroup(versions);
+    if(!r) return;
+    const nm=normalizeResidentName(r.name);
+    if(!nm||seen.has(nm)) return;
     r.name=nm;
-    seen.add(nm); return true;
-  }).sort(compareResidentsStable);
+    seen.add(nm);
+    out.push(r);
+  });
+  return out.sort(compareResidentsStable);
 }
 
 function mergeSuppliesLoc(a, b){
@@ -3063,7 +3099,7 @@ function selectMedTimingChip(timing){
   document.getElementById('medFormTiming').value=timing;
   document.querySelectorAll('#medTargetChips .chip').forEach(c=>{
     const name=c.getAttribute('data-name');
-    const res=(db.residents||[]).find(x=>x.name===name);
+    const res=dbResidentByNameLoose(name);
     const on=res&&medTargetChipSelectedByDefault(res, timing);
     c.classList.toggle('selected', !!on);
   });
@@ -3271,7 +3307,7 @@ function selectMealChip(section){
   document.getElementById('mealSnack').value=data.snack;
   document.querySelectorAll('#mealResChips .meal-res-chip').forEach(c=>{
     const name=c.dataset.name;
-    const res=(db.residents||[]).find(x=>x.name===name);
+    const res=dbResidentByNameLoose(name);
     const on=mealResChipSelectedByDefault(res||{name,sched:[]}, section);
     c.classList.toggle('selected', on);
   });
@@ -3935,6 +3971,7 @@ function handleXlsx(file){
         if(cat.indexOf('泊')>=0) byName[curName].otomari=row;
       }
       var newRes=[], dailyCount=0;
+      var importUBase=Date.now();
       Object.keys(byName).forEach(function(n){
         var v=byName[n], uRow=v.riyou, oRow=v.otomari;
         // D列（col 3 = 1日目）のお泊行に入力があれば常時利用者
@@ -3959,7 +3996,8 @@ function handleXlsx(file){
         const existing=db.residents.find(r=>r.name===n);
         const id=existing?existing.id:genId('r');
         const serviceType=isDaily?'resident':'day';
-        newRes.push({id,name:n,care:v.care,sched:sched,serviceType});
+        const _u=importUBase+newRes.length;
+        newRes.push({id,name:n,care:v.care,sched:sched,serviceType,_u});
       });
       if(newRes.length>0){
         db.residents=newRes;
