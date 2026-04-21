@@ -450,7 +450,7 @@ input,select,textarea{font-family:inherit;font-size:30px;}
       <thead>
         <tr>
           <th style="width:32px;min-width:32px;">申送</th>
-          <th style="min-width:80px;">氏名</th>
+          <th class="res-div-r" style="min-width:80px;">氏名</th>
           <th class="res-div-l">体温</th>
           <th>血圧</th>
           <th>脈拍</th>
@@ -459,7 +459,7 @@ input,select,textarea{font-family:inherit;font-size:30px;}
           <th class="res-div-r" style="white-space:nowrap;">最終排便</th>
           <th class="res-div-lr">入浴</th>
           <th class="res-div-lr">食事</th>
-          <th class="res-div-lr">レク</th>
+          <th class="res-div-r">レク</th>
           <th onclick="openBulkMed()" style="cursor:pointer;white-space:nowrap;">服薬 ▼</th>
         </tr>
       </thead>
@@ -2753,7 +2753,7 @@ function renderMain(){
 
     return `<tr>
       <td style="width:32px;min-width:32px;padding:4px;" onclick="openDetail('${r.name}','notes')">${nc}</td>
-      <td class="name-cell">
+      <td class="name-cell res-div-r">
         <div class="name-cell-inner">
           <div class="name-cell-text">
             <div class="name-txt" onclick="openSummary('${r.name}')">${r.name}</div>
@@ -2770,7 +2770,7 @@ function renderMain(){
       <td class="res-div-r" onclick="openDetail('${r.name}','excretion')">${lsc}</td>
       <td class="res-div-lr" onclick="openDetail('${r.name}','bath')">${bac}</td>
       <td class="res-div-lr" onclick="openDetail('${r.name}','meal')">${mc}</td>
-      <td class="res-div-lr" onclick="openDetail('${r.name}','rec')">${rc}</td>
+      <td class="res-div-r" onclick="openDetail('${r.name}','rec')">${rc}</td>
       <td onclick="openDetail('${r.name}','med')">${mdc}</td>
     </tr>`;
   }).join('');
