@@ -1948,15 +1948,26 @@ function mergeResidentDelMaps(x,y){
   });
   return out;
 }
+/** 設定ラベルの同値正規化（例: 尿量 1000 と 1,000 を同一とみなす） */
+function canonicalSettingLabel(key, s){
+  const v=String(s==null?'':s).trim();
+  if(!v) return '';
+  if(key==='exUrineMlOptions'){
+    const n=Number(v.replace(/,/g,''));
+    if(Number.isFinite(n)) return String(n);
+  }
+  return v;
+}
 /** 設定の文字列配列（選択肢）を和集合。先に local の順、続けて remote だけのもの。両方空なら defFallback */
-function mergeSettingsStringArrayUnion(a, b, defFallback){
+function mergeSettingsStringArrayUnion(a, b, defFallback, key){
   const out=[];
   const seen=new Set();
   const push=(arr)=>{
     (Array.isArray(arr)?arr:[]).forEach(x=>{
       const s=String(x==null?'':x).trim();
-      if(!s||seen.has(s)) return;
-      seen.add(s);
+      const c=canonicalSettingLabel(key, s);
+      if(!s||!c||seen.has(c)) return;
+      seen.add(c);
       out.push(s);
     });
   };
@@ -1969,9 +1980,9 @@ function mergeSettingsStringArrayUnion(a, b, defFallback){
 function sortNumericStringLabelsIfAllNumeric(arr){
   const list=Array.isArray(arr)?arr.map(x=>String(x).trim()).filter(Boolean):[];
   if(!list.length) return list;
-  const nums=list.map(s=>Number(s));
+  const nums=list.map(s=>Number(s.replace(/,/g,'')));
   if(!nums.every(n=>Number.isFinite(n))) return list;
-  return [...list].sort((x,y)=>Number(x)-Number(y));
+  return [...list].sort((x,y)=>Number(x.replace(/,/g,''))-Number(y.replace(/,/g,'')));
 }
 /** バイタル等の行削除墓石キー（例 v:abc123） */
 function recordItemDelKey(kind, id){
@@ -2158,7 +2169,7 @@ function mergePulledDb(local, remote){
       const def=DEFAULT_SETTINGS[k];
       if(!Array.isArray(def)) return;
       const L=(local.settings||{})[k], R=(remote.settings||{})[k];
-      let merged=mergeSettingsStringArrayUnion(L,R,def);
+      let merged=mergeSettingsStringArrayUnion(L,R,def,k);
       if(k==='exUrineMlOptions') merged=sortNumericStringLabelsIfAllNumeric(merged);
       out.settings[k]=merged;
     });
@@ -3572,7 +3583,6 @@ function buildMealPanel(){
     return `<div class="hist-item">
     <div class="hist-time">${recDayLabel(ml._dk)}</div>
     <div class="hist-content">${body}</div>
-    <button class="hist-del" onclick="delMealRecord('${ml._dk}')">3食削除</button>
   </div>`;
   }).join(''):'<div class="text-gray" style="font-size:14px;padding:8px 0;">記録なし</div>';
   const nowH=new Date().getHours();
