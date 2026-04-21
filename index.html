@@ -3561,9 +3561,10 @@ function buildMealPanel(){
   const isDayCur=isDayServiceByName(curRes);
   const mealHistHtml=mealHist.length?mealHist.map(ml=>{
     const lines=[];
-    const showB=(!isDayCur||mealSectionExplicitlyRecorded(ml,'breakfast'))&&mealSectionExplicitlyRecorded(ml,'breakfast');
-    const showL=mealSectionExplicitlyRecorded(ml,'lunch');
-    const showD=(!isDayCur||mealSectionExplicitlyRecorded(ml,'dinner'))&&mealSectionExplicitlyRecorded(ml,'dinner');
+    /** 非デイは3食を常に表示。デイは昼のみ基本＋朝夕は明示入力時のみ表示 */
+    const showB=isDayCur?mealSectionExplicitlyRecorded(ml,'breakfast'):true;
+    const showL=isDayCur?mealSectionExplicitlyRecorded(ml,'lunch'):true;
+    const showD=isDayCur?mealSectionExplicitlyRecorded(ml,'dinner'):true;
     if(showB) lines.push(`<div style="display:flex;justify-content:space-between;gap:8px;align-items:center;"><span>朝: 主食${ml.bMain||0}% 副食${ml.bSide||0}% ${ml.bWater?`水分${ml.bWater}ml`:''}</span><span><button class="hist-edit" onclick="editMealRecord('${ml._dk}','breakfast')">編集</button> <button class="hist-del" onclick="delMealRecord('${ml._dk}','breakfast')">削除</button></span></div>`);
     if(showL) lines.push(`<div style="display:flex;justify-content:space-between;gap:8px;align-items:center;"><span>昼: ${ml.menu||''} 主食${ml.main||0}% 副食${ml.side||0}% ${ml.water?`水分${ml.water}ml`:''}${ml.snack?` おやつ:${ml.snack}`:''}</span><span><button class="hist-edit" onclick="editMealRecord('${ml._dk}','lunch')">編集</button> <button class="hist-del" onclick="delMealRecord('${ml._dk}','lunch')">削除</button></span></div>`);
     if(showD) lines.push(`<div style="display:flex;justify-content:space-between;gap:8px;align-items:center;"><span>夕: 主食${ml.dMain||0}% 副食${ml.dSide||0}% ${ml.dWater?`水分${ml.dWater}ml`:''}</span><span><button class="hist-edit" onclick="editMealRecord('${ml._dk}','dinner')">編集</button> <button class="hist-del" onclick="delMealRecord('${ml._dk}','dinner')">削除</button></span></div>`);
