@@ -3482,10 +3482,8 @@ function buildMealPanel(){
     const dt=new Date(curDate); dt.setDate(dt.getDate()-d);
     const k=dk(dt);
     const dayData=db.records[k]&&db.records[k][curRes];
-    if(dayData&&dayData.meal){
-      const ml=dayData.meal;
-      const hasData=ml.menu||ml.bMain||ml.main||ml.dMain;
-      if(hasData) mealHist.push({...ml,_dk:k});
+    if(dayData&&dayData.meal&&mealRowHasData(dayData.meal)){
+      mealHist.push({...dayData.meal,_dk:k});
     }
   }
   const mealHistHtml=mealHist.length?mealHist.map(ml=>`<div class="hist-item">
@@ -3623,12 +3621,13 @@ function editMealRecord(dkStr){
   selectMealChip(sec);
 }
 function delMealRecord(dkStr){
-  if(!confirm('この日の食事記録を削除しますか？')) return;
+  if(!confirm('この日の食事記録（朝・昼・夕のすべて）を削除しますか？')) return;
   const m=getRec(curRes,dkStr).meal;
   m.bTime='07:30'; m.bMain=100; m.bSide=100; m.bWater='';
   m.time='11:50'; m.menu=''; m.snack=''; m.main=100; m.side=100; m.water='';
   m.dTime='17:30'; m.dMain=100; m.dSide=100; m.dWater='';
-  m._u=Date.now();
+  /** Date.now() にすると mealRowHasData が常に true になり、昼だけ消えたように見える／シートにも行が残る */
+  m._u=0;
   const modeLabel=document.getElementById('mealEditModeLabel');
   if(modeLabel){
     modeLabel.style.display='none';
