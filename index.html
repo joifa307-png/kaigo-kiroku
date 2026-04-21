@@ -5446,14 +5446,29 @@ function saveMonthlyBackup(){
   const json=JSON.stringify(db,null,2);
   const blob=new Blob([json],{type:'application/json'});
   const file=new File([blob],fname,{type:'application/json'});
-  if(navigator.canShare&&navigator.canShare({files:[file]})){
-    navigator.share({files:[file],title:fname})
-      .catch(e=>{if(e.name!=='AbortError')alert('保存エラー: '+e.message);});
-  } else {
-    const url=URL.createObjectURL(blob);
-    const a=document.createElement('a');
-    a.href=url; a.download=fname; a.click();
-    URL.revokeObjectURL(url);
+  function fallbackDownload(){
+    try{
+      const url=URL.createObjectURL(blob);
+      const a=document.createElement('a');
+      a.href=url; a.download=fname;
+      a.rel='noopener';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }catch(err){
+      alert('保存エラー: '+(err&&err.message||String(err)));
+    }
+  }
+  /** Windows 版 Chrome 等では canShare が true でも share(files) が Permission denied で失敗することがある → ダウンロードに切替 */
+  const canTryShare=navigator.share&&navigator.canShare&&navigator.canShare({files:[file]});
+  if(canTryShare){
+    navigator.share({files:[file],title:fname}).catch(e=>{
+      if(e&&e.name==='AbortError') return;
+      fallbackDownload();
+    });
+  }else{
+    fallbackDownload();
   }
 }
 
