@@ -458,7 +458,7 @@ input,select,textarea{font-family:inherit;font-size:30px;}
           <th>排泄</th>
           <th class="res-div-r" style="white-space:nowrap;">最終排便</th>
           <th class="res-div-lr">入浴</th>
-          <th class="res-div-lr">食事</th>
+          <th class="res-div-r">食事</th>
           <th class="res-div-r">レク</th>
           <th onclick="openBulkMed()" style="cursor:pointer;white-space:nowrap;">服薬 ▼</th>
         </tr>
@@ -2769,7 +2769,7 @@ function renderMain(){
       <td onclick="openDetail('${r.name}','excretion')">${ec}</td>
       <td class="res-div-r" onclick="openDetail('${r.name}','excretion')">${lsc}</td>
       <td class="res-div-lr" onclick="openDetail('${r.name}','bath')">${bac}</td>
-      <td class="res-div-lr" onclick="openDetail('${r.name}','meal')">${mc}</td>
+      <td class="res-div-r" onclick="openDetail('${r.name}','meal')">${mc}</td>
       <td class="res-div-r" onclick="openDetail('${r.name}','rec')">${rc}</td>
       <td onclick="openDetail('${r.name}','med')">${mdc}</td>
     </tr>`;
