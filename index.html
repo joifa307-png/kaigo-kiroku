@@ -772,6 +772,12 @@ const DEFAULT_DAY_ITEMS = [
   '1日を通して、いつもよりやや元気がないように感じられました。',
 ];
 
+/** 同期マージで「新しい方だけ」にすると片方のカスタムが消えるため、和集合にする設定キー */
+const SETTINGS_MERGE_UNION_KEYS=new Set([
+  'exUrineOptions','exUrineMlOptions','exPadOptions','exStoolOptions',
+  'bathOptions','recItems','careItems','dayItems','supplyProducts',
+]);
+
 const DEFAULT_SETTINGS = {
   facilityName: '',
   logoB64: '',
@@ -1853,6 +1859,31 @@ function mergeResidentDelMaps(x,y){
   });
   return out;
 }
+/** 設定の文字列配列（選択肢）を和集合。先に local の順、続けて remote だけのもの。両方空なら defFallback */
+function mergeSettingsStringArrayUnion(a, b, defFallback){
+  const out=[];
+  const seen=new Set();
+  const push=(arr)=>{
+    (Array.isArray(arr)?arr:[]).forEach(x=>{
+      const s=String(x==null?'':x).trim();
+      if(!s||seen.has(s)) return;
+      seen.add(s);
+      out.push(s);
+    });
+  };
+  push(a);
+  push(b);
+  if(!out.length) push(defFallback);
+  return out;
+}
+/** 尿量（㎖）など数値だけのラベルなら昇順に整列 */
+function sortNumericStringLabelsIfAllNumeric(arr){
+  const list=Array.isArray(arr)?arr.map(x=>String(x).trim()).filter(Boolean):[];
+  if(!list.length) return list;
+  const nums=list.map(s=>Number(s));
+  if(!nums.every(n=>Number.isFinite(n))) return list;
+  return [...list].sort((x,y)=>Number(x)-Number(y));
+}
 /** バイタル等の行削除墓石キー（例 v:abc123） */
 function recordItemDelKey(kind, id){
   return `${kind}:${String(id||'').trim()}`;
@@ -2030,7 +2061,17 @@ function mergePulledDb(local, remote){
     });
     Object.keys(remote.settings||{}).forEach(k=>{
       if(k==='logoB64') return;
+      if(SETTINGS_MERGE_UNION_KEYS.has(k)) return;
       if(_numU(ru[k])>_numU(lu[k])) out.settings[k]=cloneDeep(remote.settings[k]);
+    });
+    SETTINGS_MERGE_UNION_KEYS.forEach(k=>{
+      if(!Object.prototype.hasOwnProperty.call(DEFAULT_SETTINGS,k)) return;
+      const def=DEFAULT_SETTINGS[k];
+      if(!Array.isArray(def)) return;
+      const L=(local.settings||{})[k], R=(remote.settings||{})[k];
+      let merged=mergeSettingsStringArrayUnion(L,R,def);
+      if(k==='exUrineMlOptions') merged=sortNumericStringLabelsIfAllNumeric(merged);
+      out.settings[k]=merged;
     });
     Object.keys(DEFAULT_SETTINGS).forEach(k=>{
       if(k==='logoB64') return;
@@ -4532,8 +4573,109 @@ function saveResidentSched(){
 }
 
 // ========== データ管理 ==========
+/** このユニットの localStorage 主要キーの概算バイト数（文字列長×2 近似） */
+function estimateFacilityLocalStorageBytes(){
+  if(!FAC) return 0;
+  let sum=0;
+  const keys=[FAC.storageKey,FAC.storageKey+'_dirty',FAC.storageKey+'_logo_b64_v1',FAC.storageKey+'_settings_snap_v1'];
+  keys.forEach(k=>{
+    try{
+      const v=localStorage.getItem(k);
+      if(v) sum+=v.length;
+    }catch(_){}
+  });
+  return sum*2;
+}
+function formatStorageSize(bytes){
+  if(bytes<=0) return '0 B';
+  if(bytes<1024) return `${bytes} B`;
+  if(bytes<1048576) return `${(bytes/1024).toFixed(1)} KB`;
+  return `${(bytes/1048576).toFixed(2)} MB`;
+}
+/** 記録の日キーを cutKey 未満で削除（YYYY-MM-DD 文字列比較） */
+function runStorageCleanupRecordsBeforeCutKey(cutKey){
+  if(!FAC||!cutKey) return 0;
+  const recs=db.records||{};
+  const keys=Object.keys(recs).filter(k=>{
+    const nk=normalizeDateKey(k);
+    return nk&&nk<cutKey;
+  });
+  keys.forEach(k=>{ delete recs[k]; });
+  return keys.length;
+}
+function runStorageCleanupSuppliesBeforeCutKey(cutKey){
+  if(!cutKey) return 0;
+  const arr=db.supplies||[];
+  const before=arr.length;
+  db.supplies=arr.filter(s=>{
+    const d=String(s&&s.date||'').trim();
+    if(!d) return true;
+    const nk=normalizeDateKey(d.slice(0,10));
+    return !nk||nk>=cutKey;
+  });
+  return before-(db.supplies||[]).length;
+}
+/** _recordItemDel の古いエントリ削除（値が ms タイムスタンプ） */
+function runStorageCleanupOldTombstones(maxAgeDays){
+  const days=Math.max(30,Number(maxAgeDays)||180);
+  const lim=Date.now()-days*86400000;
+  const m=db.settings&&db.settings._recordItemDel;
+  if(!m||typeof m!=='object'||Array.isArray(m)) return 0;
+  let n=0;
+  Object.keys(m).forEach(k=>{
+    if(_numU(m[k])<lim){ delete m[k]; n++; }
+  });
+  return n;
+}
+function runStorageCleanupByMonths(){
+  if(!FAC){ alert('施設が未選択です'); return; }
+  const sel=document.getElementById('stCleanupMonths');
+  const months=parseInt(sel&&sel.value||'0',10)||0;
+  if(!months){ alert('「〇ヶ月より前」を選んでください'); return; }
+  const cut=new Date();
+  cut.setHours(0,0,0,0);
+  cut.setMonth(cut.getMonth()-months);
+  const cutKey=dk(cut);
+  const alsoSup=document.getElementById('stCleanupAlsoSupplies')?.checked;
+  const nRec=Object.keys(db.records||{}).filter(k=>{
+    const nk=normalizeDateKey(k);
+    return nk&&nk<cutKey;
+  }).length;
+  const nSup=alsoSup?(db.supplies||[]).filter(s=>{
+    const d=String(s&&s.date||'').trim();
+    if(!d) return false;
+    const nk=normalizeDateKey(d.slice(0,10));
+    return nk&&nk<cutKey;
+  }).length:0;
+  if(!nRec&&(!alsoSup||!nSup)){ alert(`${cutKey} より前のデータは見つかりませんでした`); return; }
+  const gasWarn=gasConfigured()
+    ? '\n\n【重要】GAS 同期を次に実行すると、スプレッドシートは「端末の内容で全面書き換え」されます。削除した日の行はシートからも消えます。必ずバックアップ（月次保存・JSON）を取ってから続行してください。'
+    : '';
+  const msg=`次の基準より前のデータを端末から削除します。\n基準日（未満）: ${cutKey}\n\n対象: 記録の日付 ${nRec} 日分${alsoSup?` + 消耗品記録 ${nSup} 件`:''}${gasWarn}\n\n実行しますか？`;
+  if(!confirm(msg)) return;
+  const delDays=runStorageCleanupRecordsBeforeCutKey(cutKey);
+  let delSup=0;
+  if(alsoSup) delSup=runStorageCleanupSuppliesBeforeCutKey(cutKey);
+  coalesceAllRecordArrays(db.records||{});
+  saveDB();
+  alert(`削除しました。\n記録: ${delDays} 日分${alsoSup?` / 消耗品: ${delSup} 件`:''}\n必要に応じて「🔄同期」を実行してください。`);
+  renderSettingsPanel('data');
+}
+function runStorageTombstoneCleanup(){
+  if(!FAC){ alert('施設が未選択です'); return; }
+  const inp=document.getElementById('stTombstoneDays');
+  const days=Math.max(30,parseInt(inp&&inp.value||'180',10)||180);
+  if(!confirm(`削除墓石（同期で消した行の内部管理）のうち、${days}日より古いエントリを消します。\n通常は容量削減に有効で、記録内容には影響しません。続行しますか？`)) return;
+  const n=runStorageCleanupOldTombstones(days);
+  if(n) touchSetU('_recordItemDel');
+  saveDB();
+  alert(n?`${n} 件の墓石を削除しました`:'削除対象の墓石はありませんでした`);
+  renderSettingsPanel('data');
+}
+
 function buildDataSettings(){
   const hasOldData = !!localStorage.getItem('kaigo3');
+  const stEst=FAC?formatStorageSize(estimateFacilityLocalStorageBytes()):'—';
   const gUrl=(typeof localStorage!=='undefined'&&localStorage.getItem('kaigo_gas_webapp_url'))||'';
   const gUrlEsc=String(gUrl).replace(/&/g,'&amp;').replace(/"/g,'&quot;');
   const hasTok=!!(typeof localStorage!=='undefined'&&localStorage.getItem('kaigo_gas_token'));
@@ -4580,6 +4722,31 @@ function buildDataSettings(){
         ファイルを選択
         <input type="file" accept=".json" style="display:none;" onchange="importDB(this)">
       </label>
+    </div>
+    <div class="panel-sec">
+      <h3>🗄 ストレージ整理</h3>
+      <p style="font-size:14px;color:var(--text2);margin-bottom:8px;">このユニットのブラウザ保存の<strong>おおよそのサイズ</strong>（主要キーの文字列長から推定）: <strong>${stEst}</strong></p>
+      <p style="font-size:13px;color:var(--red);margin-bottom:10px;line-height:1.5;">GAS 同期を使っている場合、古い記録を消したあと「🔄同期」で push すると、スプレッドシートも端末の内容で<strong>全面書き換え</strong>され、削除した日の行はシートからも消えます。実行前に必ず月次保存または JSON エクスポートでバックアップを取ってください。</p>
+      <div class="fg">
+        <label>記録データ・消耗品の基準（この日より<strong>前</strong>を削除）</label>
+        <select id="stCleanupMonths" style="font-size:16px;padding:8px;">
+          <option value="0">（選んでください）</option>
+          <option value="3">3ヶ月より前</option>
+          <option value="6">6ヶ月より前</option>
+          <option value="12">12ヶ月より前</option>
+          <option value="24">24ヶ月より前</option>
+        </select>
+      </div>
+      <label style="display:flex;align-items:center;gap:8px;font-size:14px;color:var(--text2);margin:10px 0;">
+        <input type="checkbox" id="stCleanupAlsoSupplies"> 消耗品の納品記録も同じ基準で削除する
+      </label>
+      <button type="button" class="btn btn-sm" style="background:#fdecea;color:#b71c1c;border:1px solid #b71c1c;" onclick="runStorageCleanupByMonths()">古いデータを削除</button>
+      <div class="fg" style="margin-top:16px;">
+        <label>削除墓石の掃除（日数）</label>
+        <input type="number" id="stTombstoneDays" min="30" max="730" value="180" style="max-width:120px;font-size:16px;padding:8px;">
+      </div>
+      <p style="font-size:12px;color:var(--text3);margin:4px 0 8px;">同期で「削除した行が戻らない」ための内部データです。古いものだけ消して容量を抑えます。</p>
+      <button type="button" class="btn btn-gray btn-sm" onclick="runStorageTombstoneCleanup()">墓石を掃除</button>
     </div>
     <details class="panel-sec" style="margin-top:4px;">
       <summary style="cursor:pointer;font-size:14px;color:var(--text2);user-select:none;">アプリ情報（普段は閉じておいてください）</summary>
