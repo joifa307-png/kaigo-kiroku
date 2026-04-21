@@ -682,46 +682,76 @@ const FACILITIES = {
   }
 };
 
+/** URL・localStorage・Cookie の施設ID（大文字小文字・前後空白のゆれ対策） */
+function normalizeFacilityId(raw){
+  const s=String(raw==null?'':raw).trim().toLowerCase();
+  return FACILITIES[s]?s:'';
+}
+
 // 施設情報（動的に設定）
 let FACILITY_ID = null;
 let FAC = null;
 
 function initFacility(facId){
-  if(!FACILITIES[facId]) return false;
-  FACILITY_ID = facId;
-  FAC = FACILITIES[facId];
+  const id=normalizeFacilityId(facId);
+  if(!id) return false;
+  FACILITY_ID = id;
+  FAC = FACILITIES[id];
   return true;
 }
 
 /** ブックマークと実際のユニットのずれ防止（西／南は別データのため） */
 function syncFacilityIntoUrl(facId){
-  if(!facId || !FACILITIES[facId]) return;
+  const id=normalizeFacilityId(facId);
+  if(!id) return;
   try{
     const u=new URL(window.location.href);
-    if(u.searchParams.get('f')===facId) return;
-    u.searchParams.set('f', facId);
+    if(u.searchParams.get('f')===id) return;
+    u.searchParams.set('f', id);
     history.replaceState(history.state,'',u.pathname+u.search+(u.hash||''));
   }catch(_){}
 }
 
 function selectFacility(facId){
-  localStorage.setItem('kaigo_last_facility', facId);
-  gasMirrorToCookies();
-  if(initFacility(facId)){
-    syncFacilityIntoUrl(facId);
-    startApp();
+  const id=normalizeFacilityId(facId);
+  if(!id){ alert('施設IDが不正です（西・南のいずれかを選んでください）'); return; }
+  try{
+    localStorage.setItem('kaigo_last_facility', id);
+    gasMirrorToCookies();
+    if(initFacility(id)){
+      syncFacilityIntoUrl(id);
+      startApp();
+    }
+  }catch(err){
+    console.error('selectFacility',err);
+    FAC=null; FACILITY_ID=null;
+    alert('施設の開始に失敗しました: '+(err&&err.message||String(err)));
+    showScreen('selectScreen');
   }
 }
 
 function startApp(){
   showScreen('mainScreen');
-  loadDB();
-  gasMirrorToCookies();
-  setSyncStatus('--','var(--text3)');
-  renderDate();
-  renderMain();
-  syncPullOnly();
-  startAutoSync();
+  /** メインスレッドで loadDB が長いとタップが効かないように見えるため、描画後に続きを実行 */
+  requestAnimationFrame(()=>{
+    setTimeout(()=>{
+      try{
+        loadDB();
+        gasMirrorToCookies();
+        setSyncStatus('--','var(--text3)');
+        renderDate();
+        renderMain();
+        syncPullOnly();
+        startAutoSync();
+      }catch(err){
+        console.error('startApp',err);
+        FAC=null; FACILITY_ID=null;
+        try{ localStorage.removeItem('kaigo_last_facility'); }catch(_){}
+        alert('データの読み込みに失敗しました。ストレージが壊れている可能性があります。\n'+String(err&&err.message||err)+'\n\n施設を選び直してください。月次保存やJSONバックアップがあれば復元できます。');
+        showScreen('selectScreen');
+      }
+    },0);
+  });
 }
 
 // ========== 初期データ ==========
@@ -1083,14 +1113,14 @@ function gasMirrorToCookies(){
   try{
     gasWriteCookie('kaigo_gas_url', (localStorage.getItem('kaigo_gas_webapp_url')||'').trim());
     gasWriteCookie('kaigo_gas_tok', (localStorage.getItem('kaigo_gas_token')||'').trim());
-    gasWriteCookie('kaigo_fac', (localStorage.getItem('kaigo_last_facility')||'').trim());
+    gasWriteCookie('kaigo_fac', normalizeFacilityId(localStorage.getItem('kaigo_last_facility')));
   }catch(_){}
 }
 function gasRepairFromCookieMirror(){
   try{
     const u=gasReadCookie('kaigo_gas_url').trim();
     const t=gasReadCookie('kaigo_gas_tok').trim();
-    const f=gasReadCookie('kaigo_fac').trim();
+    const f=normalizeFacilityId(gasReadCookie('kaigo_fac'));
     let any=false;
     if(u&&!(localStorage.getItem('kaigo_gas_webapp_url')||'').trim()){
       localStorage.setItem('kaigo_gas_webapp_url',u); any=true;
@@ -5422,12 +5452,17 @@ function showSavedToast(){
 function init(){
   gasCredentialsInit();
   const params=new URLSearchParams(location.search);
-  const savedFac=params.get('f')||localStorage.getItem('kaigo_last_facility');
+  const savedFac=normalizeFacilityId(params.get('f'))||normalizeFacilityId(localStorage.getItem('kaigo_last_facility'));
   if(savedFac && initFacility(savedFac)){
     localStorage.setItem('kaigo_last_facility', savedFac);
     syncFacilityIntoUrl(savedFac);
     startApp();
   } else {
+    try{
+      const rawLs=localStorage.getItem('kaigo_last_facility');
+      if(rawLs!=null && String(rawLs).trim()!=='' && !normalizeFacilityId(rawLs))
+        localStorage.removeItem('kaigo_last_facility');
+    }catch(_){}
     showScreen('selectScreen');
   }
 }
