@@ -1752,8 +1752,7 @@ function isDayServiceByName(name){
  */
 function mealSectionExplicitlyRecorded(m, section){
   if(!m) return false;
-  const k = section==='breakfast' ? 'bU' : section==='dinner' ? 'dU' : 'lU';
-  if(_numU(m[k])>0) return true;
+  /** bU/lU/dU は同期マージ用。ここで「>0 なら記録あり」とすると削除直後も常に表示されてしまうため使わない */
   if(section==='breakfast'){
     if(String(m.bWater||'').trim()) return true;
     const mv=Number(m.bMain), sv=Number(m.bSide);
@@ -1889,6 +1888,41 @@ function coalesceAllRecordArrays(records){
   });
 }
 
+/** 朝・昼・夕は bU/lU/dU で別々にマージ（片方だけ昼削除したときに他端末の昼が丸ごと復活しない） */
+function mergeMealSections(Lm, Rm){
+  const L=Lm||{}, R=Rm||{};
+  const lb=_numU(L.bU), rb=_numU(R.bU);
+  const ll=_numU(L.lU), rl=_numU(R.lU);
+  const ld=_numU(L.dU), rd=_numU(R.dU);
+  const muL=_numU(L._u), muR=_numU(R._u);
+  if(!lb&&!rb&&!ll&&!rl&&!ld&&!rd){
+    return cloneDeep(muR>muL?(R&&Object.keys(R).length?R:L):(L&&Object.keys(L).length?L:R));
+  }
+  const pick=(a,b)=>{ if(b>a) return 'R'; if(a>b) return 'L'; return muR>muL?'R':'L'; };
+  const sB=pick(lb,rb), sL=pick(ll,rl), sD=pick(ld,rd);
+  const B=sB==='R'?R:L, Lt=sL==='R'?R:L, D=sD==='R'?R:L;
+  return{
+    bTime:normalizeTimeText(B.bTime)||'07:30',
+    bMain:_numU(B.bMain)||100,
+    bSide:_numU(B.bSide)||100,
+    bWater:String(B.bWater||'').trim(),
+    time:normalizeTimeText(Lt.time)||'11:50',
+    menu:normalizeMealFreeText(Lt.menu)||'',
+    snack:normalizeMealFreeText(Lt.snack)||'',
+    main:_numU(Lt.main)||100,
+    side:_numU(Lt.side)||100,
+    water:String(Lt.water||'').trim(),
+    dTime:normalizeTimeText(D.dTime)||'17:30',
+    dMain:_numU(D.dMain)||100,
+    dSide:_numU(D.dSide)||100,
+    dWater:String(D.dWater||'').trim(),
+    bU:sB==='R'?rb:lb,
+    lU:sL==='R'?rl:ll,
+    dU:sD==='R'?rd:ld,
+    _u:Math.max(muL,muR)
+  };
+}
+
 function mergeRecordDay(L, R, dk, nm){
   if(!L && !R) return null;
   if(!L){
@@ -1909,9 +1943,7 @@ function mergeRecordDay(L, R, dk, nm){
   out.care=coalesceSameKindItems([...(L.care||[]),...(R.care||[])], careFingerprint, 'c', 'c');
   out.notes=coalesceSameKindItems([...(L.notes||[]),...(R.notes||[])], notesFingerprint, 'n', null);
 
-  /** 食事は updatedAt(_u) が大きい方を採用。全削除後は必ず新しい _u を付けること（_u=0 だとリモートが勝って復活する） */
-  const muL=_numU((L.meal||{})._u), muR=_numU((R.meal||{})._u);
-  out.meal=cloneDeep(muR>muL?(R.meal||L.meal||{}):(L.meal||R.meal||{}));
+  out.meal=mergeMealSections(L.meal||{}, R.meal||{});
 
   out.med={ morning:{time:'',staff:'',items:[]}, lunch:{time:'',staff:'',items:[]}, dinner:{time:'',staff:'',items:[]}, bedtime:{time:'',staff:'',items:[]} };
   const delMap=recordItemDelMapActive();
@@ -3715,11 +3747,12 @@ function delMealRecord(dkStr, secArg){
   const msg=sec==='breakfast'?'この日の朝食記録を削除しますか？':sec==='lunch'?'この日の昼食記録を削除しますか？':sec==='dinner'?'この日の夕食記録を削除しますか？':'この日の食事記録（朝・昼・夕のすべて）を削除しますか？';
   if(!confirm(msg)) return;
   const m=getRec(curRes,dkStr).meal;
-  if(!sec||sec==='breakfast'){ m.bTime='07:30'; m.bMain=100; m.bSide=100; m.bWater=''; m.bU=0; }
-  if(!sec||sec==='lunch'){ m.time='11:50'; m.menu=''; m.snack=''; m.main=100; m.side=100; m.water=''; m.lU=0; }
-  if(!sec||sec==='dinner'){ m.dTime='17:30'; m.dMain=100; m.dSide=100; m.dWater=''; m.dU=0; }
-  /** 新しい _u でマージ・同期時に「削除後の空」をリモートより優先。区分の有無は bU/lU/dU で判定 */
-  m._u=Date.now();
+  const ts=Date.now();
+  if(!sec||sec==='breakfast'){ m.bTime='07:30'; m.bMain=100; m.bSide=100; m.bWater=''; m.bU=ts; }
+  if(!sec||sec==='lunch'){ m.time='11:50'; m.menu=''; m.snack=''; m.main=100; m.side=100; m.water=''; m.lU=ts; }
+  if(!sec||sec==='dinner'){ m.dTime='17:30'; m.dMain=100; m.dSide=100; m.dWater=''; m.dU=ts; }
+  /** 区分ごとの ts で mergeMealSections が「空の削除」を他端末より新しく扱える */
+  m._u=ts;
   const modeLabel=document.getElementById('mealEditModeLabel');
   if(modeLabel){
     modeLabel.style.display='none';
