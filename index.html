@@ -2763,7 +2763,8 @@ function renderMain(){
       const _ls=getLastStool(r.name);
       if(!_ls){lsc='<span class="cell-empty">—</span>';}
       else{
-        const _ha=(Date.now()-_ls.dt)/3600000;
+        /** 経過時間から24h分を引いて帯判定（＝最終排便時刻に+24hしたものと比較）。警告「－n日」が1日分遅れる */
+        const _ha=(Date.now()-_ls.dt)/3600000-24;
         if(_ha<48) lsc=`<span class="cell-val" style="font-size:14px;">${_ls.dayStr}曜 ${normalizeTimeText(_ls.time)}</span>`;
         else if(_ha<60) lsc='<span class="cell-warn">－3日</span>';
         else if(_ha<72) lsc='<span class="cell-warn">－4日</span>';
