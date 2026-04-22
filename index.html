@@ -1750,6 +1750,21 @@ function dbResidentByNameLoose(name){
   if(!nm) return null;
   return (db.residents||[]).find(x=>normalizeResidentName(x.name)===nm)||null;
 }
+/**
+ * 日オブジェクト { 氏名: レcord } から1名分のレコードを取る。キーは同期前後で空白等がずれる。
+ */
+function getRecordInDayByResidentName(day, resName){
+  if(!day||!resName) return null;
+  if(resName in day) return day[resName]||null;
+  const want=normalizeResidentName(resName);
+  for(const k of Object.keys(day)){
+    if(normalizeResidentName(k)===want) return day[k]||null;
+  }
+  return null;
+}
+function getDayRecordByResidentName(dkKey, resName){
+  return getRecordInDayByResidentName(db.records[dkKey]||{}, resName);
+}
 /** デイサービス利用者（氏名指定。residents にいない名前は false＝入所扱い） */
 function isDayServiceByName(name){
   const r=dbResidentByNameLoose(name);
@@ -2631,7 +2646,7 @@ function getLastStool(name){
   // 過去14日間を遡って最終排便を探す
   for(let d=0;d<=13;d++){
     const dt=new Date(curDate); dt.setDate(dt.getDate()-d);
-    const dayData=db.records[dk(dt)]&&db.records[dk(dt)][name];
+    const dayData=getRecordInDayByResidentName(db.records[dk(dt)]||{},name);
     if(dayData&&dayData.excretion){
       const found=dayData.excretion.filter(e=>e.stool&&e.stool!=='なし');
       if(found.length){
@@ -2713,14 +2728,14 @@ function renderMain(){
     return;
   }
   tbody.innerHTML=todayRes.map(r=>{
-    const rec=db.records[dk()]&&db.records[dk()][r.name]||{};
+    const rec=getDayRecordByResidentName(dk(),r.name)||{};
     // 申送（選択日当日終了時点から72時間以内のメモ：複数日チェック／履歴と同基準）
     const refEnd=historyRefEndMs(), winMs=72*3600000;
     const _h48chk=()=>{
       for(let d=0;d<=2;d++){
         const dt=new Date(curDate); dt.setDate(dt.getDate()-d);
         const k=dk(dt);
-        const rr=db.records[k]&&db.records[k][r.name]||{};
+        const rr=getDayRecordByResidentName(k,r.name)||{};
         if((rr.notes||[]).some(n=>{
           if(!isActiveNote(n)) return false;
           const tms=recordItemTsMs(k, n);
@@ -2773,8 +2788,9 @@ function renderMain(){
     }
     // 入浴
     const bac=(rec.bath||[]).length?'<span class="cell-ok">○</span>':'<span class="cell-empty">—</span>';
-    // 食事：メイン表は従来どおり「昼メニュー」有無で○（mealRowHasData は正規化・初期値判定が絡み厳しすぎる）
-    const mc=(rec.meal&&rec.meal.menu)?'<span class="cell-ok">○</span>':'<span class="cell-empty">—</span>';
+    // 食事列は昼（menu 等）の有無。DB の氏名キー揺れは getDayRecordByResidentName、判定は detail の昼と同じ mealSectionExplicitlyRecorded
+    const _mm=rec.meal;
+    const mc=(_mm&&mealSectionExplicitlyRecorded(_mm,'lunch'))?'<span class="cell-ok">○</span>':'<span class="cell-empty">—</span>';
     // レク（申し送り）
     const rc=(rec.rec&&(rec.rec.content||(rec.rec.chips&&rec.rec.chips.length)))?'<span class="cell-ok">○</span>':'<span class="cell-empty">—</span>';
     // 服薬
