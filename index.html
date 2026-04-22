@@ -1042,6 +1042,11 @@ function getRec(name, dateKey){
     if(!r.med[t]) r.med[t]={time:'',staff:'',items:[]};
     if(!r.med[t].items) r.med[t].items=[];
   });
+  if(!r.meal){
+    r.meal={bTime:'07:30',bMain:100,bSide:100,bWater:'',
+          time:'11:50',menu:'',snack:'',main:100,side:100,water:'',
+          dTime:'17:30',dMain:100,dSide:100,dWater:''};
+  }
   return r;
 }
 
@@ -1321,6 +1326,12 @@ function mealRowHasData(m){
   if(mealIsBlankDefaultState(m)) return false;
   return true;
 }
+/** シート出力・履歴表示用：中身が空でも削除や保存で _u / bU / lU / dU が付いていれば行を残す（未送信だと「消えない」ように見える） */
+function mealRowHasDataOrSyncMeta(m){
+  if(!m) return false;
+  if(mealRowHasData(m)) return true;
+  return !!(_numU(m._u) || _numU(m.bU) || _numU(m.lU) || _numU(m.dU));
+}
 
 /** スプレッドシートの時刻セルが誤って meal_menu / meal_snack に ISO（1899-12-30…）で入った場合に空へ正規化 */
 function normalizeMealFreeText(v){
@@ -1425,7 +1436,7 @@ function dbToSheet(inDb){
       });
 
       const m=rec.meal||{};
-      if(mealRowHasData(m)){
+      if(mealRowHasDataOrSyncMeta(m)){
         const a=blankRecRow();
         a[REC.rid]='meal|'+dk+'|'+name; a[REC.k]='meal'; a[REC.dk]=dk; a[REC.nm]=name; a[REC.uu]=String(_numU(m._u||0));
         a[REC.seq]='0'; a[REC.tm]='';
@@ -2641,7 +2652,7 @@ function recordDayHasMainListData(rec){
   if((rec.bath||[]).length) return true;
   if((rec.care||[]).length) return true;
   if((rec.notes||[]).some(n=>isActiveNote(n))) return true;
-  if(rec.meal&&mealRowHasData(rec.meal)) return true;
+  if(rec.meal&&mealRowHasDataOrSyncMeta(rec.meal)) return true;
   const med=rec.med||{};
   if(['morning','lunch','dinner','bedtime'].some(t=>{
     const x=med[t];
@@ -3597,7 +3608,7 @@ function buildMealPanel(){
     const dt=new Date(curDate); dt.setDate(dt.getDate()-d);
     const k=dk(dt);
     const dayData=db.records[k]&&db.records[k][curRes];
-    if(dayData&&dayData.meal&&mealRowHasData(dayData.meal)){
+    if(dayData&&dayData.meal&&mealRowHasDataOrSyncMeta(dayData.meal)){
       mealHist.push({...dayData.meal,_dk:k});
     }
   }
