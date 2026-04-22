@@ -4149,6 +4149,15 @@ function switchSupTab(tab){
   if(tab==='rec') renderSupplyList();
   if(tab==='sum') renderSupplySummary();
 }
+function toJSTDateStr(dateStr) {
+  if (!dateStr) return '';
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return dateStr;
+  const jst = new Date(d.getTime() + 9 * 60 * 60 * 1000);
+  const m = jst.getUTCMonth() + 1;
+  const day = jst.getUTCDate();
+  return m + '月' + day + '日';
+}
 
 function renderSupplyList(){
   const now = new Date();
@@ -4166,7 +4175,7 @@ function renderSupplyList(){
   const dayNames=['日','月','火','水','木','金','土'];
   el.innerHTML = `<div style="font-size:13px;font-weight:600;color:var(--text3);margin-bottom:6px;">${selRes}　${now.getMonth()+1}月の記録（${items.length}件）</div>`
     + items.map(s=>{
-      const dt=new Date(s.date+'T00:00:00');
+      const dt=new Date(s.date);
       const dateLabel=`${dt.getMonth()+1}/${dt.getDate()}（${dayNames[dt.getDay()]}）`;
       return `<div class="sup-item">
         <div class="sup-item-info">
@@ -4221,8 +4230,7 @@ function renderSupplySummary(){
       rowTotal+=total;
       // 日付詳細
       const detail = entries.sort((a,b)=>a.date.localeCompare(b.date)).map(e=>{
-        const dt=new Date(e.date+'T00:00:00');
-        return `${dt.getDate()}日×${e.qty}`;
+        return `${toJSTDateStr(e.date)}×${e.qty}`;
       }).join('、');
       return `<td style="text-align:center;"><span style="font-weight:700;font-size:17px;">${total}</span><div class="sup-sum-detail">${detail}</div></td>`;
     });
@@ -4422,15 +4430,32 @@ function delResidentByName(name){
   db.residents.splice(idx,1);
   saveDB(); renderMain();
 }
+function clearResidentTombstone(resident){
+  db.settings=db.settings||{};
+  const del=db.settings._residentDel;
+  if(!del||typeof del!=='object'||Array.isArray(del)) return;
+  const sid=String(resident&&resident.id||'').trim();
+  const nm=normalizeResidentName(resident&&resident.name||'');
+  let changed=false;
+  if(sid){
+    if(sid in del){ delete del[sid]; changed=true; }
+    const kid='id:'+sid;
+    if(kid in del){ delete del[kid]; changed=true; }
+  }
+  if(nm){
+    const kn='name:'+nm;
+    if(kn in del){ delete del[kn]; changed=true; }
+  }
+  if(changed) touchSetU('_residentDel');
+}
 // メイン画面の＋ボタンから追加
 function openAddResOv(){
   const dayIdx = curDate.getDate()-1;
-  const todayNames = new Set((db.residents||[]).filter(r=>r.sched&&r.sched[dayIdx]===1).map(r=>r.name));
-  const notToday = (db.residents||[]).filter(r=>!todayNames.has(r.name)).sort(compareResidentsStable);
+  const notToday = (db.residents||[]).filter(r=>!((r.sched||[])[dayIdx]===1)).sort(compareResidentsStable);
   const sel = document.getElementById('addResSelect');
   if(notToday.length>0){
     sel.innerHTML = '<option value="">-- 選択してください --</option>'
-      + notToday.map(r=>`<option value="${r.name}">${r.name}${r.care?'（'+r.care+'）':''}</option>`).join('');
+      + notToday.map(r=>`<option value="${String(r.id||'')}">${r.name}${r.care?'（'+r.care+'）':''}</option>`).join('');
     sel.disabled = false;
   } else {
     sel.innerHTML = '<option value="">（未登録の利用者はいません）</option>';
@@ -4441,21 +4466,27 @@ function openAddResOv(){
   openOv('ovAddRes');
 }
 function addExistingRes(){
-  const name = document.getElementById('addResSelect').value;
-  if(!name){ alert('利用者を選択してください'); return; }
+  const rid = document.getElementById('addResSelect').value;
+  if(!rid){ alert('利用者を選択してください'); return; }
   const dayIdx = curDate.getDate()-1;
-  const r = (db.residents||[]).find(r=>r.name===name);
+  const r = (db.residents||[]).find(x=>String(x.id||'')===String(rid));
   if(!r){ alert('利用者が見つかりません'); return; }
   if(!r.sched) r.sched=Array(31).fill(0);
   r.sched[dayIdx]=1;
+  r._u=Date.now();
   saveDB(); closeOv('ovAddRes'); renderMain();
 }
 function addResidentFromMain(){
   const name=document.getElementById('addResName').value.trim();
   const care=document.getElementById('addResCare').value;
   if(!name){ alert('氏名を入力してください'); return; }
-  if((db.residents||[]).find(r=>r.name===name)){ alert('同名の利用者が既に存在します'); return; }
-  db.residents.push({id:genId('r'),name,care,sched:Array(31).fill(0),serviceType:'resident'});
+  if((db.residents||[]).find(r=>normalizeResidentName(r.name)===normalizeResidentName(name))){ alert('同名の利用者が既に存在します'); return; }
+  const dayIdx=curDate.getDate()-1;
+  const sched=Array(31).fill(0);
+  if(dayIdx>=0&&dayIdx<31) sched[dayIdx]=1;
+  const rec={id:genId('r'),name,care,sched,serviceType:'resident',_u:Date.now()};
+  clearResidentTombstone(rec);
+  db.residents.push(rec);
   saveDB(); closeOv('ovAddRes'); renderMain();
 }
 
