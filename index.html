@@ -2773,7 +2773,7 @@ function renderMain(){
     }
     // 入浴
     const bac=(rec.bath||[]).length?'<span class="cell-ok">○</span>':'<span class="cell-empty">—</span>';
-    // 食事
+    // 食事：メイン表は従来どおり「昼メニュー」有無で○（mealRowHasData は正規化・初期値判定が絡み厳しすぎる）
     const mc=(rec.meal&&rec.meal.menu)?'<span class="cell-ok">○</span>':'<span class="cell-empty">—</span>';
     // レク（申し送り）
     const rc=(rec.rec&&(rec.rec.content||(rec.rec.chips&&rec.rec.chips.length)))?'<span class="cell-ok">○</span>':'<span class="cell-empty">—</span>';
