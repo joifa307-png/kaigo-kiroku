@@ -1019,8 +1019,16 @@ function initializeSetUForExistingSettings(){
 function getRec(name, dateKey){
   const k = dateKey||dk();
   if(!db.records[k]) db.records[k]={};
-  if(!db.records[k][name]){
-    db.records[k][name]={
+  let recKey=String(name||'');
+  if(!db.records[k][recKey]){
+    const want=normalizeResidentName(recKey);
+    if(want){
+      const hit=Object.keys(db.records[k]).find(nm=>normalizeResidentName(nm)===want);
+      if(hit) recKey=hit;
+    }
+  }
+  if(!db.records[k][recKey]){
+    db.records[k][recKey]={
       vital:[], excretion:[], bath:[], care:[], notes:[],
       meal:{bTime:'07:30',bMain:100,bSide:100,bWater:'',
             time:'11:50',menu:'',snack:'',main:100,side:100,water:'',
@@ -1031,7 +1039,7 @@ function getRec(name, dateKey){
       day:''
     };
   }
-  const r = db.records[k][name];
+  const r = db.records[k][recKey];
   if(!r.vital) r.vital=[];
   if(!r.excretion) r.excretion=[];
   if(!r.bath) r.bath=[];
@@ -3386,7 +3394,7 @@ function saveCare(){
     }
     _editCare=null;
   }else{
-    const r=getRec(curRes);
+  const r=getRec(curRes);
     const item={id:genId('c'),time,content,staff,forwardToNotes,sheetU:Date.now()};
     if(forwardToNotes){
       const noteId=genId('n');
@@ -5408,12 +5416,11 @@ function printCareRange(){
         });
       });
 
-      // 食事（入力があるときだけ行を出す。デイ利用者は朝食・夕食のデフォルト100%は記録なし扱い）
+      // 食事（明示入力があるときだけ行を出す）
       const ml=rec.meal||{};
       const hasMeal = (k)=>ml[k]!=null && String(ml[k]).trim()!=='';
-      const isDayCare=isDayServiceByName(res.name);
       // 朝食
-      if((!isDayCare||mealSectionExplicitlyRecorded(ml,'breakfast')) && (hasMeal('bMain')||hasMeal('bSide')||hasMeal('bWater'))){
+      if(mealSectionExplicitlyRecorded(ml,'breakfast') && (hasMeal('bMain')||hasMeal('bSide')||hasMeal('bWater'))){
         const parts=[];
         if(hasMeal('bMain')) parts.push('主食:'+ml.bMain+'%');
         if(hasMeal('bSide')) parts.push('副食:'+ml.bSide+'%');
@@ -5428,7 +5435,7 @@ function printCareRange(){
         });
       }
       // 昼食
-      if(hasMeal('main')||hasMeal('side')||hasMeal('water')||hasMeal('menu')||hasMeal('snack')){
+      if(mealSectionExplicitlyRecorded(ml,'lunch') && (hasMeal('main')||hasMeal('side')||hasMeal('water')||hasMeal('menu')||hasMeal('snack'))){
         const parts=[];
         if(hasMeal('main')) parts.push('主食:'+ml.main+'%');
         if(hasMeal('side')) parts.push('副食:'+ml.side+'%');
@@ -5445,7 +5452,7 @@ function printCareRange(){
         });
       }
       // 夕食
-      if((!isDayCare||mealSectionExplicitlyRecorded(ml,'dinner')) && (hasMeal('dMain')||hasMeal('dSide')||hasMeal('dWater'))){
+      if(mealSectionExplicitlyRecorded(ml,'dinner') && (hasMeal('dMain')||hasMeal('dSide')||hasMeal('dWater'))){
         const parts=[];
         if(hasMeal('dMain')) parts.push('主食:'+ml.dMain+'%');
         if(hasMeal('dSide')) parts.push('副食:'+ml.dSide+'%');
@@ -5545,14 +5552,15 @@ function buildPrintPages(sel, date){
     rec.excretion.forEach(e=>rows.push({t:e.time,cat:'排泄',body:'排尿:'+e.urine+(e.pad&&e.pad!=='なし'?'、パット:'+e.pad:'')+'、排便:'+e.stool}));
     // 入浴
     rec.bath.forEach(b=>rows.push({t:b.time,cat:'入浴',body:b.type}));
-    // 食事（デイ利用者は朝食・夕食が明示入力された場合のみ出す）
+    // 食事（明示入力がある区分のみ出す）
     const ml=rec.meal||{};
-    const isDayPrint=isDayServiceByName(name);
-    if(!isDayPrint||mealSectionExplicitlyRecorded(ml,'breakfast')){
+    if(mealSectionExplicitlyRecorded(ml,'breakfast')){
       rows.push({t:ml.bTime||'07:30',cat:'朝食',body:'主食：'+(ml.bMain||0)+'%、副食：'+(ml.bSide||0)+'%'+(ml.bWater?'、水分：'+ml.bWater+'ml':'')});
     }
-    rows.push({t:ml.time||'11:50',cat:'昼食',body:'主食：'+(ml.main||0)+'%、副食：'+(ml.side||0)+'%'+(ml.water?'、水分：'+ml.water+'ml':'')+(ml.menu?'　メニュー：'+ml.menu:'')});
-    if(!isDayPrint||mealSectionExplicitlyRecorded(ml,'dinner')){
+    if(mealSectionExplicitlyRecorded(ml,'lunch')){
+      rows.push({t:ml.time||'11:50',cat:'昼食',body:'主食：'+(ml.main||0)+'%、副食：'+(ml.side||0)+'%'+(ml.water?'、水分：'+ml.water+'ml':'')+(ml.menu?'　メニュー：'+ml.menu:'')});
+    }
+    if(mealSectionExplicitlyRecorded(ml,'dinner')){
       rows.push({t:ml.dTime||'17:30',cat:'夕食',body:'主食：'+(ml.dMain||0)+'%、副食：'+(ml.dSide||0)+'%'+(ml.dWater?'、水分：'+ml.dWater+'ml':'')});
     }
     // レク
