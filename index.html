@@ -1451,8 +1451,11 @@ function dbToSheet(inDb){
         a[REC.mbt]=m.bTime||''; a[REC.mbm]=m.bMain??''; a[REC.mbs]=m.bSide??''; a[REC.mbw]=m.bWater??'';
         a[REC.mlt]=m.time||''; a[REC.mm]=m.menu||''; a[REC.msk]=m.snack||''; a[REC.mlmi]=m.main??''; a[REC.mls]=m.side??''; a[REC.mlw]=m.water??'';
         a[REC.mdt]=m.dTime||''; a[REC.mdm]=m.dMain??''; a[REC.mds]=m.dSide??''; a[REC.mdw]=m.dWater??'';
-        const mealMeta={bU:_numU(m.bU),lU:_numU(m.lU),dU:_numU(m.dU)};
-        if(mealMeta.bU||mealMeta.lU||mealMeta.dU) a[REC.exj]=JSON.stringify(mealMeta);
+        const mealMeta={
+          bU:_numU(m.bU),lU:_numU(m.lU),dU:_numU(m.dU),
+          bDel:!!Number(m.bDel||0),lDel:!!Number(m.lDel||0),dDel:!!Number(m.dDel||0)
+        };
+        if(mealMeta.bU||mealMeta.lU||mealMeta.dU||mealMeta.bDel||mealMeta.lDel||mealMeta.dDel) a[REC.exj]=JSON.stringify(mealMeta);
         pushR(a);
       }
 
@@ -1594,6 +1597,7 @@ function applyRecordRow(dbOut, row){
       time:normalizeTimeText(row[REC.mlt])||'11:50', menu:normalizeMealFreeText(row[REC.mm])||'', snack:normalizeMealFreeText(row[REC.msk])||'', main:_numU(row[REC.mlmi])||100, side:_numU(row[REC.mls])||100, water:row[REC.mlw]||'',
       dTime:normalizeTimeText(row[REC.mdt])||'17:30', dMain:_numU(row[REC.mdm])||100, dSide:_numU(row[REC.mds])||100, dWater:row[REC.mdw]||'',
       bU:_numU(exj.bU), lU:_numU(exj.lU), dU:_numU(exj.dU),
+      bDel:!!Number(exj.bDel||0), lDel:!!Number(exj.lDel||0), dDel:!!Number(exj.dDel||0),
       _u:u
     };
     return;
@@ -1786,6 +1790,9 @@ function isDayServiceByName(name){
  */
 function mealSectionExplicitlyRecorded(m, section){
   if(!m) return false;
+  if(section==='breakfast' && !!Number(m.bDel||0)) return false;
+  if(section==='lunch' && !!Number(m.lDel||0)) return false;
+  if(section==='dinner' && !!Number(m.dDel||0)) return false;
   /** bU/lU/dU は同期マージ用。ここで「>0 なら記録あり」とすると削除直後も常に表示されてしまうため使わない */
   if(section==='breakfast'){
     if(String(m.bWater||'').trim()) return true;
@@ -1953,6 +1960,9 @@ function mergeMealSections(Lm, Rm){
     bU:sB==='R'?rb:lb,
     lU:sL==='R'?rl:ll,
     dU:sD==='R'?rd:ld,
+    bDel:!!_numU((sB==='R'?R:L).bDel),
+    lDel:!!_numU((sL==='R'?R:L).lDel),
+    dDel:!!_numU((sD==='R'?R:L).dDel),
     _u:Math.max(muL,muR)
   };
 }
@@ -3640,10 +3650,10 @@ function buildMealPanel(){
   const isDayCur=isDayServiceByName(curRes);
   const mealHistHtml=mealHist.length?mealHist.map(ml=>{
     const lines=[];
-    /** 非デイは3食を常に表示。デイは昼のみ基本＋朝夕は明示入力時のみ表示 */
-    const showB=isDayCur?mealSectionExplicitlyRecorded(ml,'breakfast'):true;
-    const showL=isDayCur?mealSectionExplicitlyRecorded(ml,'lunch'):true;
-    const showD=isDayCur?mealSectionExplicitlyRecorded(ml,'dinner'):true;
+    /** 区分は「明示入力あり」のときだけ表示（削除で100%既定値へ戻した朝夕が残って見えるのを防ぐ） */
+    const showB=mealSectionExplicitlyRecorded(ml,'breakfast');
+    const showL=mealSectionExplicitlyRecorded(ml,'lunch');
+    const showD=mealSectionExplicitlyRecorded(ml,'dinner');
     if(showB) lines.push(`<div style="display:flex;justify-content:space-between;gap:8px;align-items:center;"><span>朝: 主食${ml.bMain||0}% 副食${ml.bSide||0}% ${ml.bWater?`水分${ml.bWater}ml`:''}</span><span><button class="hist-edit" onclick="editMealRecord('${ml._dk}','breakfast')">編集</button> <button class="hist-del" onclick="delMealRecord('${ml._dk}','breakfast')">削除</button></span></div>`);
     if(showL) lines.push(`<div style="display:flex;justify-content:space-between;gap:8px;align-items:center;"><span>昼: ${ml.menu||''} 主食${ml.main||0}% 副食${ml.side||0}% ${ml.water?`水分${ml.water}ml`:''}${ml.snack?` おやつ:${ml.snack}`:''}</span><span><button class="hist-edit" onclick="editMealRecord('${ml._dk}','lunch')">編集</button> <button class="hist-del" onclick="delMealRecord('${ml._dk}','lunch')">削除</button></span></div>`);
     if(showD) lines.push(`<div style="display:flex;justify-content:space-between;gap:8px;align-items:center;"><span>夕: 主食${ml.dMain||0}% 副食${ml.dSide||0}% ${ml.dWater?`水分${ml.dWater}ml`:''}</span><span><button class="hist-edit" onclick="editMealRecord('${ml._dk}','dinner')">編集</button> <button class="hist-del" onclick="delMealRecord('${ml._dk}','dinner')">削除</button></span></div>`);
@@ -3747,9 +3757,9 @@ function _getMealFormData(){
 function _applyMealData(resName, d, dateKey){
   const m=getRec(resName,dateKey).meal;
   const ts=Date.now();
-  if(d.section==='breakfast'){ m.bTime=d.time; m.bMain=d.main; m.bSide=d.side; m.bWater=d.water; m.bU=ts; }
-  else if(d.section==='lunch'){ m.time=d.time; m.main=d.main; m.side=d.side; m.menu=d.menu; m.water=d.water; m.snack=d.snack; m.lU=ts; }
-  else { m.dTime=d.time; m.dMain=d.main; m.dSide=d.side; m.dWater=d.water; m.dU=ts; }
+  if(d.section==='breakfast'){ m.bTime=d.time; m.bMain=d.main; m.bSide=d.side; m.bWater=d.water; m.bU=ts; m.bDel=0; }
+  else if(d.section==='lunch'){ m.time=d.time; m.main=d.main; m.side=d.side; m.menu=d.menu; m.water=d.water; m.snack=d.snack; m.lU=ts; m.lDel=0; }
+  else { m.dTime=d.time; m.dMain=d.main; m.dSide=d.side; m.dWater=d.water; m.dU=ts; m.dDel=0; }
   m._u=ts;
 }
 function saveMealSection(){
@@ -3784,9 +3794,9 @@ function delMealRecord(dkStr, secArg){
   if(!confirm(msg)) return;
   const m=getRec(curRes,dkStr).meal;
   const ts=Date.now();
-  if(!sec||sec==='breakfast'){ m.bTime='07:30'; m.bMain=100; m.bSide=100; m.bWater=''; m.bU=ts; }
-  if(!sec||sec==='lunch'){ m.time='11:50'; m.menu=''; m.snack=''; m.main=100; m.side=100; m.water=''; m.lU=ts; }
-  if(!sec||sec==='dinner'){ m.dTime='17:30'; m.dMain=100; m.dSide=100; m.dWater=''; m.dU=ts; }
+  if(!sec||sec==='breakfast'){ m.bTime='07:30'; m.bMain=100; m.bSide=100; m.bWater=''; m.bU=ts; m.bDel=1; }
+  if(!sec||sec==='lunch'){ m.time='11:50'; m.menu=''; m.snack=''; m.main=100; m.side=100; m.water=''; m.lU=ts; m.lDel=1; }
+  if(!sec||sec==='dinner'){ m.dTime='17:30'; m.dMain=100; m.dSide=100; m.dWater=''; m.dU=ts; m.dDel=1; }
   /** 区分ごとの ts で mergeMealSections が「空の削除」を他端末より新しく扱える */
   m._u=ts;
   const modeLabel=document.getElementById('mealEditModeLabel');
