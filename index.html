@@ -3650,10 +3650,10 @@ function buildMealPanel(){
   const isDayCur=isDayServiceByName(curRes);
   const mealHistHtml=mealHist.length?mealHist.map(ml=>{
     const lines=[];
-    /** 区分は「明示入力あり」のときだけ表示（削除で100%既定値へ戻した朝夕が残って見えるのを防ぐ） */
-    const showB=mealSectionExplicitlyRecorded(ml,'breakfast');
-    const showL=mealSectionExplicitlyRecorded(ml,'lunch');
-    const showD=mealSectionExplicitlyRecorded(ml,'dinner');
+    /** 非デイは3食を表示。デイは朝夕のみ明示入力時表示。削除フラグ付き区分は常に非表示。 */
+    const showB=!Number(ml.bDel||0) && (isDayCur?mealSectionExplicitlyRecorded(ml,'breakfast'):true);
+    const showL=!Number(ml.lDel||0) && (isDayCur?mealSectionExplicitlyRecorded(ml,'lunch'):true);
+    const showD=!Number(ml.dDel||0) && (isDayCur?mealSectionExplicitlyRecorded(ml,'dinner'):true);
     if(showB) lines.push(`<div style="display:flex;justify-content:space-between;gap:8px;align-items:center;"><span>朝: 主食${ml.bMain||0}% 副食${ml.bSide||0}% ${ml.bWater?`水分${ml.bWater}ml`:''}</span><span><button class="hist-edit" onclick="editMealRecord('${ml._dk}','breakfast')">編集</button> <button class="hist-del" onclick="delMealRecord('${ml._dk}','breakfast')">削除</button></span></div>`);
     if(showL) lines.push(`<div style="display:flex;justify-content:space-between;gap:8px;align-items:center;"><span>昼: ${ml.menu||''} 主食${ml.main||0}% 副食${ml.side||0}% ${ml.water?`水分${ml.water}ml`:''}${ml.snack?` おやつ:${ml.snack}`:''}</span><span><button class="hist-edit" onclick="editMealRecord('${ml._dk}','lunch')">編集</button> <button class="hist-del" onclick="delMealRecord('${ml._dk}','lunch')">削除</button></span></div>`);
     if(showD) lines.push(`<div style="display:flex;justify-content:space-between;gap:8px;align-items:center;"><span>夕: 主食${ml.dMain||0}% 副食${ml.dSide||0}% ${ml.dWater?`水分${ml.dWater}ml`:''}</span><span><button class="hist-edit" onclick="editMealRecord('${ml._dk}','dinner')">編集</button> <button class="hist-del" onclick="delMealRecord('${ml._dk}','dinner')">削除</button></span></div>`);
@@ -5426,11 +5426,12 @@ function printCareRange(){
         });
       });
 
-      // 食事（明示入力があるときだけ行を出す）
+      // 食事（削除フラグ付き区分は除外。デイ利用者は朝夕のみ明示入力時に出力）
       const ml=rec.meal||{};
       const hasMeal = (k)=>ml[k]!=null && String(ml[k]).trim()!=='';
+      const isDayRes=isDayServiceByName(res.name);
       // 朝食
-      if(mealSectionExplicitlyRecorded(ml,'breakfast') && (hasMeal('bMain')||hasMeal('bSide')||hasMeal('bWater'))){
+      if(!Number(ml.bDel||0) && (!isDayRes||mealSectionExplicitlyRecorded(ml,'breakfast')) && (hasMeal('bMain')||hasMeal('bSide')||hasMeal('bWater'))){
         const parts=[];
         if(hasMeal('bMain')) parts.push('主食:'+ml.bMain+'%');
         if(hasMeal('bSide')) parts.push('副食:'+ml.bSide+'%');
@@ -5445,7 +5446,7 @@ function printCareRange(){
         });
       }
       // 昼食
-      if(mealSectionExplicitlyRecorded(ml,'lunch') && (hasMeal('main')||hasMeal('side')||hasMeal('water')||hasMeal('menu')||hasMeal('snack'))){
+      if(!Number(ml.lDel||0) && (hasMeal('main')||hasMeal('side')||hasMeal('water')||hasMeal('menu')||hasMeal('snack'))){
         const parts=[];
         if(hasMeal('main')) parts.push('主食:'+ml.main+'%');
         if(hasMeal('side')) parts.push('副食:'+ml.side+'%');
@@ -5462,7 +5463,7 @@ function printCareRange(){
         });
       }
       // 夕食
-      if(mealSectionExplicitlyRecorded(ml,'dinner') && (hasMeal('dMain')||hasMeal('dSide')||hasMeal('dWater'))){
+      if(!Number(ml.dDel||0) && (!isDayRes||mealSectionExplicitlyRecorded(ml,'dinner')) && (hasMeal('dMain')||hasMeal('dSide')||hasMeal('dWater'))){
         const parts=[];
         if(hasMeal('dMain')) parts.push('主食:'+ml.dMain+'%');
         if(hasMeal('dSide')) parts.push('副食:'+ml.dSide+'%');
@@ -5562,15 +5563,16 @@ function buildPrintPages(sel, date){
     rec.excretion.forEach(e=>rows.push({t:e.time,cat:'排泄',body:'排尿:'+e.urine+(e.pad&&e.pad!=='なし'?'、パット:'+e.pad:'')+'、排便:'+e.stool}));
     // 入浴
     rec.bath.forEach(b=>rows.push({t:b.time,cat:'入浴',body:b.type}));
-    // 食事（明示入力がある区分のみ出す）
+    // 食事（削除フラグ付き区分は除外。デイ利用者は朝夕のみ明示入力時）
     const ml=rec.meal||{};
-    if(mealSectionExplicitlyRecorded(ml,'breakfast')){
+    const isDayPrint=isDayServiceByName(name);
+    if(!Number(ml.bDel||0) && (!isDayPrint||mealSectionExplicitlyRecorded(ml,'breakfast'))){
       rows.push({t:ml.bTime||'07:30',cat:'朝食',body:'主食：'+(ml.bMain||0)+'%、副食：'+(ml.bSide||0)+'%'+(ml.bWater?'、水分：'+ml.bWater+'ml':'')});
     }
-    if(mealSectionExplicitlyRecorded(ml,'lunch')){
+    if(!Number(ml.lDel||0)){
       rows.push({t:ml.time||'11:50',cat:'昼食',body:'主食：'+(ml.main||0)+'%、副食：'+(ml.side||0)+'%'+(ml.water?'、水分：'+ml.water+'ml':'')+(ml.menu?'　メニュー：'+ml.menu:'')});
     }
-    if(mealSectionExplicitlyRecorded(ml,'dinner')){
+    if(!Number(ml.dDel||0) && (!isDayPrint||mealSectionExplicitlyRecorded(ml,'dinner'))){
       rows.push({t:ml.dTime||'17:30',cat:'夕食',body:'主食：'+(ml.dMain||0)+'%、副食：'+(ml.dSide||0)+'%'+(ml.dWater?'、水分：'+ml.dWater+'ml':'')});
     }
     // レク
