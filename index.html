@@ -1022,35 +1022,17 @@ function _sumSuppliesInWeekFromLocalStorageKaigoNishi(productNames){
   return out;
 }
 function postZaikoConsumptionWeekly(){
-  alert('送信開始');
-  alert('ステップ2');
   try{
-    alert('ステップ3');
     const url=zaikoGasUrl();
-    if(!url){
-      alert('スキップ: 在庫管理GAS URL 未設定（設定→データ管理で保存）');
-      return Promise.resolve(false);
-    }
-    alert('ステップ4 url OK');
+    if(!url) return Promise.resolve(false);
     let raw='';
     try{ raw=localStorage.getItem('kaigo_nishi')||''; }catch(_){ raw=''; }
-    if(!raw){
-      alert('スキップ: localStorage kaigo_nishi が空');
-      return Promise.resolve(false);
-    }
-    alert('ステップ5 raw '+raw.length+' 文字');
+    if(!raw) return Promise.resolve(false);
     let j=null;
     try{ j=JSON.parse(raw); }catch(_){ j=null; }
     const products=(j&&j.settings&&Array.isArray(j.settings.supplyProducts))?j.settings.supplyProducts.map(x=>String(x||'').trim()).filter(Boolean):[];
-    if(!products.length){
-      alert('スキップ: settings.supplyProducts が空');
-      return Promise.resolve(false);
-    }
-    alert('ステップ6 品目数 '+products.length);
-    alert('ステップ7 週次集計前');
+    if(!products.length) return Promise.resolve(false);
     const weekly=_sumSuppliesInWeekFromLocalStorageKaigoNishi(products);
-    alert(JSON.stringify(weekly));
-    alert('ステップ8 fetch前');
     const supply={};
     products.forEach(p=>{
       supply[p]={ nishiConsumedSync: Number(weekly[p]||0) };
@@ -1067,9 +1049,12 @@ function postZaikoConsumptionWeekly(){
       method:'POST',
       headers:{'Content-Type':'text/plain'},
       body:JSON.stringify(payload)
-    }).then(()=>true).catch(()=>false);
-  }catch(e){
-    alert('エラー: '+String(e));
+    }).then(res=>{
+      if(!res.ok) return false;
+      alert('送信しました');
+      return true;
+    }).catch(()=>false);
+  }catch(_){
     return Promise.resolve(false);
   }
 }
