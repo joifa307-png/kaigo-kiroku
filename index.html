@@ -975,7 +975,80 @@ function saveDB(){
   saveSettingsSnapshot();
   syncDirty = true;
   localStorage.setItem(FAC.storageKey+'_dirty','1'); // ページ再読込後も未送信フラグを保持
+  /** 在庫管理への週次消費数同期は失敗しても本保存を阻害しない */
+  try{ postZaikoConsumptionWeekly(); }catch(_){}
   if(!window._kaigoGasSaving) scheduleGasSync();
+}
+function zaikoGasUrl(){ return (localStorage.getItem('kaigo_zaiko_gas_url')||'').trim(); }
+function zaikoGasToken(){ return (localStorage.getItem('kaigo_zaiko_gas_token')||'KAIGO_ZAIKO_2025').trim()||'KAIGO_ZAIKO_2025'; }
+function _toJstYmd(dateStr){
+  if(!dateStr) return '';
+  const d=new Date(dateStr);
+  if(isNaN(d.getTime())) return '';
+  const jst=new Date(d.getTime()+9*60*60*1000);
+  return jst.toISOString().slice(0,10);
+}
+function _ymdLocal(d){
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+}
+function _weekMondayLocal(base){
+  const x=new Date(base.getFullYear(),base.getMonth(),base.getDate());
+  const w=(x.getDay()+6)%7;
+  x.setDate(x.getDate()-w);
+  return x;
+}
+function _sumSuppliesInWeekFromLocalStorageKaigoNishi(productNames){
+  const out={};
+  (productNames||[]).forEach(p=>{ out[p]=0; });
+  let raw='';
+  try{ raw=localStorage.getItem('kaigo_nishi')||''; }catch(_){ raw=''; }
+  if(!raw) return out;
+  let j=null;
+  try{ j=JSON.parse(raw); }catch(_){ j=null; }
+  if(!j||typeof j!=='object') return out;
+  const list=Array.isArray(j.supplies)?j.supplies:[];
+  const monday=_weekMondayLocal(new Date());
+  const from=_ymdLocal(monday);
+  const to=_ymdLocal(new Date(monday.getFullYear(),monday.getMonth(),monday.getDate()+6));
+  list.forEach(s=>{
+    if(!s) return;
+    const ymd=_toJstYmd(s.date);
+    if(!ymd||ymd<from||ymd>to) return;
+    const p=String(s.product==null?'':s.product);
+    if(!(p in out)) return;
+    const q=Number(s.qty);
+    out[p]+=Number.isFinite(q)?q:0;
+  });
+  return out;
+}
+function postZaikoConsumptionWeekly(){
+  const url=zaikoGasUrl();
+  if(!url) return Promise.resolve(false);
+  let raw='';
+  try{ raw=localStorage.getItem('kaigo_nishi')||''; }catch(_){ raw=''; }
+  if(!raw) return Promise.resolve(false);
+  let j=null;
+  try{ j=JSON.parse(raw); }catch(_){ j=null; }
+  const products=(j&&j.settings&&Array.isArray(j.settings.supplyProducts))?j.settings.supplyProducts.map(x=>String(x||'').trim()).filter(Boolean):[];
+  if(!products.length) return Promise.resolve(false);
+  const weekly=_sumSuppliesInWeekFromLocalStorageKaigoNishi(products);
+  const supply={};
+  products.forEach(p=>{
+    supply[p]={ nishiConsumedSync: Number(weekly[p]||0) };
+  });
+  const payload={
+    token:zaikoGasToken(),
+    sender:'kaigo_nishi_auto',
+    sentAt:new Date().toISOString(),
+    settings:{},
+    supply,
+    daily:{}
+  };
+  return fetch(url,{
+    method:'POST',
+    headers:{'Content-Type':'text/plain'},
+    body:JSON.stringify(payload)
+  }).then(()=>true).catch(()=>false);
 }
 
 function settingsSnapshotKey(){
@@ -4932,6 +5005,10 @@ function buildDataSettings(){
   const hasTok=!!(typeof localStorage!=='undefined'&&localStorage.getItem('kaigo_gas_token'));
   const hasUrl=!!String(gUrl||'').trim();
   const gasOk=hasUrl&&hasTok;
+  const zUrl=(typeof localStorage!=='undefined'&&localStorage.getItem('kaigo_zaiko_gas_url'))||'';
+  const zTok=(typeof localStorage!=='undefined'&&localStorage.getItem('kaigo_zaiko_gas_token'))||'KAIGO_ZAIKO_2025';
+  const zUrlEsc=String(zUrl).replace(/&/g,'&amp;').replace(/"/g,'&quot;');
+  const zTokEsc=String(zTok||'KAIGO_ZAIKO_2025').replace(/&/g,'&amp;').replace(/"/g,'&quot;');
   const pwaNote=isStandaloneWebApp()
     ? `<p style="font-size:14px;margin-bottom:10px;padding:10px;border-radius:var(--r2);background:#FFF8E6;color:#5c4d03;border:1px solid #E8D4A8;">
       <b>ホーム画面アプリ</b>で開いています。<b>Safari 本体とは保存領域が別</b>のため、ここでも GAS URL・トークンを保存し、必要なら「🔄同期」で取得してください。Safari の「Webサイトデータを削除」では<b>このアプリ側のデータは消えません</b>（別アプリ扱い）。
@@ -4953,6 +5030,15 @@ function buildDataSettings(){
         <button type="button" class="btn btn-sm" style="background:#FFF3CD;color:#856404;border:1px solid #856404;" onclick="diagSync()">診断</button>
       </div>
       <p style="font-size:13px;color:var(--text3);margin-top:10px;">シート名は「${FAC?FAC.sheetName:'西'}」（${FAC?FAC.name:'西ユニット'}）です。南ユニット利用時は「南」シートに書き込まれます。</p>
+    </div>
+    <div class="panel-sec">
+      <h3>📦 在庫管理アプリ連携</h3>
+      <p style="font-size:14px;color:var(--text2);margin-bottom:10px;">記録保存時に、今週の消費数（西ユニット）を在庫管理GASへ送信します。</p>
+      <div class="fg"><label>在庫管理GAS URL</label><input type="url" id="kaigo-zaiko-gas-url" value="${zUrlEsc}" placeholder="https://script.google.com/macros/s/.../exec" autocomplete="off"></div>
+      <div class="fg"><label>在庫管理トークン</label><input type="password" id="kaigo-zaiko-gas-token" value="${zTokEsc}" placeholder="KAIGO_ZAIKO_2025" autocomplete="off"></div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;">
+        <button type="button" class="btn btn-primary btn-sm" onclick="saveZaikoConfig()">保存</button>
+      </div>
     </div>
     <div class="panel-sec" style="${hasOldData?'border:2px solid var(--green);border-radius:10px;padding:14px;background:var(--green2);':'display:none;'}">
       <h3 style="color:var(--green);">🔄 旧アプリからデータ移行</h3>
@@ -5008,6 +5094,21 @@ function buildDataSettings(){
       </p>
     </details>
   </div>`;
+}
+function saveZaikoConfig(){
+  const urlEl=document.getElementById('kaigo-zaiko-gas-url');
+  const tokEl=document.getElementById('kaigo-zaiko-gas-token');
+  if(!urlEl||!tokEl){ alert('設定を開き直して再度お試しください'); return; }
+  const u=urlEl.value.trim();
+  const t=tokEl.value.trim()||'KAIGO_ZAIKO_2025';
+  try{
+    if(u) localStorage.setItem('kaigo_zaiko_gas_url',u);
+    else localStorage.removeItem('kaigo_zaiko_gas_url');
+    localStorage.setItem('kaigo_zaiko_gas_token',t);
+    alert('在庫管理連携設定を保存しました');
+  }catch(err){
+    alert('保存できませんでした: '+(err&&err.message||String(err)));
+  }
 }
 function saveGasConfig(){
   const urlEl=document.getElementById('gasWebUrl');
