@@ -1023,34 +1023,39 @@ function _sumSuppliesInWeekFromLocalStorageKaigoNishi(productNames){
 }
 function postZaikoConsumptionWeekly(){
   alert('送信開始');
-  const url=zaikoGasUrl();
-  if(!url) return Promise.resolve(false);
-  let raw='';
-  try{ raw=localStorage.getItem('kaigo_nishi')||''; }catch(_){ raw=''; }
-  if(!raw) return Promise.resolve(false);
-  let j=null;
-  try{ j=JSON.parse(raw); }catch(_){ j=null; }
-  const products=(j&&j.settings&&Array.isArray(j.settings.supplyProducts))?j.settings.supplyProducts.map(x=>String(x||'').trim()).filter(Boolean):[];
-  if(!products.length) return Promise.resolve(false);
-  const weekly=_sumSuppliesInWeekFromLocalStorageKaigoNishi(products);
-  alert(JSON.stringify(weekly));
-  const supply={};
-  products.forEach(p=>{
-    supply[p]={ nishiConsumedSync: Number(weekly[p]||0) };
-  });
-  const payload={
-    token:zaikoGasToken(),
-    sender:'kaigo_nishi_auto',
-    sentAt:new Date().toISOString(),
-    settings:{},
-    supply,
-    daily:{}
-  };
-  return fetch(url,{
-    method:'POST',
-    headers:{'Content-Type':'text/plain'},
-    body:JSON.stringify(payload)
-  }).then(()=>true).catch(()=>false);
+  try{
+    const url=zaikoGasUrl();
+    if(!url) return Promise.resolve(false);
+    let raw='';
+    try{ raw=localStorage.getItem('kaigo_nishi')||''; }catch(_){ raw=''; }
+    if(!raw) return Promise.resolve(false);
+    let j=null;
+    try{ j=JSON.parse(raw); }catch(_){ j=null; }
+    const products=(j&&j.settings&&Array.isArray(j.settings.supplyProducts))?j.settings.supplyProducts.map(x=>String(x||'').trim()).filter(Boolean):[];
+    if(!products.length) return Promise.resolve(false);
+    const weekly=_sumSuppliesInWeekFromLocalStorageKaigoNishi(products);
+    alert(JSON.stringify(weekly));
+    const supply={};
+    products.forEach(p=>{
+      supply[p]={ nishiConsumedSync: Number(weekly[p]||0) };
+    });
+    const payload={
+      token:zaikoGasToken(),
+      sender:'kaigo_nishi_auto',
+      sentAt:new Date().toISOString(),
+      settings:{},
+      supply,
+      daily:{}
+    };
+    return fetch(url,{
+      method:'POST',
+      headers:{'Content-Type':'text/plain'},
+      body:JSON.stringify(payload)
+    }).then(()=>true).catch(()=>false);
+  }catch(e){
+    alert('エラー: '+String(e));
+    return Promise.resolve(false);
+  }
 }
 
 function settingsSnapshotKey(){
