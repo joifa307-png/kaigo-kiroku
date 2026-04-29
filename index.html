@@ -992,6 +992,7 @@ function saveDB(){
   localStorage.setItem(FAC.storageKey+'_dirty','1'); // ページ再読込後も未送信フラグを保持
   /** 在庫管理への週次消費数同期は失敗しても本保存を阻害しない */
   try{
+    console.log('[zaiko-sync] saveDB: calling postZaikoConsumptionWeekly()');
     postZaikoConsumptionWeekly();
   }catch(_){}
   if(!window._kaigoGasSaving) scheduleGasSync();
@@ -1041,6 +1042,7 @@ function _sumSuppliesInWeekFromLocalStorageKaigoNishi(productNames){
 function postZaikoConsumptionWeekly(){
   try{
     const url=zaikoGasUrl();
+    console.log('zaiko GAS URL:', zaikoGasUrl());
     if(!url) return Promise.resolve(false);
     let raw='';
     try{ raw=localStorage.getItem('kaigo_nishi')||''; }catch(_){ raw=''; }
