@@ -992,7 +992,6 @@ function saveDB(){
   localStorage.setItem(FAC.storageKey+'_dirty','1'); // ページ再読込後も未送信フラグを保持
   /** 在庫管理への週次消費数同期は失敗しても本保存を阻害しない */
   try{
-    alert('削除後送信開始');
     postZaikoConsumptionWeekly();
   }catch(_){}
   if(!window._kaigoGasSaving) scheduleGasSync();
@@ -1051,7 +1050,6 @@ function postZaikoConsumptionWeekly(){
     const products=(j&&j.settings&&Array.isArray(j.settings.supplyProducts))?j.settings.supplyProducts.map(x=>String(x||'').trim()).filter(Boolean):[];
     if(!products.length) return Promise.resolve(false);
     const weekly=_sumSuppliesInWeekFromLocalStorageKaigoNishi(products);
-    alert('週次集計(今週) オムツLL='+(Number(weekly['オムツLL']||0))+' / リハビリパンツLL='+(Number(weekly['リハビリパンツLL']||0)));
     const supply={};
     products.forEach(p=>{
       supply[p]={ nishiConsumedSync: Number(weekly[p]||0) };
@@ -1070,7 +1068,6 @@ function postZaikoConsumptionWeekly(){
       body:JSON.stringify(payload)
     }).then(res=>{
       if(!res.ok) return false;
-      alert('送信しました');
       return true;
     }).catch(()=>false);
   }catch(_){
