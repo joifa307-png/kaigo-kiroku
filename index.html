@@ -4286,6 +4286,34 @@ function switchSupTab(tab){
   document.getElementById('supPaneSum').style.display = tab==='sum'?'block':'none';
   document.getElementById('supTabRec').classList.toggle('active', tab==='rec');
   document.getElementById('supTabSum').classList.toggle('active', tab==='sum');
+  // 集計（sum）表示時はオーバーレイを最大化して固定表示
+  const ovRoot = document.getElementById('ovSupply');
+  const ovInner = ovRoot && ovRoot.querySelector('.ov.show');
+  if(ovRoot && ovInner){
+    // 初回だけ元スタイルを退避
+    if(!ovRoot.dataset.supBaseStored){
+      ovRoot.dataset.supBaseStored = '1';
+      ovRoot.dataset.supBaseRootStyle = ovRoot.getAttribute('style') || '';
+      ovRoot.dataset.supBaseInnerStyle = ovInner.getAttribute('style') || '';
+    }
+    if(tab === 'sum'){
+      ovRoot.style.alignItems = 'stretch';
+      ovRoot.style.justifyContent = 'stretch';
+      ovRoot.style.padding = '0';
+      ovInner.style.width = '100vw';
+      ovInner.style.maxWidth = 'none';
+      ovInner.style.height = '100vh';
+      ovInner.style.maxHeight = '100vh';
+      ovInner.style.borderRadius = '0';
+      // ヘッダーの角丸も無効化（フルスクリーン時）
+      const hdr = ovInner.children && ovInner.children[0];
+      if(hdr && hdr.style) hdr.style.borderRadius = '0';
+    }else{
+      // 記録（rec）へ戻したら元に復帰
+      ovRoot.setAttribute('style', ovRoot.dataset.supBaseRootStyle || '');
+      ovInner.setAttribute('style', ovRoot.dataset.supBaseInnerStyle || '');
+    }
+  }
   if(tab==='rec') renderSupplyList();
   if(tab==='sum') renderSupplySummary();
 }
