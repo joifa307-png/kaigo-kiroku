@@ -624,6 +624,7 @@ input,select,textarea{font-family:inherit;font-size:30px;}
       <div class="sup-sum-toolbar" style="display:flex;align-items:center;gap:12px;margin-bottom:16px;flex-wrap:wrap;">
         <label>対象月</label>
         <input type="month" id="supSumMonth" onchange="renderSupplySummary()">
+        <button type="button" class="btn btn-sm" style="background:#FFF3CD;color:#856404;border:1px solid #856404;" onclick="sendZaikoSummaryNow()">集計結果送信</button>
       </div>
       <div id="supSummary"></div>
       <button type="button" class="btn-sup-close" style="margin-top:16px;" onclick="closeOv('ovSupply')">閉じる</button>
@@ -5214,6 +5215,13 @@ function saveZaikoConfig(){
   }catch(err){
     alert('保存できませんでした: '+(err&&err.message||String(err)));
   }
+}
+function sendZaikoSummaryNow(){
+  const url=zaikoGasUrl();
+  if(!url){ alert('GAS URLを設定してください'); return; }
+  postZaikoConsumptionWeekly()
+    .then(ok=>{ alert(ok?'送信しました':'送信失敗'); })
+    .catch(()=>{ alert('送信失敗'); });
 }
 function saveGasConfig(){
   const urlEl=document.getElementById('gasWebUrl');
