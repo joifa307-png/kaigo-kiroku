@@ -1064,14 +1064,22 @@ function postZaikoConsumptionWeekly(){
       supply,
       daily:{}
     };
+    let _zaikoStatus=null;
     return fetch(url,{
       method:'POST',
       headers:{'Content-Type':'text/plain'},
       body:JSON.stringify(payload)
-    }).then(res=>{
-      if(!res.ok) return false;
-      return true;
-    }).catch(()=>false);
+    }).then(function(r){
+      _zaikoStatus=r.status;
+      console.log('zaiko POST status:', r.status);
+      return r.text();
+    }).then(function(t){
+      console.log('zaiko POST response:', t);
+      return (_zaikoStatus>=200 && _zaikoStatus<300);
+    }).catch(function(e){
+      console.error('zaiko POST error:', e);
+      return false;
+    });
   }catch(_){
     return Promise.resolve(false);
   }
