@@ -983,6 +983,15 @@ function loadDB(){
 }
 
 function saveDB(){
+  console.log('[zaiko-sync] saveDB called. FAC=', FAC);
+  // console出力が見えない場合でも実行確認できるようマーカーを残す
+  try{
+    window._zaikoDebug = window._zaikoDebug || {};
+    window._zaikoDebug.saveDBCalledAt = Date.now();
+    window._zaikoDebug.saveDBHasFAC = !!FAC;
+    localStorage.setItem('zaiko_debug_saveDB_calledAt', String(window._zaikoDebug.saveDBCalledAt));
+    localStorage.setItem('zaiko_debug_saveDB_hasFAC', String(!!FAC));
+  }catch(_){}
   if(!FAC) return;
   initializeSetUForExistingSettings();
   localStorage.setItem(FAC.storageKey, JSON.stringify(db));
@@ -1043,6 +1052,14 @@ function postZaikoConsumptionWeekly(){
   try{
     const url=zaikoGasUrl();
     console.log('zaiko GAS URL:', zaikoGasUrl());
+    // console出力が見えない場合でも実行確認できるようマーカーを残す
+    try{
+      window._zaikoDebug = window._zaikoDebug || {};
+      window._zaikoDebug.postCalledAt = Date.now();
+      window._zaikoDebug.zaikoGasUrl = url;
+      localStorage.setItem('zaiko_debug_postCalledAt', String(window._zaikoDebug.postCalledAt));
+      localStorage.setItem('zaiko_debug_zaikoGasUrl', url || '');
+    }catch(_){}
     if(!url) return Promise.resolve(false);
     let raw='';
     try{ raw=localStorage.getItem('kaigo_nishi')||''; }catch(_){ raw=''; }
@@ -4415,6 +4432,13 @@ function renderSupplySummary(){
 }
 
 function addSupply(){
+  console.log('[zaiko-sync] addSupply called');
+  // console出力が見えない場合でも実行確認できるようマーカーを残す
+  try{
+    window._zaikoDebug = window._zaikoDebug || {};
+    window._zaikoDebug.addSupplyCalledAt = Date.now();
+    localStorage.setItem('zaiko_debug_addSupply_calledAt', String(window._zaikoDebug.addSupplyCalledAt));
+  }catch(_){}
   const date = document.getElementById('supDate').value;
   const resName = document.getElementById('supRes').value;
   const product = document.getElementById('supProduct').value;
