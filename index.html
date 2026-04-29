@@ -682,6 +682,10 @@ input,select,textarea{font-family:inherit;font-size:30px;}
 
 <script>
 'use strict';
+// デバッグ用：この index.html がブラウザにロードされたか確認
+try{
+  localStorage.setItem('zaiko_debug_loadedAt', String(Date.now()));
+}catch(_){}
 
 // ========== 施設設定 ==========
 const FACILITIES = {
