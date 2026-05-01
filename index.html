@@ -42,6 +42,7 @@ input,select,textarea{font-family:inherit;font-size:30px;}
   overflow-x:auto;-webkit-overflow-scrolling:touch;flex-wrap:nowrap;
 }
 .hdr-logo{height:60px;width:auto;display:block;}
+.hdr-app-ver{font-size:10px;line-height:1.2;color:var(--text3);padding:0 2px;white-space:nowrap;max-width:140px;}
 .hdr-title{font-weight:700;font-size:16px;color:var(--orange2);}
 .hdr-facility{font-size:12px;color:var(--text3);margin-left:4px;}
 .hdr-btn{
@@ -441,7 +442,10 @@ input,select,textarea{font-family:inherit;font-size:30px;}
 <!-- ========== メイン画面 ========== -->
 <div id="mainScreen" class="screen">
   <div class="hdr no-print">
-    <img id="mainLogo" class="hdr-logo" src="" alt="" style="display:none;">
+    <div style="display:flex;flex-direction:column;align-items:flex-start;justify-content:center;gap:0;flex-shrink:0;min-width:0;">
+      <img id="mainLogo" class="hdr-logo" src="" alt="" style="display:none;">
+      <div id="hdrAppVer" class="hdr-app-ver" title="アプリバージョン"></div>
+    </div>
     <div style="flex:1;"></div>
     <div class="hdr-center">
       <button class="hdr-btn nav" onclick="moveDay(-1)">◀</button>
@@ -1206,7 +1210,7 @@ const REC = {
 const N_RECORD_COLS = 57;
 
 /** デプロイのたびに上げる（設定→データ管理の「アプリ情報」で表示） */
-const APP_VERSION='1.0.2';
+const APP_VERSION='1.0.3';
 function isStandaloneWebApp(){
   try{
     if(window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches) return true;
@@ -2729,7 +2733,7 @@ function openSummary(name){
   html+='</tr></thead><tbody>';
   const rowDefs=[
     {label:'体温',   fn:(r)=>{const lv=r.vital&&r.vital.length?r.vital[r.vital.length-1]:null;if(!lv)return '—';const tt=normalizeTempValue(lv.temp);const w=parseFloat(tt)>=37.0;return `<span style="${w?'color:#e53935;font-weight:700;':''}">${tt||'—'}℃</span>`;}},
-    {label:'血圧',   fn:(r)=>{const lv=r.vital&&r.vital.length?r.vital[r.vital.length-1]:null;if(!lv)return '—';const w=parseInt(lv.sbp)>=160;return `<span style="${w?'color:#e53935;font-weight:700;':''}">${lv.sbp}/${lv.dbp}</span>`;}},
+    {label:'血圧',   fn:(r)=>{const lv=r.vital&&r.vital.length?r.vital[r.vital.length-1]:null;if(!lv)return '—';const dbp=parseInt(String(lv.dbp).trim(),10),sbp=parseInt(String(lv.sbp).trim(),10);const dbpHigh=Number.isFinite(dbp)&&dbp>100;const sbpHigh=Number.isFinite(sbp)&&sbp>=160;const w=dbpHigh||sbpHigh;const st=dbpHigh?'color:var(--red);font-weight:700;':(sbpHigh?'color:#e53935;font-weight:700;':'');return `<span style="${w?st:''}">${lv.sbp}/${lv.dbp}</span>`;}},
     {label:'脈拍',   fn:(r)=>{const lv=r.vital&&r.vital.length?r.vital[r.vital.length-1]:null;return lv?String(lv.pulse):'—';}},
     {label:'SpO2',   fn:(r)=>{const lv=r.vital&&r.vital.length?r.vital[r.vital.length-1]:null;return lv&&lv.spo2?lv.spo2+'%':'—';}},
     {label:'排便',   fn:(r)=>{if(!r.excretion)return '—';const ex=r.excretion.filter(e=>e.stool&&e.stool!=='なし');return ex.length?`<span style="color:#8B4513;">${ex[ex.length-1].stool}</span>`:'—';}},
@@ -2897,7 +2901,12 @@ function renderMain(){
     const lv=(rec.vital||[]).length?(rec.vital[rec.vital.length-1]):null;
     const _t=normalizeTempValue(lv&&lv.temp);
     const tc=lv?`<span class="${parseFloat(_t)>=37.0?'cell-warn':'cell-val'}">${_t||'—'}℃</span>`:'<span class="cell-empty">—</span>';
-    const bc=lv?`<span class="${parseInt(lv.sbp)>=160?'cell-warn':'cell-val'}">${lv.sbp}/${lv.dbp}</span>`:'<span class="cell-empty">—</span>';
+    const _dbp=parseInt(String(lv&&lv.dbp||'').trim(),10);
+    const _sbp=parseInt(String(lv&&lv.sbp||'').trim(),10);
+    let bpCls='cell-val';
+    if(Number.isFinite(_dbp)&&_dbp>100) bpCls='cell-red';
+    else if(Number.isFinite(_sbp)&&_sbp>=160) bpCls='cell-warn';
+    const bc=lv?`<span class="${bpCls}">${lv.sbp}/${lv.dbp}</span>`:'<span class="cell-empty">—</span>';
     const pc=lv?`<span class="${parseInt(lv.pulse)>=90?'cell-warn':'cell-val'}">${lv.pulse}</span>`:'<span class="cell-empty">—</span>';
     const sc=lv?`<span class="cell-val">${lv.spo2||'—'}%</span>`:'<span class="cell-empty">—</span>';
     // 排泄
@@ -3002,6 +3011,8 @@ function renderFacilityHeader(){
     if(S.logoB64){ logo.src='data:image/png;base64,'+S.logoB64; logo.style.cssText='display:block;height:60px;width:auto;'; }
     else { logo.style.cssText='display:none;'; }
   }
+  const verEl=document.getElementById('hdrAppVer');
+  if(verEl) verEl.textContent='v'+APP_VERSION;
   document.title = S.facilityName||FAC.name;
 }
 
