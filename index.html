@@ -1210,7 +1210,7 @@ const REC = {
 const N_RECORD_COLS = 57;
 
 /** デプロイのたびに上げる（設定→データ管理の「アプリ情報」で表示） */
-const APP_VERSION='1.0.4';
+const APP_VERSION='1.0.6';
 function isStandaloneWebApp(){
   try{
     if(window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches) return true;
@@ -3810,7 +3810,7 @@ function buildMealPanel(){
     const showL=!Number(ml.lDel||0) && (isDayCur?mealSectionExplicitlyRecorded(ml,'lunch'):true);
     const showD=!Number(ml.dDel||0) && (isDayCur?mealSectionExplicitlyRecorded(ml,'dinner'):true);
     if(showB) lines.push(`<div style="display:flex;justify-content:space-between;gap:8px;align-items:center;"><span>朝: 主食${ml.bMain||0}% 副食${ml.bSide||0}% ${ml.bWater?`水分${ml.bWater}ml`:''}</span><span><button class="hist-edit" onclick="editMealRecord('${ml._dk}','breakfast')">編集</button> <button class="hist-del" onclick="delMealRecord('${ml._dk}','breakfast')">削除</button></span></div>`);
-    if(showL) lines.push(`<div style="display:flex;justify-content:space-between;gap:8px;align-items:center;"><span>昼: ${ml.menu||''} 主食${ml.main||0}% 副食${ml.side||0}% ${ml.water?`水分${ml.water}ml`:''}${ml.snack?` おやつ:${ml.snack}`:''}</span><span><button class="hist-edit" onclick="editMealRecord('${ml._dk}','lunch')">編集</button> <button class="hist-del" onclick="delMealRecord('${ml._dk}','lunch')">削除</button></span></div>`);
+    if(showL) lines.push(`<div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start;"><span>昼: ${escapeHtml(ml.menu||'')} 主食${ml.main||0}% 副食${ml.side||0}% ${ml.water?`水分${ml.water}ml`:''}${ml.snack&&String(ml.snack).trim()?`<br><span style="color:var(--text2);font-size:15px;">おやつ：${escapeHtml(String(ml.snack))}</span>`:''}</span><span><button class="hist-edit" onclick="editMealRecord('${ml._dk}','lunch')">編集</button> <button class="hist-del" onclick="delMealRecord('${ml._dk}','lunch')">削除</button></span></div>`);
     if(showD) lines.push(`<div style="display:flex;justify-content:space-between;gap:8px;align-items:center;"><span>夕: 主食${ml.dMain||0}% 副食${ml.dSide||0}% ${ml.dWater?`水分${ml.dWater}ml`:''}</span><span><button class="hist-edit" onclick="editMealRecord('${ml._dk}','dinner')">編集</button> <button class="hist-del" onclick="delMealRecord('${ml._dk}','dinner')">削除</button></span></div>`);
     const body=lines.join('')||'<span class="text-gray" style="font-size:14px;">記録なし</span>';
     return `<div class="hist-item">
@@ -3858,11 +3858,13 @@ function buildMealPanel(){
         <div class="fg"><label>主食 %</label><select id="mealMain">${pctSel(d0.main)}</select></div>
         <div class="fg"><label>副食 %</label><select id="mealSide">${pctSel(d0.side)}</select></div>
       </div>
-      <div class="fg-row fg-cols-2">
-        <div class="fg"><label>メニュー</label><input type="text" id="mealMenu" value="${d0.menu}"></div>
-        <div class="fg"><label>水分 (ml)</label><select id="mealWater">${waterSel(d0.water)}</select></div>
+      <div class="fg-row fg-cols-2" style="align-items:flex-start;">
+        <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:8px;">
+          <div class="fg" style="margin-bottom:0;"><label>メニュー</label><input type="text" id="mealMenu" value="${d0.menu}"></div>
+          <div class="fg" style="margin-bottom:0;"><label>おやつ</label><input type="text" id="mealSnack" value="${d0.snack}" placeholder="（任意）"></div>
+        </div>
+        <div class="fg" style="flex-shrink:0;"><label>水分 (ml)</label><select id="mealWater">${waterSel(d0.water)}</select></div>
       </div>
-      <div class="fg"><label>おやつ</label><input type="text" id="mealSnack" value="${d0.snack}"></div>
       <button class="btn btn-primary btn-block mt8" onclick="saveMealSection()">記録</button>
     </div>
   </div>`;
@@ -5670,22 +5672,33 @@ function printCareRange(){
           _key:'mb:'+dateKey
         });
       }
-      // 昼食
+      // 昼食（おやつは別行）
       if(!Number(ml.lDel||0) && (hasMeal('main')||hasMeal('side')||hasMeal('water')||hasMeal('menu')||hasMeal('snack'))){
         const parts=[];
         if(hasMeal('main')) parts.push('主食:'+ml.main+'%');
         if(hasMeal('side')) parts.push('副食:'+ml.side+'%');
         if(hasMeal('water')) parts.push('水分:'+ml.water+'ml');
         if(hasMeal('menu')) parts.push('メニュー:'+ml.menu);
-        if(hasMeal('snack')) parts.push('おやつ:'+ml.snack);
-        rawRows.push({
-          dk:dateKey,
-          t:normalizeTimeText(ml.time)||'11:50',
-          cat:'昼食',
-          body:parts.join('、'),
-          staff:'',
-          _key:'ml:'+dateKey
-        });
+        if(parts.length){
+          rawRows.push({
+            dk:dateKey,
+            t:normalizeTimeText(ml.time)||'11:50',
+            cat:'昼食',
+            body:parts.join('、'),
+            staff:'',
+            _key:'ml:'+dateKey
+          });
+        }
+        if(hasMeal('snack')){
+          rawRows.push({
+            dk:dateKey,
+            t:normalizeTimeText('15:00'),
+            cat:'おやつ',
+            body:String(ml.snack).trim(),
+            staff:'',
+            _key:'msk:'+dateKey
+          });
+        }
       }
       // 夕食
       if(!Number(ml.dDel||0) && (!isDayRes||mealSectionExplicitlyRecorded(ml,'dinner')) && (hasMeal('dMain')||hasMeal('dSide')||hasMeal('dWater'))){
@@ -5795,7 +5808,10 @@ function buildPrintPages(sel, date){
       rows.push({t:ml.bTime||'07:30',cat:'朝食',body:'主食：'+(ml.bMain||0)+'%、副食：'+(ml.bSide||0)+'%'+(ml.bWater?'、水分：'+ml.bWater+'ml':'')});
     }
     if(!Number(ml.lDel||0)){
-      rows.push({t:ml.time||'11:50',cat:'昼食',body:'主食：'+(ml.main||0)+'%、副食：'+(ml.side||0)+'%'+(ml.water?'、水分：'+ml.water+'ml':'')+(ml.menu?'　メニュー：'+ml.menu:'')});
+      const lunchBody='主食：'+(ml.main||0)+'%、副食：'+(ml.side||0)+'%'+(ml.water?'、水分：'+ml.water+'ml':'')+(ml.menu?'　メニュー：'+ml.menu:'');
+      rows.push({t:ml.time||'11:50',cat:'昼食',body:lunchBody});
+      const snackTxt=String(normalizeMealFreeText(ml.snack)||'').trim();
+      if(snackTxt) rows.push({t:normalizeTimeText('15:00'),cat:'おやつ',body:snackTxt});
     }
     if(!Number(ml.dDel||0) && (!isDayPrint||mealSectionExplicitlyRecorded(ml,'dinner'))){
       rows.push({t:ml.dTime||'17:30',cat:'夕食',body:'主食：'+(ml.dMain||0)+'%、副食：'+(ml.dSide||0)+'%'+(ml.dWater?'、水分：'+ml.dWater+'ml':'')});
