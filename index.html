@@ -1017,23 +1017,31 @@ function saveDB(){
 }
 function zaikoGasUrl(){ return (localStorage.getItem('kaigo_zaiko_gas_url')||'').trim(); }
 function zaikoGasToken(){ return (localStorage.getItem('kaigo_zaiko_gas_token')||'KAIGO_ZAIKO_2025').trim()||'KAIGO_ZAIKO_2025'; }
-function _toJstYmd(dateStr){
-  if(!dateStr) return '';
-  const d=new Date(dateStr);
-  if(isNaN(d.getTime())) return '';
-  const jst=new Date(d.getTime()+9*60*60*1000);
-  return jst.toISOString().slice(0,10);
-}
 function _ymdLocal(d){
   return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
 }
-function _weekMondayLocal(base){
-  const x=new Date(base.getFullYear(),base.getMonth(),base.getDate());
-  const w=(x.getDay()+6)%7;
-  x.setDate(x.getDate()-w);
-  return x;
+/** 卸記録・集計用：YYYY-MM-DD はタイムゾーンずれ防止のためそのまま。日時文字列はローカル暦で YYYY-MM-DD に正規化 */
+function supplyDateCalendarKey(raw){
+  if(raw==null||raw==='') return '';
+  const s=String(raw).trim();
+  if(/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  const d=new Date(s);
+  if(isNaN(d.getTime())) return '';
+  return _ymdLocal(d);
 }
-function _sumSuppliesInWeekFromLocalStorageKaigoNishi(productNames){
+/** GAS の resetAt（ISO 等）から比較用の暦日キー YYYY-MM-DD（ローカル） */
+function resetCalendarKeyFromResetAt(resetStr){
+  const s=String(resetStr||'').trim();
+  if(!s) return '';
+  const ms=Date.parse(s);
+  if(!isNaN(ms)) return _ymdLocal(new Date(ms));
+  return supplyDateCalendarKey(s);
+}
+/**
+ * fromDateStr が空：今月（ローカル）の記録のみ集計。
+ * それ以外：resetAt 暦日以降の記録のみ（YYYY-MM-DD 文字列比較）。
+ */
+function _sumSuppliesFromDate(fromDateStr, productNames){
   const out={};
   (productNames||[]).forEach(p=>{ out[p]=0; });
   let raw='';
@@ -1043,13 +1051,19 @@ function _sumSuppliesInWeekFromLocalStorageKaigoNishi(productNames){
   try{ j=JSON.parse(raw); }catch(_){ j=null; }
   if(!j||typeof j!=='object') return out;
   const list=Array.isArray(j.supplies)?j.supplies:[];
-  const monday=_weekMondayLocal(new Date());
-  const from=_ymdLocal(monday);
-  const to=_ymdLocal(new Date(monday.getFullYear(),monday.getMonth(),monday.getDate()+6));
+  const now=new Date();
+  const monthYm=`${now.getFullYear()}-${pad(now.getMonth()+1)}`;
+  const fromTrim=String(fromDateStr||'').trim();
+  const resetDayKey=fromTrim?resetCalendarKeyFromResetAt(fromTrim):'';
   list.forEach(s=>{
     if(!s) return;
-    const ymd=_toJstYmd(s.date);
-    if(!ymd||ymd<from||ymd>to) return;
+    const ymd=supplyDateCalendarKey(s.date);
+    if(!ymd) return;
+    if(resetDayKey){
+      if(ymd<resetDayKey) return;
+    }else{
+      if(!ymd.startsWith(monthYm)) return;
+    }
     const p=String(s.product==null?'':s.product);
     if(!(p in out)) return;
     const q=Number(s.qty);
@@ -1057,11 +1071,60 @@ function _sumSuppliesInWeekFromLocalStorageKaigoNishi(productNames){
   });
   return out;
 }
+function zaikoGasUrlWithTokenQuery(){
+  const base=String(zaikoGasUrl()||'').trim();
+  const tok=zaikoGasToken();
+  try{
+    const u=new URL(base);
+    u.searchParams.set('token', tok);
+    return u.toString();
+  }catch(_){
+    const sep=base.includes('?')?'&':'?';
+    return base+sep+'token='+encodeURIComponent(tok);
+  }
+}
+function zaikoExtractResetAtFromGetJson(data){
+  if(!data||typeof data!=='object') return '';
+  const nested=data.data&&typeof data.data==='object'&&data.data.resetAt!=null?data.data.resetAt:data.resetAt;
+  return nested==null?'':String(nested).trim();
+}
+/** resetAt 反映後の消費マップを GAS へ POST（集計結果送信・自動送信共通） */
+function postZaikoConsumed(consumed){
+  const url=zaikoGasUrl();
+  if(!url) return Promise.resolve(false);
+  const supply={};
+  Object.keys(consumed||{}).forEach(p=>{
+    supply[p]={ nishiConsumedSync: Number(consumed[p]||0) };
+  });
+  const payload={
+    token:zaikoGasToken(),
+    sender:'kaigo_nishi_auto',
+    sentAt:new Date().toISOString(),
+    settings:{},
+    supply,
+    daily:{}
+  };
+  let _zaikoStatus=null;
+  return fetch(url,{
+    method:'POST',
+    headers:{'Content-Type':'text/plain'},
+    body:JSON.stringify(payload)
+  }).then(function(r){
+    _zaikoStatus=r.status;
+    console.log('zaiko POST status:', r.status);
+    return r.text();
+  }).then(function(t){
+    console.log('zaiko POST response:', t);
+    return (_zaikoStatus>=200 && _zaikoStatus<300);
+  }).catch(function(e){
+    console.error('zaiko POST error:', e);
+    return false;
+  });
+}
 function postZaikoConsumptionWeekly(){
   try{
     const url=zaikoGasUrl();
     console.log('zaiko GAS URL:', zaikoGasUrl());
-    // console出力が見えない場合でも実行確認できるようマーカーを残す
     try{
       window._zaikoDebug = window._zaikoDebug || {};
       window._zaikoDebug.postCalledAt = Date.now();
@@ -1077,35 +1140,24 @@ function postZaikoConsumptionWeekly(){
     try{ j=JSON.parse(raw); }catch(_){ j=null; }
     const products=(j&&j.settings&&Array.isArray(j.settings.supplyProducts))?j.settings.supplyProducts.map(x=>String(x||'').trim()).filter(Boolean):[];
     if(!products.length) return Promise.resolve(false);
-    const weekly=_sumSuppliesInWeekFromLocalStorageKaigoNishi(products);
-    const supply={};
-    products.forEach(p=>{
-      supply[p]={ nishiConsumedSync: Number(weekly[p]||0) };
-    });
-    const payload={
-      token:zaikoGasToken(),
-      sender:'kaigo_nishi_auto',
-      sentAt:new Date().toISOString(),
-      settings:{},
-      supply,
-      daily:{}
-    };
-    let _zaikoStatus=null;
-    return fetch(url,{
-      method:'POST',
-      headers:{'Content-Type':'text/plain'},
-      body:JSON.stringify(payload)
-    }).then(function(r){
-      _zaikoStatus=r.status;
-      console.log('zaiko POST status:', r.status);
-      return r.text();
-    }).then(function(t){
-      console.log('zaiko POST response:', t);
-      return (_zaikoStatus>=200 && _zaikoStatus<300);
-    }).catch(function(e){
-      console.error('zaiko POST error:', e);
-      return false;
-    });
+    const getUrl=zaikoGasUrlWithTokenQuery();
+    return fetch(getUrl,{method:'GET'})
+      .then(r=>{
+        if(!r.ok) throw new Error('GET '+r.status);
+        const ct=(r.headers.get('content-type')||'').toLowerCase();
+        if(ct.includes('application/json')) return r.json();
+        return r.text().then(t=>{ try{ return JSON.parse(t); }catch(_){ return {}; } });
+      })
+      .then(data=>{
+        const resetAt=zaikoExtractResetAtFromGetJson(data);
+        const consumed=_sumSuppliesFromDate(resetAt, products);
+        return postZaikoConsumed(consumed);
+      })
+      .catch(e=>{
+        console.warn('zaiko GET failed; fallback to month-only sum', e);
+        const consumed=_sumSuppliesFromDate('', products);
+        return postZaikoConsumed(consumed);
+      });
   }catch(_){
     return Promise.resolve(false);
   }
@@ -1210,7 +1262,7 @@ const REC = {
 const N_RECORD_COLS = 57;
 
 /** デプロイのたびに上げる（設定→データ管理の「アプリ情報」で表示） */
-const APP_VERSION='1.0.6';
+const APP_VERSION='1.0.7';
 function isStandaloneWebApp(){
   try{
     if(window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches) return true;
@@ -4352,14 +4404,12 @@ function switchSupTab(tab){
   if(tab==='rec') renderSupplyList();
   if(tab==='sum') renderSupplySummary();
 }
-function toJSTDateStr(dateStr) {
-  if (!dateStr) return '';
-  const d = new Date(dateStr);
-  if (isNaN(d.getTime())) return dateStr;
-  const jst = new Date(d.getTime() + 9 * 60 * 60 * 1000);
-  const m = jst.getUTCMonth() + 1;
-  const day = jst.getUTCDate();
-  return m + '月' + day + '日';
+function toJSTDateStr(dateStr){
+  const key=supplyDateCalendarKey(dateStr);
+  if(!key) return String(dateStr||'');
+  const parts=key.split('-').map(Number);
+  const mm=parts[1], dd=parts[2];
+  return mm+'月'+dd+'日';
 }
 
 function renderSupplyList(){
@@ -4368,7 +4418,10 @@ function renderSupplyList(){
   // 選択中の利用者のみ表示
   const selRes = document.getElementById('supRes').value;
   const items = (db.supplies||[])
-    .filter(s=>s.date&&s.date.startsWith(ym)&&s.resName===selRes)
+    .filter(s=>{
+      const k=supplyDateCalendarKey(s.date);
+      return k&&k.startsWith(ym)&&s.resName===selRes;
+    })
     .sort((a,b)=>b.date.localeCompare(a.date));
   const el = document.getElementById('supRecList');
   if(!items.length){
@@ -4378,8 +4431,9 @@ function renderSupplyList(){
   const dayNames=['日','月','火','水','木','金','土'];
   el.innerHTML = `<div style="font-size:17px;font-weight:600;color:var(--text3);margin-bottom:8px;">${selRes}　${now.getMonth()+1}月の記録（${items.length}件）</div>`
     + items.map(s=>{
-      const dt=new Date(s.date);
-      const dateLabel=`${dt.getMonth()+1}/${dt.getDate()}（${dayNames[dt.getDay()]}）`;
+      const ky=supplyDateCalendarKey(s.date);
+      const dt=ky?new Date(Number(ky.slice(0,4)),Number(ky.slice(5,7))-1,Number(ky.slice(8,10))):new Date(s.date);
+      const dateLabel=isNaN(dt.getTime())?'—':`${dt.getMonth()+1}/${dt.getDate()}（${dayNames[dt.getDay()]}）`;
       return `<div class="sup-item">
         <div class="sup-item-info">
           <span class="sup-item-date">${dateLabel}</span>
@@ -4396,7 +4450,10 @@ function renderSupplySummary(){
   if(!ym) return;
   const [y,m] = ym.split('-');
   const label = `${parseInt(y)}年${parseInt(m)}月`;
-  const items = (db.supplies||[]).filter(s=>s.date&&s.date.startsWith(ym));
+  const items = (db.supplies||[]).filter(s=>{
+    const k=supplyDateCalendarKey(s.date);
+    return k&&k.startsWith(ym);
+  });
   const el = document.getElementById('supSummary');
   if(!items.length){
     el.innerHTML=`<div style="color:var(--text3);font-size:18px;text-align:center;padding:24px;">${label}の記録はありません</div>`;
