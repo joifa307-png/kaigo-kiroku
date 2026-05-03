@@ -1263,7 +1263,7 @@ const REC = {
 const N_RECORD_COLS = 57;
 
 /** デプロイのたびに上げる（設定→データ管理の「アプリ情報」で表示） */
-const APP_VERSION='1.0.9';
+const APP_VERSION='1.0.10';
 function isStandaloneWebApp(){
   try{
     if(window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches) return true;
@@ -2588,7 +2588,7 @@ function syncNow(force){
 
 function startAutoSync(){
   if(syncTimer) clearInterval(syncTimer);
-  syncTimer=setInterval(()=>{ if(FAC&&gasConfigured()) syncPullOnly(); }, 90*1000);
+  syncTimer=setInterval(()=>{ if(FAC&&gasConfigured()) syncPullOnly(); }, 180*1000);
   if(!window._kaigoSyncListener){
     window._kaigoSyncListener=()=>{
       if(document.visibilityState==='visible'&&FAC&&gasConfigured()) syncPullOnly();
