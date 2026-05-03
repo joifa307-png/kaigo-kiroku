@@ -613,10 +613,11 @@ input,select,textarea{font-family:inherit;font-size:30px;}
           <div class="fg" style="flex:1;"><label>利用者</label><select id="supRes" style="width:100%;" onchange="renderSupplyList()"></select></div>
         </div>
         <!-- 行2：品目＋個数 -->
-        <div style="display:flex;gap:12px;margin-bottom:4px;align-items:flex-end;">
+        <div style="display:flex;gap:12px;margin-bottom:12px;align-items:flex-end;">
           <div class="fg" style="flex:1;"><label>品目</label><select id="supProduct" style="width:100%;"></select></div>
           <div class="fg" style="flex:0 0 100px;"><label>個数</label><input type="number" id="supQty" min="1" max="200" value="1" style="text-align:center;width:100%;"></div>
         </div>
+        <div class="fg" style="margin-bottom:12px;"><label>担当者</label><select id="supStaff" style="width:100%;font-size:20px;padding:10px 12px;"></select></div>
         <button type="button" class="btn btn-primary btn-sup-rec" onclick="addSupply()">記録する</button>
         <button type="button" class="btn-sup-close" onclick="closeOv('ovSupply')">閉じる</button>
       </div>
@@ -1262,7 +1263,7 @@ const REC = {
 const N_RECORD_COLS = 57;
 
 /** デプロイのたびに上げる（設定→データ管理の「アプリ情報」で表示） */
-const APP_VERSION='1.0.7';
+const APP_VERSION='1.0.9';
 function isStandaloneWebApp(){
   try{
     if(window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches) return true;
@@ -1688,9 +1689,9 @@ function dbToSheet(inDb){
 
   rows.push(PR([]));
   rows.push(PR([SEC_SUP]));
-  rows.push(PR(['id','date','resName','product','qty','updatedAt']));
+  rows.push(PR(['id','date','resName','product','qty','staff','updatedAt']));
   (inDb.supplies||[]).forEach(s=>{
-    rows.push(PR([s.id||'', s.date||'', s.resName||'', s.product||'', s.qty??'', String(_numU(s._u||0))]));
+    rows.push(PR([s.id||'', s.date||'', s.resName||'', s.product||'', s.qty??'', String(s.staff||''), String(_numU(s._u||0))]));
   });
 
   return rows;
@@ -1885,7 +1886,14 @@ function sheetToDb(rows){
       if(!r||!r.length){ i++; continue; }
       const id=String(r[0]||'').trim();
       if(!id){ i++; continue; }
-      dbOut.supplies.push({ id, date:String(r[1]||''), resName:String(r[2]||''), product:String(r[3]||''), qty:_numU(r[4]), _u:_numU(r[5]) });
+      let staff='', _u;
+      if(r.length>=7){
+        staff=String(r[5]||'');
+        _u=_numU(r[6]);
+      }else{
+        _u=_numU(r[5]);
+      }
+      dbOut.supplies.push({ id, date:String(r[1]||''), resName:String(r[2]||''), product:String(r[3]||''), qty:_numU(r[4]), staff, _u });
       i++;
     }
   }
@@ -2949,18 +2957,12 @@ function renderMain(){
     };
     const h48=_h48chk();
     const nc=h48?'<span class="cell-red">●</span>':'<span class="cell-empty">—</span>';
-    // バイタル（体温/血圧/脈拍/SpO2）
+    // バイタル（体温/血圧/脈拍/SpO2）— vitalSpan* と履歴で同一判定
     const lv=(rec.vital||[]).length?(rec.vital[rec.vital.length-1]):null;
-    const _t=normalizeTempValue(lv&&lv.temp);
-    const tc=lv?`<span class="${parseFloat(_t)>=37.0?'cell-warn':'cell-val'}">${_t||'—'}℃</span>`:'<span class="cell-empty">—</span>';
-    const _dbp=parseInt(String(lv&&lv.dbp||'').trim(),10);
-    const _sbp=parseInt(String(lv&&lv.sbp||'').trim(),10);
-    let bpCls='cell-val';
-    if(Number.isFinite(_dbp)&&_dbp>100) bpCls='cell-red';
-    else if(Number.isFinite(_sbp)&&_sbp>=160) bpCls='cell-warn';
-    const bc=lv?`<span class="${bpCls}">${lv.sbp}/${lv.dbp}</span>`:'<span class="cell-empty">—</span>';
-    const pc=lv?`<span class="${parseInt(lv.pulse)>=90?'cell-warn':'cell-val'}">${lv.pulse}</span>`:'<span class="cell-empty">—</span>';
-    const sc=lv?`<span class="cell-val">${lv.spo2||'—'}%</span>`:'<span class="cell-empty">—</span>';
+    const tc=lv?vitalSpanTemp(lv.temp):'<span class="cell-empty">—</span>';
+    const bc=lv?vitalSpanBp(lv.sbp,lv.dbp):'<span class="cell-empty">—</span>';
+    const pc=lv?vitalSpanPulse(lv.pulse):'<span class="cell-empty">—</span>';
+    const sc=lv?vitalSpanSpo2(lv.spo2):'<span class="cell-empty">—</span>';
     // 排泄
     const le=(rec.excretion||[]).length?(rec.excretion[rec.excretion.length-1]):null;
     let ec;
@@ -3153,6 +3155,18 @@ function get48h(name, field){
   }
   return all.sort((a,b)=>b._ts-a._ts);
 }
+/** 48時間基準（排泄履歴と同じ）の卸記録。日付は正午でソート用タイムスタンプ化 */
+function get48hSupplies(resName){
+  const refEnd=historyRefEndMs(), limit=72*3600000, all=[];
+  (db.supplies||[]).forEach(s=>{
+    if(!s||s.resName!==resName) return;
+    const dk=supplyDateCalendarKey(s.date);
+    if(!dk) return;
+    const ts=new Date(dk+'T12:00:00').getTime();
+    if(ts<=refEnd&&refEnd-ts<=limit) all.push({...s,_dk:dk,_ts:ts,_kind:'supply'});
+  });
+  return all.sort((a,b)=>b._ts-a._ts);
+}
 function get48hMed(name){
   const refEnd=historyRefEndMs(), limit=72*3600000, all=[];
   const ORDER=['morning','lunch','dinner','bedtime'];
@@ -3246,6 +3260,29 @@ function convTemp(el){
   el.value=String(el.value||'').replace(/[，,]/g,'.').replace(/[。．]/g,'.');
 }
 
+// ========== バイタル表示（メイン表・履歴共通：しきい値で cell-warn / cell-red） ==========
+function vitalSpanTemp(temp){
+  const _t=normalizeTempValue(temp);
+  const cls=parseFloat(_t)>=37.0?'cell-warn':'cell-val';
+  return `<span class="${cls}">${_t||'—'}℃</span>`;
+}
+function vitalSpanBp(sbp,dbp){
+  const _dbp=parseInt(String(dbp||'').trim(),10);
+  const _sbp=parseInt(String(sbp||'').trim(),10);
+  let bpCls='cell-val';
+  if(Number.isFinite(_dbp)&&_dbp>100) bpCls='cell-red';
+  else if(Number.isFinite(_sbp)&&_sbp>=160) bpCls='cell-warn';
+  return `<span class="${bpCls}">${sbp||''}/${dbp||''}</span>`;
+}
+function vitalSpanPulse(pulse){
+  const p=parseInt(String(pulse||'').trim(),10);
+  const cls=Number.isFinite(p)&&p>=90?'cell-warn':'cell-val';
+  return `<span class="${cls}">${pulse||''}</span>`;
+}
+function vitalSpanSpo2(spo2){
+  return `<span class="cell-val">${spo2||'—'}%</span>`;
+}
+
 // ========== バイタルパネル ==========
 let _editVital=null;
 function buildVitalPanel(){
@@ -3254,7 +3291,7 @@ function buildVitalPanel(){
   const histHtml=hist.length?hist.map(v=>`<div class="hist-item">
     <div class="hist-time">${recDayLabel(v._dk)} ${normalizeTimeText(v.time)}</div>
     <div class="hist-content">
-      BP: ${v.sbp||''}/${v.dbp||''} mmHg　脈: ${v.pulse||''}　体温: ${normalizeTempValue(v.temp)||''}℃　SpO2: ${v.spo2||''}%${v.weight?`　体重: ${v.weight}kg`:''}
+      BP: ${vitalSpanBp(v.sbp,v.dbp)} mmHg　脈: ${vitalSpanPulse(v.pulse)}　体温: ${vitalSpanTemp(v.temp)}　SpO2: ${vitalSpanSpo2(v.spo2)}${v.weight?`　体重: ${v.weight}kg`:''}
     </div>
     <button class="hist-edit" onclick="editVital('${v._dk}',${v._i})">編集</button>
     <button class="hist-del" onclick="delVital('${v._dk}',${v._i})">削除</button>
@@ -3331,10 +3368,21 @@ function delVital(dkStr,idx){
 // ========== 排泄パネル ==========
 function buildExPanel(){
   const rec=getRec(curRes);
-  const hist=get48h(curRes,'excretion');
+  const histEx=get48h(curRes,'excretion').map(e=>({...e,_kind:'ex'}));
+  const histSup=get48hSupplies(curRes);
+  const hist=[...histEx,...histSup].sort((a,b)=>b._ts-a._ts);
   const S=db.settings||{};
 
   const histRow=(e)=> {
+    if(e._kind==='supply'){
+      const staffLine=e.staff?`<br><span class="text-gray">${escapeHtml(e.staff)}</span>`:'';
+      return `<div class="hist-item">
+        <div class="hist-time">${recDayLabel(e._dk)} —</div>
+        <div class="hist-content">卸 ${escapeHtml(e.product||'')} ${e.qty||0}個${staffLine}</div>
+        <button class="hist-edit" style="opacity:0;pointer-events:none;" tabindex="-1" aria-hidden="true">　</button>
+        <button class="hist-del" onclick="delSupply('${e.id}')">削除</button>
+      </div>`;
+    }
     const tags=[];
     if(e.urine&&e.urine!=='なし') tags.push(`尿量:${e.urine}`);
     if(e.urineMl&&e.urineMl!=='なし') tags.push(`尿量(㎖):${e.urineMl}`);
@@ -4360,6 +4408,7 @@ function openSupplyRecord(initResName){
   // 品目セレクト
   const products = (db.settings.supplyProducts||[]);
   document.getElementById('supProduct').innerHTML = products.map(p=>`<option>${p}</option>`).join('');
+  buildStaffSelect('supStaff','');
   // 集計月を今月に
   const now = new Date();
   document.getElementById('supSumMonth').value = `${now.getFullYear()}-${pad(now.getMonth()+1)}`;
@@ -4439,6 +4488,7 @@ function renderSupplyList(){
           <span class="sup-item-date">${dateLabel}</span>
           ${s.product}
           <span style="color:var(--orange2);font-weight:700;">${s.qty}個</span>
+          ${s.staff?`<span style="color:var(--text3);font-size:16px;margin-left:6px;">${escapeHtml(s.staff)}</span>`:''}
         </div>
         <button onclick="delSupply('${s.id}')" style="border:none;background:none;color:var(--text3);font-size:22px;cursor:pointer;padding:6px 10px;">×</button>
       </div>`;
@@ -4518,14 +4568,17 @@ function addSupply(){
   const resName = document.getElementById('supRes').value;
   const product = document.getElementById('supProduct').value;
   const qty = parseInt(document.getElementById('supQty').value)||0;
+  const staff=(document.getElementById('supStaff')&&document.getElementById('supStaff').value)||'';
   if(!date||!resName||!product){ alert('日付・利用者・品目を入力してください'); return; }
+  if(!String(staff).trim()){ alert('担当者を選択してください'); return; }
   if(qty<=0){ alert('個数を1以上で入力してください'); return; }
   if(!db.supplies) db.supplies=[];
-  db.supplies.push({id:genId('sup'),date,resName,product,qty,_u:Date.now()});
+  db.supplies.push({id:genId('sup'),date,resName,product,qty,staff,_u:Date.now()});
   db.supplies.sort((a,b)=>a.date.localeCompare(b.date));
   saveDB();
   document.getElementById('supQty').value='1';
   renderSupplyList();
+  if(typeof curTab!=='undefined'&&curTab==='excretion') refreshPanel('excretion');
 }
 
 function delSupply(id){
@@ -4534,6 +4587,7 @@ function delSupply(id){
   db.supplies=(db.supplies||[]).filter(s=>s.id!==id);
   saveDB();
   renderSupplyList();
+  if(typeof curTab!=='undefined'&&curTab==='excretion') refreshPanel('excretion');
 }
 
 // ========== 設定画面 ==========
