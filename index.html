@@ -1267,7 +1267,7 @@ const REC = {
 const N_RECORD_COLS = 57;
 
 /** デプロイのたびに上げる（設定→データ管理の「アプリ情報」で表示） */
-const APP_VERSION='1.0.11';
+const APP_VERSION='1.0.12';
 function isStandaloneWebApp(){
   try{
     if(window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches) return true;
@@ -3106,10 +3106,9 @@ function refreshDetailResidentSelect(){
     }
   }
   list.sort(compareResidentsStable);
-  sel.innerHTML=list.map(r=>{
-    const lab=(r.name||'')+(r.care?'（'+r.care+'）':'');
-    return `<option value="${escapeAttr(r.name)}">${escapeHtml(lab)}</option>`;
-  }).join('');
+  sel.innerHTML=list.map(r=>
+    `<option value="${escapeAttr(r.name)}">${escapeHtml(r.name||'')}</option>`
+  ).join('');
   if(curRes){
     const hit=list.find(r=>normalizeResidentName(r.name)===normalizeResidentName(curRes));
     sel.value=hit?hit.name:curRes;
