@@ -192,6 +192,10 @@ input,select,textarea{font-family:inherit;font-size:30px;}
   position:sticky;top:0;z-index:100;box-shadow:var(--shadow);
 }
 .detail-name{font-size:18px;font-weight:600;color:var(--text1);}
+.detail-res-select{
+  flex:1;min-width:0;max-width:min(52vw,280px);font-size:17px;font-weight:600;color:var(--text1);
+  border:1px solid var(--border2);border-radius:var(--r1);padding:6px 8px;background:var(--white);
+}
 .back-btn{
   padding:7px 14px;border-radius:var(--r2);border:1px solid #F5C49A;
   background:var(--orange-bg);color:var(--orange2);font-size:15px;font-weight:600;
@@ -490,9 +494,9 @@ input,select,textarea{font-family:inherit;font-size:30px;}
 <div id="detailScreen" class="screen">
   <div class="detail-hdr no-print">
     <!-- 左: 戻るボタン + 名前 -->
-    <div style="display:flex;align-items:center;gap:8px;overflow:hidden;">
+    <div style="display:flex;align-items:center;gap:8px;overflow:hidden;min-width:0;">
       <button class="back-btn" onclick="goBack()">◀ メイン</button>
-      <div class="detail-name" id="detName" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></div>
+      <select id="detResSelect" class="detail-res-select" title="当日の利用者に切り替え" onchange="onDetResSelectChange(this)"></select>
     </div>
     <!-- 中央: 日付ナビ -->
     <div class="hdr-center">
@@ -1263,7 +1267,7 @@ const REC = {
 const N_RECORD_COLS = 57;
 
 /** デプロイのたびに上げる（設定→データ管理の「アプリ情報」で表示） */
-const APP_VERSION='1.0.10';
+const APP_VERSION='1.0.11';
 function isStandaloneWebApp(){
   try{
     if(window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches) return true;
@@ -2631,7 +2635,9 @@ function moveDay(d){
 }
 function moveDayDet(d){
   curDate.setDate(curDate.getDate()+d);
-  renderDate(); refreshPanel(curTab);
+  renderDate();
+  refreshDetailResidentSelect();
+  refreshPanel(curTab);
 }
 
 // ========== 画面切替 ==========
@@ -2692,6 +2698,7 @@ function pickDay(y,m,d){
   curDate=new Date(y,m,d); curDate.setHours(0,0,0,0);
   renderDate();
   if(document.getElementById('detailScreen').classList.contains('active')){
+    refreshDetailResidentSelect();
     refreshPanel(curTab);
   } else {
     renderMain();
@@ -2702,6 +2709,7 @@ function goToday(){
   curDate=new Date(); curDate.setHours(0,0,0,0);
   renderDate();
   if(document.getElementById('detailScreen').classList.contains('active')){
+    refreshDetailResidentSelect();
     refreshPanel(curTab);
   } else {
     renderMain();
@@ -3084,12 +3092,50 @@ const TAB_LIST = [
   {id:'summary',  label:'サマリー'},
 ];
 
+function refreshDetailResidentSelect(){
+  const sel=document.getElementById('detResSelect');
+  if(!sel) return;
+  const dayIdx=curDate.getDate()-1;
+  let list=residentsOnDaySorted(dayIdx,{forMainTable:true}).slice();
+  if(curRes){
+    const has=list.some(r=>normalizeResidentName(r.name)===normalizeResidentName(curRes));
+    if(!has){
+      const row=(db.residents||[]).find(r=>normalizeResidentName(r.name)===normalizeResidentName(curRes));
+      if(row) list.push(Object.assign({},row));
+      else list.push({name:curRes,care:'',sched:[],_u:0});
+    }
+  }
+  list.sort(compareResidentsStable);
+  sel.innerHTML=list.map(r=>{
+    const lab=(r.name||'')+(r.care?'（'+r.care+'）':'');
+    return `<option value="${escapeAttr(r.name)}">${escapeHtml(lab)}</option>`;
+  }).join('');
+  if(curRes){
+    const hit=list.find(r=>normalizeResidentName(r.name)===normalizeResidentName(curRes));
+    sel.value=hit?hit.name:curRes;
+  }
+}
+function onDetResSelectChange(el){
+  const v=el&&el.value;
+  if(v) switchDetailResident(v);
+}
+function switchDetailResident(name){
+  const nm=String(name||'').trim();
+  if(!nm||normalizeResidentName(nm)===normalizeResidentName(curRes)) return;
+  const dayIdx=curDate.getDate()-1;
+  const list=residentsOnDaySorted(dayIdx,{forMainTable:true});
+  const hit=list.find(r=>normalizeResidentName(r.name)===normalizeResidentName(nm));
+  curRes=hit?hit.name:nm;
+  _editVital=_editEx=_editBath=_editCare=null;
+  refreshDetailResidentSelect();
+  refreshPanel(curTab);
+}
 function openDetail(name, tab){
   curRes=name;
   curTab=tab||'vital';
-  document.getElementById('detName').textContent=name;
   renderDate();
   renderTabs();
+  refreshDetailResidentSelect();
   showPanel(curTab);
   showScreen('detailScreen');
 }
