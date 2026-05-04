@@ -1273,7 +1273,7 @@ const REC = {
 const N_RECORD_COLS = 57;
 
 /** デプロイのたびに上げる（設定→データ管理の「アプリ情報」で表示） */
-const APP_VERSION='1.0.15';
+const APP_VERSION='1.0.16';
 function isStandaloneWebApp(){
   try{
     if(window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches) return true;
@@ -1730,6 +1730,7 @@ function ensureDay(dbOut, dk, name){
 }
 
 function applyRecordRow(dbOut, row){
+  row=padSheetRow(Array.isArray(row)?row.slice():[], N_RECORD_COLS);
   const kind=String(row[REC.k]||'').trim();
   const dk=normalizeDateKey(row[REC.dk]);
   const name=String(row[REC.nm]||'').trim();
@@ -5685,6 +5686,27 @@ function dedupePrintRows(list, makeKey){
     return true;
   });
 }
+/** バイタル印刷セル：0 やシート由来の数値を落とさない（|| '' は 0 を潰すため使わない） */
+function vitalPrintStr(val){
+  if(val===null||val===undefined) return '';
+  if(typeof val==='number'){
+    if(!Number.isFinite(val)) return '';
+    return String(val);
+  }
+  const s=String(val).trim();
+  if(s===''||s==='—'||s==='―'||s==='-') return '';
+  return s;
+}
+function vitalPrintBp(v){
+  const s=vitalPrintStr(v&&v.sbp), d=vitalPrintStr(v&&v.dbp);
+  if(!s&&!d) return '';
+  return s+'/'+d;
+}
+function vitalPrintSpo2(v){
+  const s=vitalPrintStr(v&&v.spo2);
+  if(!s) return '';
+  return /%$/.test(s)?s:s+'%';
+}
 function getCareContentText(c){
   return String(c&&(
     c.content ??
@@ -5720,16 +5742,16 @@ function printVitalRange(){
       v.id||'',
       normalizeTimeText(v.time)||'',
       normalizeTempValue(v.temp)||'',
-      v.sbp||'',v.dbp||'',v.pulse||'',v.spo2||'',v.weight||'',
-      v.staff||'',v.sheetU||''
+      vitalPrintStr(v.sbp),vitalPrintStr(v.dbp),vitalPrintStr(v.pulse),vitalPrintStr(v.spo2),vitalPrintStr(v.weight),
+      String(v.staff||'').trim(),v.sheetU||''
     ].join('|');
   }).map(row=>{
     const v=row.v||{};
     return `<tr>
           <td>${row.dk}</td><td>${row.name}</td>
           <td>${normalizeTimeText(v.time)||''}</td><td>${normalizeTempValue(v.temp)||''}</td>
-          <td>${v.sbp||''}/${v.dbp||''}</td><td>${v.pulse||''}</td>
-          <td>${v.spo2||''}</td><td>${v.weight||''}</td><td>${v.staff||''}</td>
+          <td>${vitalPrintBp(v)}</td><td>${vitalPrintStr(v.pulse)}</td>
+          <td>${vitalPrintSpo2(v)}</td><td>${vitalPrintStr(v.weight)}</td><td>${String(v.staff||'').trim()}</td>
         </tr>`;
   }).join('');
   const html=`
