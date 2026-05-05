@@ -1273,7 +1273,7 @@ const REC = {
 const N_RECORD_COLS = 57;
 
 /** デプロイのたびに上げる（設定→データ管理の「アプリ情報」で表示） */
-const APP_VERSION='1.0.22';
+const APP_VERSION='1.0.23';
 function isStandaloneWebApp(){
   try{
     if(window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches) return true;
@@ -1455,6 +1455,25 @@ function inferServiceTypeFromSched(sched){
   if(!Array.isArray(sched)||sched.length===0) return 'resident';
   if(sched.every(v=>Number(v)===1)) return 'resident';
   return 'day';
+}
+/**
+ * 予定表Excelの「常時」行判定（sched を全日1にする・あわせて serviceType を resident に寄せる）。
+ * - 従来: お泊行のD列(1日目)のみ。表によっては空で別日にだけ記載があるため緩和する。
+ * - お泊行のいずれかの日付列に入力があり、かつ利用行が全日〇なら常時（ショートステイは通常全日〇にならない想定）
+ */
+function excelIsDailyResidentFromRows(uRow, oRow){
+  if(!oRow) return false;
+  if(String(oRow[3]||'').trim().length>0) return true;
+  var hasPo=false;
+  for(var c=3;c<=33;c++){
+    if(String(oRow[c]||'').trim().length>0){ hasPo=true; break; }
+  }
+  if(!hasPo||!uRow) return false;
+  for(var c=3;c<=33;c++){
+    var uv=uRow[c];
+    if(!uv||['〇','○','◯'].indexOf(String(uv).trim())<0) return false;
+  }
+  return true;
 }
 /** シート列 serviceType（あれば優先）＋無ければ sched から推定 */
 function residentServiceTypeFromSheet(svcRaw, sched){
@@ -4206,7 +4225,7 @@ function buildNotesPanel(){
         <p style="margin:0 0 10px;"><strong>メイン表「申送」列（●）</strong><br>
         カレンダーで選んだ日の「終わり時刻」を基準に、<strong>過去72時間以内</strong>に内容のある申送りが1件でもあると赤の●。申送り履歴（本タブの48時間）と同じ時間の考え方です。●または氏名から本画面へ来られます。</p>
         <p style="margin:0 0 10px;"><strong>メイン表「最終排便」列</strong><br>
-        <strong>デイサービス（通所）</strong>利用者は「—」固定（宿泊なし想定）。<strong>入所・常時利用</strong>のみ、過去<strong>14日</strong>の排泄で排便が「なし」以外の<strong>最新</strong>を表示します（経過で「－3日」等）。<strong>予定表Excel</strong>では「お泊」行D列に常時の印がある利用者を入所・それ以外をデイとして取り込みます。スプレッドシートに <code>serviceType</code> 列がある場合はそちらが優先されます。</p>
+        <strong>デイサービス（通所）</strong>利用者は「—」固定（宿泊なし想定）。<strong>入所・常時・全日来所</strong>のみ、過去<strong>14日</strong>の排泄で排便が「なし」以外の<strong>最新</strong>を表示します。<strong>予定表Excel</strong>ではお泊行・利用行から常時を判定し、それ以外は<strong>その月の予定が全日来所かどうか</strong>で入所／デイを付けます（別システムのスプレッドシートを編集する必要はありません）。クラウド同期で利用者シートに <code>serviceType</code> 列がある場合のみ上書き優先があります。</p>
         <p style="margin:0 0 10px;"><strong>同期（GAS）</strong><br>
         約<strong>3分</strong>ごとにスプレッドシートを取得。タブを前面に戻したときも取得します。記録保存のあと、約<strong>2.5秒</strong>後に反映送信が走る仕組みです。</p>
         <p style="margin:0 0 10px;"><strong>詳細画面ヘッダー</strong><br>
@@ -4933,9 +4952,7 @@ function handleXlsx(file){
       var importUBase=Date.now();
       Object.keys(byName).forEach(function(n){
         var v=byName[n], uRow=v.riyou, oRow=v.otomari;
-        // D列（col 3 = 1日目）のお泊行に入力があれば常時利用者
-        var d1Val=oRow?String(oRow[3]||'').trim():'';
-        var isDaily=(oRow&&d1Val.length>0);
+        var isDaily=excelIsDailyResidentFromRows(uRow, oRow);
         if(!isDaily&&!uRow) return;
         var sched=[];
         for(var c=3;c<=33;c++){
@@ -4955,8 +4972,8 @@ function handleXlsx(file){
         const nn=normalizeResidentName(n);
         const existing=(db.residents||[]).find(r=>normalizeResidentName(r.name)===nn);
         const id=existing?existing.id:genId('r');
-        // 常時利用（お泊D列）と通所をExcelの isDaily で区別。sched だけだと「毎日〇のデイ」が全日1になり入所に誤判定されるため推定に頼らない
-        const serviceType=isDaily?'resident':'day';
+        // 常時は resident。それ以外は予定 sched から推定（全日来所なら resident＝最終排便あり）。v1.0.22 の「常時以外は一律 day」は D1 無し入所で誤判定だったため廃止
+        const serviceType=isDaily?'resident':inferServiceTypeFromSched(sched);
         const _u=importUBase+newRes.length;
         newRes.push({id,name:n,care:v.care,sched:sched,serviceType,_u});
       });
