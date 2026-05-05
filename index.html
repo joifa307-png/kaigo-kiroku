@@ -1273,7 +1273,7 @@ const REC = {
 const N_RECORD_COLS = 57;
 
 /** デプロイのたびに上げる（設定→データ管理の「アプリ情報」で表示） */
-const APP_VERSION='1.0.17';
+const APP_VERSION='1.0.18';
 function isStandaloneWebApp(){
   try{
     if(window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches) return true;
@@ -1464,6 +1464,13 @@ function residentServiceTypeOrDefault(r){
   if(r.serviceType!=null&&String(r.serviceType).trim()!=='')
     return normalizeResidentServiceType(r.serviceType);
   return inferServiceTypeFromSched(r.sched);
+}
+/** メイン表・最終排便列のみ。sched からの「デイ推定」は使わない（週一部の入所でも 0 が混じりデイ誤判定→排便が常に — になるため）。デイで非表示にするのは serviceType を明示したときだけ */
+function isExplicitDayServiceForLastStoolRow(r){
+  if(!r) return false;
+  if(r.serviceType==null||r.serviceType===undefined) return false;
+  if(String(r.serviceType).trim()==='') return false;
+  return normalizeResidentServiceType(r.serviceType)==='day';
 }
 /** 食事の対象者チップ：デイは昼のみ既定選択、入所は全区分で既定選択 */
 function mealResChipSelectedByDefault(r, mealSection){
@@ -3005,9 +3012,9 @@ function renderMain(){
       if(lines.length===0) lines.push('空振り');
       ec=`<span class="cell-ex">${normalizeTimeText(le.time)}<br>${lines.join('<br>')}</span>`;
     }
-    // 最終排便（デイサービス利用者は管理対象外のため常に —）
+    // 最終排便（serviceType で明示したデイのみ非表示。sched 推定デイは誤爆が多いため使わない）
     let lsc;
-    if(residentServiceTypeOrDefault(r)==='day'){
+    if(isExplicitDayServiceForLastStoolRow(r)){
       lsc='<span class="cell-empty">—</span>';
     }else{
       const _ls=getLastStool(r.name);
