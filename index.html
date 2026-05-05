@@ -1273,7 +1273,7 @@ const REC = {
 const N_RECORD_COLS = 57;
 
 /** デプロイのたびに上げる（設定→データ管理の「アプリ情報」で表示） */
-const APP_VERSION='1.0.18';
+const APP_VERSION='1.0.20';
 function isStandaloneWebApp(){
   try{
     if(window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches) return true;
@@ -1464,13 +1464,6 @@ function residentServiceTypeOrDefault(r){
   if(r.serviceType!=null&&String(r.serviceType).trim()!=='')
     return normalizeResidentServiceType(r.serviceType);
   return inferServiceTypeFromSched(r.sched);
-}
-/** メイン表・最終排便列のみ。sched からの「デイ推定」は使わない（週一部の入所でも 0 が混じりデイ誤判定→排便が常に — になるため）。デイで非表示にするのは serviceType を明示したときだけ */
-function isExplicitDayServiceForLastStoolRow(r){
-  if(!r) return false;
-  if(r.serviceType==null||r.serviceType===undefined) return false;
-  if(String(r.serviceType).trim()==='') return false;
-  return normalizeResidentServiceType(r.serviceType)==='day';
 }
 /** 食事の対象者チップ：デイは昼のみ既定選択、入所は全区分で既定選択 */
 function mealResChipSelectedByDefault(r, mealSection){
@@ -2875,7 +2868,7 @@ function jumpToSummaryNotes(dateKey){
 }
 
 // ========== メイン画面描画 ==========
-/** YYYY-MM-DD + HH:mm をローカルの Unix ms に（ISO文字列は iPad Safari で不正になりやすい） */
+/** YYYY-MM-DD + HH:mm をローカルの Unix ms に（時刻に秒が付くと ISO 連結が二重になり env によって Invalid になり得る） */
 function timestampFromDateKeyAndHm(dkStr, hmNorm){
   const ymd=String(dkStr||'').trim().split('-').map(Number);
   if(ymd.length!==3||ymd.some(n=>!Number.isFinite(n))) return NaN;
@@ -3012,23 +3005,19 @@ function renderMain(){
       if(lines.length===0) lines.push('空振り');
       ec=`<span class="cell-ex">${normalizeTimeText(le.time)}<br>${lines.join('<br>')}</span>`;
     }
-    // 最終排便（serviceType で明示したデイのみ非表示。sched 推定デイは誤爆が多いため使わない）
+    // 最終排便（過去14日・排便≠なし）。デイ利用者を除外する分岐はあったが、予定Excel取込が非常時に serviceType:'day' を直書きしており除外が誤爆→常に — になるため出さない
     let lsc;
-    if(isExplicitDayServiceForLastStoolRow(r)){
-      lsc='<span class="cell-empty">—</span>';
+    const _ls=getLastStool(r.name);
+    if(!_ls){lsc='<span class="cell-empty">—</span>';}
+    else if(!Number.isFinite(_ls.dt)){
+      lsc=`<span class="cell-val" style="font-size:14px;">${_ls.dayStr}曜 ${normalizeTimeText(_ls.time)}</span>`;
     }else{
-      const _ls=getLastStool(r.name);
-      if(!_ls){lsc='<span class="cell-empty">—</span>';}
-      else if(!Number.isFinite(_ls.dt)){
-        lsc=`<span class="cell-val" style="font-size:14px;">${_ls.dayStr}曜 ${normalizeTimeText(_ls.time)}</span>`;
-      }else{
-        /** 経過時間から24h分を引いて帯判定（＝最終排便時刻に+24hしたものと比較）。警告「－n日」が1日分遅れる */
-        const _ha=(Date.now()-_ls.dt)/3600000-24;
-        if(_ha<48) lsc=`<span class="cell-val" style="font-size:14px;">${_ls.dayStr}曜 ${normalizeTimeText(_ls.time)}</span>`;
-        else if(_ha<60) lsc='<span class="cell-warn">－3日</span>';
-        else if(_ha<72) lsc='<span class="cell-warn">－4日</span>';
-        else lsc='<span class="cell-warn">－5日</span>';
-      }
+      /** 経過時間から24h分を引いて帯判定（＝最終排便時刻に+24hしたものと比較）。警告「－n日」が1日分遅れる */
+      const _ha=(Date.now()-_ls.dt)/3600000-24;
+      if(_ha<48) lsc=`<span class="cell-val" style="font-size:14px;">${_ls.dayStr}曜 ${normalizeTimeText(_ls.time)}</span>`;
+      else if(_ha<60) lsc='<span class="cell-warn">－3日</span>';
+      else if(_ha<72) lsc='<span class="cell-warn">－4日</span>';
+      else lsc='<span class="cell-warn">－5日</span>';
     }
     // 入浴
     const bac=(rec.bath||[]).length?'<span class="cell-ok">○</span>':'<span class="cell-empty">—</span>';
@@ -4940,10 +4929,12 @@ function handleXlsx(file){
           }
         }
         if(isDaily) dailyCount++;
-        // 既存利用者のIDを引き継ぐ（同期時に重複しないよう）
-        const existing=db.residents.find(r=>r.name===n);
+        // 既存利用者のIDを引き継ぐ（空白差で別人扱いにならないよう氏名は正規化して照合）
+        const nn=normalizeResidentName(n);
+        const existing=(db.residents||[]).find(r=>normalizeResidentName(r.name)===nn);
         const id=existing?existing.id:genId('r');
-        const serviceType=isDaily?'resident':'day';
+        // 旧: 非常時に serviceType:'day' を直書き → メイン表の「最終排便」がデイ扱いで常に — になる。シート列が無いときは sched から推定に任せる
+        const serviceType=residentServiceTypeFromSheet(undefined, sched);
         const _u=importUBase+newRes.length;
         newRes.push({id,name:n,care:v.care,sched:sched,serviceType,_u});
       });
