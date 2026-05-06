@@ -1273,7 +1273,7 @@ const REC = {
 const N_RECORD_COLS = 57;
 
 /** デプロイのたびに上げる（設定→データ管理の「アプリ情報」で表示） */
-const APP_VERSION='1.0.23';
+const APP_VERSION='1.0.24';
 function isStandaloneWebApp(){
   try{
     if(window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches) return true;
@@ -1454,6 +1454,19 @@ function normalizeResidentServiceType(v){
 function inferServiceTypeFromSched(sched){
   if(!Array.isArray(sched)||sched.length===0) return 'resident';
   if(sched.every(v=>Number(v)===1)) return 'resident';
+  return 'day';
+}
+/**
+ * 予定表Excel「利用」行：Excelの列21・28・35…（7列ごと）に入力があれば入所、すべて空ならデイ。
+ * 列番号はExcelの A=1 基準（配列 index は col-1）。日付の〇は列3〜にあるためここでは見ない。
+ */
+function excelServiceTypeFromInstitutionMarkerCols(uRow){
+  if(!uRow||!uRow.length) return 'resident';
+  for(let col1=21;col1<=70;col1+=7){
+    const ix=col1-1;
+    if(ix>=uRow.length) break;
+    if(String(uRow[ix]||'').trim().length>0) return 'resident';
+  }
   return 'day';
 }
 /**
@@ -4225,7 +4238,7 @@ function buildNotesPanel(){
         <p style="margin:0 0 10px;"><strong>メイン表「申送」列（●）</strong><br>
         カレンダーで選んだ日の「終わり時刻」を基準に、<strong>過去72時間以内</strong>に内容のある申送りが1件でもあると赤の●。申送り履歴（本タブの48時間）と同じ時間の考え方です。●または氏名から本画面へ来られます。</p>
         <p style="margin:0 0 10px;"><strong>メイン表「最終排便」列</strong><br>
-        <strong>デイサービス（通所）</strong>利用者は「—」固定（宿泊なし想定）。<strong>入所・常時・全日来所</strong>のみ、過去<strong>14日</strong>の排泄で排便が「なし」以外の<strong>最新</strong>を表示します。<strong>予定表Excel</strong>ではお泊行・利用行から常時を判定し、それ以外は<strong>その月の予定が全日来所かどうか</strong>で入所／デイを付けます（別システムのスプレッドシートを編集する必要はありません）。クラウド同期で利用者シートに <code>serviceType</code> 列がある場合のみ上書き優先があります。</p>
+        <strong>デイサービス（通所）</strong>利用者は「—」固定。<strong>入所</strong>のみ過去<strong>14日</strong>の排泄から<strong>最新の排便</strong>を表示します。<strong>予定表Excel</strong>では「利用」行の<strong>Excel列21・28・35…（7列ごと）</strong>に何か入力があれば入所、すべて空ならデイと判定します（日付の〇列とは別）。お泊行で常時のときは従来どおり全日予定1です。クラウド同期で利用者シートに <code>serviceType</code> 列がある場合はそちらが優先されます。</p>
         <p style="margin:0 0 10px;"><strong>同期（GAS）</strong><br>
         約<strong>3分</strong>ごとにスプレッドシートを取得。タブを前面に戻したときも取得します。記録保存のあと、約<strong>2.5秒</strong>後に反映送信が走る仕組みです。</p>
         <p style="margin:0 0 10px;"><strong>詳細画面ヘッダー</strong><br>
@@ -4972,8 +4985,8 @@ function handleXlsx(file){
         const nn=normalizeResidentName(n);
         const existing=(db.residents||[]).find(r=>normalizeResidentName(r.name)===nn);
         const id=existing?existing.id:genId('r');
-        // 常時は resident。それ以外は予定 sched から推定（全日来所なら resident＝最終排便あり）。v1.0.22 の「常時以外は一律 day」は D1 無し入所で誤判定だったため廃止
-        const serviceType=isDaily?'resident':inferServiceTypeFromSched(sched);
+        // 常時は resident。それ以外は「利用」行の列21/28/35…（週間マーカー）の有無のみで入所／デイ（予定の〇だけでは混同するため使わない）
+        const serviceType=isDaily?'resident':excelServiceTypeFromInstitutionMarkerCols(uRow);
         const _u=importUBase+newRes.length;
         newRes.push({id,name:n,care:v.care,sched:sched,serviceType,_u});
       });
