@@ -1275,7 +1275,7 @@ const REC = {
 const N_RECORD_COLS = 57;
 
 /** デプロイのたびに上げる（設定→データ管理の「アプリ情報」で表示） */
-const APP_VERSION='1.0.26';
+const APP_VERSION='1.0.27';
 function isStandaloneWebApp(){
   try{
     if(window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches) return true;
@@ -1459,13 +1459,25 @@ function inferServiceTypeFromSched(sched){
   return 'day';
 }
 /**
- * 予定表Excel「利用」行：**D列のみ**（ExcelのD列＝配列 index 3）。入力あり→入所（resident）、空→デイ（day）。
- * メイン表の最終排便は serviceType===day のとき常に「—」のみ表示。
+ * D列が「1日の来所〇・×」などだけか（入所専用の別記載がないか）。
+ * 多くの表で D＝1日目の出席なので、〇○◯のみでも resident にするとデイ利用者に最終排便が付く。
+ */
+function excelDColumnIsAttendanceMarksOnly(val){
+  const s=String(val==null?'').trim();
+  if(!s) return true;
+  return /^[\s〇○◯×✕・･．.\-_]+$/u.test(s);
+}
+/**
+ * 予定表Excel「利用」行：**D列のみ**（index 3）。空→day。
+ * 〇・○・◯・×等の来所印のみ→day（出席丸と入所マーカーの兼用を避ける）。
+ * それ以外の文字が含まれる→入所（resident）。
  */
 function excelServiceTypeFromUtilizationRowColumnD(uRow){
   if(!uRow||!uRow.length) return 'resident';
-  if(String(uRow[3]||'').trim().length>0) return 'resident';
-  return 'day';
+  const d=String(uRow[3]??'').trim();
+  if(!d) return 'day';
+  if(excelDColumnIsAttendanceMarksOnly(d)) return 'day';
+  return 'resident';
 }
 /**
  * 予定表Excelの「常時」行判定（sched を全日1にする・あわせて serviceType を resident に寄せる）。
@@ -4256,7 +4268,7 @@ function buildNotesPanel(){
         <p style="margin:0 0 10px;"><strong>メイン表「申送」列（●）</strong><br>
         カレンダーで選んだ日の「終わり時刻」を基準に、<strong>過去72時間以内</strong>に内容のある申送りが1件でもあると赤の●。申送り履歴（本タブの48時間）と同じ時間の考え方です。●または氏名から本画面へ来られます。</p>
         <p style="margin:0 0 10px;"><strong>メイン表「最終排便」列</strong><br>
-        <code>serviceType</code> が<strong>データに明示されていて</strong>かつ <strong>day 以外</strong>（入所）のときだけ、過去<strong>14日</strong>の排泄から<strong>最新の排便</strong>を表示します（未設定は「—」。全日来所の推定だけでは出しません）。<strong>予定表Excel</strong>では「利用」行の<strong>D列が空なら day・入力があれば resident</strong>が保存されます。クラウド同期でシートの <code>serviceType</code> 列が<strong>空</strong>のときは種別を付けず、食事などの判定には予定からの推定が使われます。</p>
+        <code>serviceType</code> が<strong>明示されていて day 以外</strong>のときだけ過去<strong>14日</strong>の排便を表示（未設定は「—」）。<strong>予定表Excel</strong>では「利用」行の<strong>D列</strong>が空ならデイ、<strong>〇・×など来所印だけ</strong>でもデイ（1日の出席と区別）。入所だけ<strong>文字・数字など別の表記</strong>をD列に入れる運用にしてください。クラウド同期の <code>serviceType</code> 列が空のときは種別は付きません。</p>
         <p style="margin:0 0 10px;"><strong>同期（GAS）</strong><br>
         約<strong>3分</strong>ごとにスプレッドシートを取得。タブを前面に戻したときも取得します。記録保存のあと、約<strong>2.5秒</strong>後に反映送信が走る仕組みです。</p>
         <p style="margin:0 0 10px;"><strong>詳細画面ヘッダー</strong><br>
