@@ -438,10 +438,10 @@ input,select,textarea{font-family:inherit;font-size:30px;}
     <div style="font-size:28px;font-weight:700;color:var(--orange2);margin-bottom:8px;">介護記録</div>
     <div style="font-size:14px;color:var(--text3);margin-bottom:40px;">ユニットを選択してください</div>
     <div style="display:flex;flex-direction:column;gap:16px;width:100%;max-width:320px;">
-      <button type="button" id="facilityBtnNishi" style="padding:24px;border-radius:var(--r3);border:2px solid var(--orange);background:var(--orange-bg);color:var(--orange2);font-size:22px;font-weight:700;cursor:pointer;">
+      <button type="button" onclick="selectFacility('nishi')" style="padding:24px;border-radius:var(--r3);border:2px solid var(--orange);background:var(--orange-bg);color:var(--orange2);font-size:22px;font-weight:700;cursor:pointer;">
         🏠 西ユニット
       </button>
-      <button type="button" id="facilityBtnMinami" style="padding:24px;border-radius:var(--r3);border:2px solid var(--blue);background:var(--blue2);color:var(--blue);font-size:22px;font-weight:700;cursor:pointer;">
+      <button type="button" onclick="selectFacility('minami')" style="padding:24px;border-radius:var(--r3);border:2px solid var(--blue);background:var(--blue2);color:var(--blue);font-size:22px;font-weight:700;cursor:pointer;">
         🏠 南ユニット
       </button>
     </div>
@@ -752,28 +752,18 @@ function selectFacility(facId){
   if(!id){ alert('施設IDが不正です（西・南のいずれかを選んでください）'); return; }
   try{
     localStorage.setItem('kaigo_last_facility', id);
+    gasMirrorToCookies();
+    if(initFacility(id)){
+      syncFacilityIntoUrl(id);
+      startApp();
+    }
   }catch(err){
-    console.error('selectFacility localStorage',err);
-    alert('ブラウザの保存領域に書き込めません。プライベートモードの解除やストレージの空きを確認してください。\n'+(err&&err.message||String(err)));
-    return;
-  }
-  gasMirrorToCookies();
-  if(!initFacility(id)){
-    alert('施設の初期化に失敗しました。ページを再読み込みしてください。');
-    return;
-  }
-  try{ syncFacilityIntoUrl(id); }catch(e){ console.warn('syncFacilityIntoUrl',e); }
-  try{
-    startApp();
-  }catch(err){
-    console.error('selectFacility startApp',err);
+    console.error('selectFacility',err);
     FAC=null; FACILITY_ID=null;
-    try{ localStorage.removeItem('kaigo_last_facility'); }catch(_){}
-    alert('画面の表示に失敗しました: '+(err&&err.message||String(err)));
+    alert('施設の開始に失敗しました: '+(err&&err.message||String(err)));
     showScreen('selectScreen');
   }
 }
-window.selectFacility=selectFacility;
 
 function startApp(){
   showScreen('mainScreen');
@@ -1285,7 +1275,7 @@ const REC = {
 const N_RECORD_COLS = 57;
 
 /** デプロイのたびに上げる（設定→データ管理の「アプリ情報」で表示） */
-const APP_VERSION='1.0.28';
+const APP_VERSION='1.0.27';
 function isStandaloneWebApp(){
   try{
     if(window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches) return true;
@@ -2722,10 +2712,7 @@ function moveDayDet(d){
 /** 服薬一括などで #ovMain に直書きした display:flex が残ると、施設選択など下の画面がタップ不能になる（bfCache 復帰時に顕在化しやすい） */
 function closeAllOverlays(){
   try{
-    document.querySelectorAll('.ov-back').forEach(el=>{
-      el.classList.remove('show');
-      el.style.cssText='';
-    });
+    document.querySelectorAll('.ov-back').forEach(el=>{ el.classList.remove('show'); });
     const om=document.getElementById('ovMain');
     if(om) om.style.cssText='';
     const omb=document.getElementById('ovMainBody');
@@ -6232,12 +6219,6 @@ function showSavedToast(){
 function init(){
   closeAllOverlays();
   gasCredentialsInit();
-  (function bindFacilityButtons(){
-    const bn=document.getElementById('facilityBtnNishi');
-    const bm=document.getElementById('facilityBtnMinami');
-    if(bn&&!bn._facBound){ bn._facBound=1; bn.addEventListener('click',()=>selectFacility('nishi')); }
-    if(bm&&!bm._facBound){ bm._facBound=1; bm.addEventListener('click',()=>selectFacility('minami')); }
-  })();
   const params=new URLSearchParams(location.search);
   const savedFac=normalizeFacilityId(params.get('f'))||normalizeFacilityId(localStorage.getItem('kaigo_last_facility'));
   if(savedFac && initFacility(savedFac)){
