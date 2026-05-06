@@ -393,6 +393,41 @@ input,select,textarea{font-family:inherit;font-size:30px;}
   color:var(--red);font-size:12px;padding:3px 8px;
   border:1px solid var(--red);border-radius:var(--r1);background:none;cursor:pointer;
 }
+.settings-list-item.resident-mgmt-row{
+  display:grid;
+  grid-template-columns:minmax(0,1fr) clamp(7.75rem,24vw,9.25rem) 2.5rem;
+  align-items:center;
+  column-gap:14px;
+  row-gap:6px;
+  padding:10px 14px;
+}
+.settings-list-item.resident-mgmt-row .resident-mgmt-name{
+  margin:0;
+  font-size:16px;
+  font-weight:500;
+  line-height:1.38;
+  min-width:0;
+  overflow-wrap:anywhere;
+  word-break:normal;
+}
+.settings-list-item.resident-mgmt-row .resident-mgmt-check{
+  display:flex;
+  justify-content:center;
+  align-items:center;
+  margin:0;
+  gap:6px;
+  font-size:14px;
+  color:var(--text2);
+  cursor:pointer;
+  white-space:nowrap;
+}
+.settings-list-item.resident-mgmt-row .resident-mgmt-del{
+  display:flex;
+  justify-content:center;
+  align-items:center;
+  min-height:1.75em;
+}
+.settings-list-item.resident-mgmt-row .resident-mgmt-del .res-del-btn{padding:4px 6px;}
 
 /* ===== 印刷 ===== */
 #printArea{display:none;}
@@ -1303,7 +1338,7 @@ const REC = {
 const N_RECORD_COLS = 57;
 
 /** デプロイのたびに上げる（設定→データ管理の「アプリ情報」で表示） */
-const APP_VERSION='1.0.24';
+const APP_VERSION='1.0.25';
 function isStandaloneWebApp(){
   try{
     if(window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches) return true;
@@ -4834,16 +4869,16 @@ function buildResidentMgmtSettings(){
   const rows=list.length?list.map(r=>{
     const checked=getResidentClassification(r.name)==='inpatient'?' checked':'';
     const ridEsc=escapeAttr(String(r.id));
-    const delBtn=r._mainGhost?'':`<button type="button" class="res-del-btn no-print" title="この利用者を一覧から削除" aria-label="削除" onclick="delResidentFromMgmtById('${ridEsc}')">×</button>`;
-    return `<div class="settings-list-item" style="display:flex;align-items:center;justify-content:flex-start;gap:10px 14px;flex-wrap:wrap;">
-      <div class="item-name" style="flex:0 1 auto;margin:0;max-width:min(100%,22em);">${escapeHtml(r.name)}</div>
-      <div style="display:flex;align-items:center;gap:10px;">
-        <label style="display:inline-flex;align-items:center;gap:6px;font-size:14px;color:var(--text2);cursor:pointer;white-space:nowrap;margin:0;">
-          <input type="checkbox" data-resident-id="${ridEsc}"${checked} onchange="onResidentInpatientCheckbox(this)">
-          <span>入所者</span>
-        </label>
-        ${delBtn}
-      </div>
+    const delCell=r._mainGhost
+      ?'<div class="resident-mgmt-del"></div>'
+      :`<div class="resident-mgmt-del"><button type="button" class="res-del-btn no-print" title="この利用者を一覧から削除" aria-label="削除" onclick="delResidentFromMgmtById('${ridEsc}')">×</button></div>`;
+    return `<div class="settings-list-item resident-mgmt-row">
+      <div class="resident-mgmt-name">${escapeHtml(r.name)}</div>
+      <label class="resident-mgmt-check">
+        <input type="checkbox" data-resident-id="${ridEsc}"${checked} onchange="onResidentInpatientCheckbox(this)">
+        <span>入所者</span>
+      </label>
+      ${delCell}
     </div>`;
   }).join(''):'<div class="text-gray" style="font-size:13px;">登録されている利用者がいません</div>';
   return `<div class="settings-panel active">
