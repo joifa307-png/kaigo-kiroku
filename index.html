@@ -988,7 +988,9 @@ function loadDB(){
       const nm=normalizeResidentName(r&&r.name);
       if(!nm||seen.has(nm)) return false;
       r.name=nm;
-      r.serviceType=residentServiceTypeOrDefault(r);
+      // serviceType は推定で上書きしない（sched 全日→resident の推定がデイ利用者に付き、最終排便が出る原因になる）
+      if(r.serviceType!=null&&String(r.serviceType).trim()!=='')
+        r.serviceType=normalizeResidentServiceType(r.serviceType);
       seen.add(nm); return true;
     });
   }
@@ -1273,7 +1275,7 @@ const REC = {
 const N_RECORD_COLS = 57;
 
 /** デプロイのたびに上げる（設定→データ管理の「アプリ情報」で表示） */
-const APP_VERSION='1.0.25';
+const APP_VERSION='1.0.26';
 function isStandaloneWebApp(){
   try{
     if(window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches) return true;
@@ -1484,11 +1486,21 @@ function excelIsDailyResidentFromRows(uRow, oRow){
   }
   return true;
 }
-/** シート列 serviceType（あれば優先）＋無ければ sched から推定 */
-function residentServiceTypeFromSheet(svcRaw, sched){
+/** スプレッドシート利用者行の serviceType 列。空なら undefined（sched から推定して resident を付けない。同期でデイが入所扱いになるのを防ぐ） */
+function residentServiceTypeFromSheet(svcRaw){
   if(svcRaw!==undefined&&svcRaw!==null&&String(svcRaw).trim()!=='')
     return normalizeResidentServiceType(svcRaw);
-  return inferServiceTypeFromSched(sched);
+  return undefined;
+}
+/**
+ * メイン表「最終排便」列のみ：明示された serviceType が day 以外のときだけ表示。
+ * residentServiceTypeOrDefault の sched 推定は使わない（全日来所のデイが resident に化けるため）。
+ */
+function shouldShowLastStoolColumn(r){
+  if(!r) return false;
+  const st=r.serviceType;
+  if(st==null||String(st).trim()==='') return false;
+  return normalizeResidentServiceType(st)!=='day';
 }
 function residentServiceTypeOrDefault(r){
   if(!r) return 'resident';
@@ -1603,7 +1615,7 @@ function dbToSheet(inDb){
     const sch=r.sched||[];
     for(let di=0;di<31;di++) row.push(sch[di]===1?1:0);
     row.push(_numU(r._u));
-    row.push(residentServiceTypeOrDefault(r));
+    row.push(r.serviceType!=null&&String(r.serviceType).trim()!==''?normalizeResidentServiceType(r.serviceType):'');
     rows.push(PR(row));
   });
   rows.push(PR([]));
@@ -1889,7 +1901,7 @@ function sheetToDb(rows){
     while(sched.length<31) sched.push(0);
     dbOut.residents.push({
       id:id||genId('r'), name, care, sched, _u:_numU(r[34]),
-      serviceType:residentServiceTypeFromSheet(r[35], sched)
+      serviceType:residentServiceTypeFromSheet(r[35])
     });
     i++;
   }
@@ -2379,17 +2391,27 @@ function residentDroppedByTombstone(r,resDel){
   if(!delAt) return false;
   return _numU(r._u)<=delAt;
 }
+function mergeExplicitServiceType(versions){
+  let best=null,bestU=-1;
+  (versions||[]).forEach(r=>{
+    if(r.serviceType==null||String(r.serviceType).trim()==='') return;
+    const u=_numU(r._u);
+    if(u>bestU){ bestU=u; best=normalizeResidentServiceType(r.serviceType); }
+  });
+  return best;
+}
 /**
  * 同一利用者の複数バージョン（ローカル・リモート等）を1件にまとめる。
  * - sched / care / id / 氏名などは _u が最大の行をベースにする
- * - serviceType は **更新が新しい行（_u 最大）** を採用（旧「day が1件でも勝ち」は誤った day が残り続けるため廃止）
+ * - serviceType は「明示されている値」のうち _u 最大のもの（sched 推定で上書きしない）
  */
 function mergeResidentGroup(versions){
   if(!versions||!versions.length) return null;
   const v0=versions.map(r=>cloneDeep(r));
   if(v0.length===1){
     const x=v0[0];
-    x.serviceType=residentServiceTypeOrDefault(x);
+    if(x.serviceType!=null&&String(x.serviceType).trim()!=='')
+      x.serviceType=normalizeResidentServiceType(x.serviceType);
     return x;
   }
   let best=cloneDeep(v0[0]);
@@ -2399,7 +2421,7 @@ function mergeResidentGroup(versions){
     if(u>bestU){ best=cloneDeep(v0[i]); bestU=u; }
   }
   best._u=Math.max(...v0.map(r=>_numU(r._u)));
-  best.serviceType=residentServiceTypeOrDefault(best);
+  best.serviceType=mergeExplicitServiceType(v0);
   return best;
 }
 function mergeResidentsLoc(a, b, resDel){
@@ -3032,9 +3054,9 @@ function renderMain(){
       if(lines.length===0) lines.push('空振り');
       ec=`<span class="cell-ex">${normalizeTimeText(le.time)}<br>${lines.join('<br>')}</span>`;
     }
-    // 最終排便（過去14日・排便≠なし）。デイ利用者は宿泊なし想定のため列は「—」（種別は Excel の常時/通所とシート列 serviceType で判定）
+    // 最終排便：DB に明示された serviceType が day 以外のときだけ表示（推定 resident は使わない→v1.0.26）
     let lsc;
-    if(residentServiceTypeOrDefault(r)==='day'){
+    if(!shouldShowLastStoolColumn(r)){
       lsc='<span class="cell-empty">—</span>';
     }else{
       const _ls=getLastStool(r.name);
@@ -4234,7 +4256,7 @@ function buildNotesPanel(){
         <p style="margin:0 0 10px;"><strong>メイン表「申送」列（●）</strong><br>
         カレンダーで選んだ日の「終わり時刻」を基準に、<strong>過去72時間以内</strong>に内容のある申送りが1件でもあると赤の●。申送り履歴（本タブの48時間）と同じ時間の考え方です。●または氏名から本画面へ来られます。</p>
         <p style="margin:0 0 10px;"><strong>メイン表「最終排便」列</strong><br>
-        内部の <code>serviceType</code> が <strong>day</strong>（デイ）のときは<strong>常に「—」</strong>のみ。<strong>resident</strong>（入所）のときだけ過去<strong>14日</strong>の排泄から<strong>最新の排便</strong>を表示します。<strong>予定表Excel</strong>では「利用」行の<strong>D列が空ならデイ・入力があれば入所</strong>と判定します（お泊行で常時のときは全日予定1かつ入所）。クラウド同期で利用者シートに <code>serviceType</code> 列がある場合はそちらが優先されます。</p>
+        <code>serviceType</code> が<strong>データに明示されていて</strong>かつ <strong>day 以外</strong>（入所）のときだけ、過去<strong>14日</strong>の排泄から<strong>最新の排便</strong>を表示します（未設定は「—」。全日来所の推定だけでは出しません）。<strong>予定表Excel</strong>では「利用」行の<strong>D列が空なら day・入力があれば resident</strong>が保存されます。クラウド同期でシートの <code>serviceType</code> 列が<strong>空</strong>のときは種別を付けず、食事などの判定には予定からの推定が使われます。</p>
         <p style="margin:0 0 10px;"><strong>同期（GAS）</strong><br>
         約<strong>3分</strong>ごとにスプレッドシートを取得。タブを前面に戻したときも取得します。記録保存のあと、約<strong>2.5秒</strong>後に反映送信が走る仕組みです。</p>
         <p style="margin:0 0 10px;"><strong>詳細画面ヘッダー</strong><br>
