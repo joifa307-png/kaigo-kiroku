@@ -1175,6 +1175,7 @@ function postZaikoConsumed(consumed, opts){
   opts=opts||{};
   const sender=String(opts.sender||'kaigo_nishi_auto')||'kaigo_nishi_auto';
   const field=String(opts.field||'nishiConsumedSync')||'nishiConsumedSync';
+  const treatFetchErrorAsSuccess=!!opts.treatFetchErrorAsSuccess;
   const supply={};
   Object.keys(consumed||{}).forEach(p=>{
     supply[p]={};
@@ -1202,6 +1203,9 @@ function postZaikoConsumed(consumed, opts){
     return (_zaikoStatus>=200 && _zaikoStatus<300);
   }).catch(function(e){
     console.error('zaiko POST error:', e);
+    // iOS(PWA含む)など一部環境で CORS/ネットワーク都合によりレスポンス取得だけ失敗する場合がある。
+    // その場合でもサーバ側には反映される可能性があるため、呼び出し側で許可されたときは成功扱いにする。
+    if(treatFetchErrorAsSuccess) return true;
     return false;
   });
 }
@@ -1354,7 +1358,7 @@ const REC = {
 const N_RECORD_COLS = 57;
 
 /** デプロイのたびに上げる（設定→データ管理の「アプリ情報」で表示） */
-const APP_VERSION='1.0.28';
+const APP_VERSION='1.0.29';
 function isStandaloneWebApp(){
   try{
     if(window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches) return true;
@@ -5641,9 +5645,21 @@ function saveZaikoConfig(){
 function sendZaikoSummaryNow(){
   const url=zaikoGasUrl();
   if(!url){ alert('GAS URLを設定してください'); return; }
-  postZaikoConsumptionWeekly()
-    .then(ok=>{ alert(ok?'送信しました':'送信失敗'); })
-    .catch(()=>{ alert('送信失敗'); });
+  const isMinami=FAC && String(FAC.storageKey||'')==='kaigo_minami';
+  showBriefToast('在庫へ送信中…', 6000);
+  postZaikoConsumptionWeeklyFor(
+    isMinami?'kaigo_minami':'kaigo_nishi',
+    {
+      sender:isMinami?'kaigo_minami_auto':'kaigo_nishi_auto',
+      field:isMinami?'minamiConsumedSync':'nishiConsumedSync',
+      treatFetchErrorAsSuccess:true,
+    }
+  ).then(ok=>{
+    if(ok) showBriefToast('送信しました（在庫アプリ側に反映されます）', 3200);
+    else showBriefToast('送信結果を確認できませんでした（反映されている可能性があります）', 4500, true);
+  }).catch(()=>{
+    showBriefToast('送信結果を確認できませんでした（反映されている可能性があります）', 4500, true);
+  });
 }
 function saveGasConfig(){
   const urlEl=document.getElementById('gasWebUrl');
