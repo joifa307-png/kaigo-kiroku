@@ -1087,8 +1087,10 @@ function saveDB(){
   localStorage.setItem(FAC.storageKey+'_dirty','1'); // ページ再読込後も未送信フラグを保持
   /** 在庫管理への週次消費数同期は失敗しても本保存を阻害しない */
   try{
-    console.log('[zaiko-sync] saveDB: calling postZaikoConsumptionWeekly()');
-    postZaikoConsumptionWeekly();
+    const isMinami=(FAC && String(FAC.storageKey||'')==='kaigo_minami');
+    console.log('[zaiko-sync] saveDB: calling postZaikoConsumptionWeekly() fac=', isMinami?'minami':'nishi');
+    if(isMinami) postZaikoConsumptionWeeklyMinami();
+    else postZaikoConsumptionWeekly();
   }catch(_){}
   if(!window._kaigoGasSaving) scheduleGasSync();
 }
@@ -1118,11 +1120,12 @@ function resetCalendarKeyFromResetAt(resetStr){
  * fromDateStr が空：今月（ローカル）の記録のみ集計。
  * それ以外：resetAt 暦日以降の記録のみ（YYYY-MM-DD 文字列比較）。
  */
-function _sumSuppliesFromDate(fromDateStr, productNames){
+function _sumSuppliesFromDate(fromDateStr, productNames, sourceStorageKey){
   const out={};
   (productNames||[]).forEach(p=>{ out[p]=0; });
+  const src=String(sourceStorageKey||'kaigo_nishi').trim()||'kaigo_nishi';
   let raw='';
-  try{ raw=localStorage.getItem('kaigo_nishi')||''; }catch(_){ raw=''; }
+  try{ raw=localStorage.getItem(src)||''; }catch(_){ raw=''; }
   if(!raw) return out;
   let j=null;
   try{ j=JSON.parse(raw); }catch(_){ j=null; }
@@ -1166,16 +1169,20 @@ function zaikoExtractResetAtFromGetJson(data){
   return nested==null?'':String(nested).trim();
 }
 /** resetAt 反映後の消費マップを GAS へ POST（集計結果送信・自動送信共通） */
-function postZaikoConsumed(consumed){
+function postZaikoConsumed(consumed, opts){
   const url=zaikoGasUrl();
   if(!url) return Promise.resolve(false);
+  opts=opts||{};
+  const sender=String(opts.sender||'kaigo_nishi_auto')||'kaigo_nishi_auto';
+  const field=String(opts.field||'nishiConsumedSync')||'nishiConsumedSync';
   const supply={};
   Object.keys(consumed||{}).forEach(p=>{
-    supply[p]={ nishiConsumedSync: Number(consumed[p]||0) };
+    supply[p]={};
+    supply[p][field]=Number(consumed[p]||0);
   });
   const payload={
     token:zaikoGasToken(),
-    sender:'kaigo_nishi_auto',
+    sender,
     sentAt:new Date().toISOString(),
     settings:{},
     supply,
@@ -1198,7 +1205,7 @@ function postZaikoConsumed(consumed){
     return false;
   });
 }
-function postZaikoConsumptionWeekly(){
+function postZaikoConsumptionWeeklyFor(sourceStorageKey, opts){
   try{
     const url=zaikoGasUrl();
     console.log('zaiko GAS URL:', zaikoGasUrl());
@@ -1210,8 +1217,9 @@ function postZaikoConsumptionWeekly(){
       localStorage.setItem('zaiko_debug_zaikoGasUrl', url || '');
     }catch(_){}
     if(!url) return Promise.resolve(false);
+    const src=String(sourceStorageKey||'kaigo_nishi').trim()||'kaigo_nishi';
     let raw='';
-    try{ raw=localStorage.getItem('kaigo_nishi')||''; }catch(_){ raw=''; }
+    try{ raw=localStorage.getItem(src)||''; }catch(_){ raw=''; }
     if(!raw) return Promise.resolve(false);
     let j=null;
     try{ j=JSON.parse(raw); }catch(_){ j=null; }
@@ -1227,17 +1235,24 @@ function postZaikoConsumptionWeekly(){
       })
       .then(data=>{
         const resetAt=zaikoExtractResetAtFromGetJson(data);
-        const consumed=_sumSuppliesFromDate(resetAt, products);
-        return postZaikoConsumed(consumed);
+        const consumed=_sumSuppliesFromDate(resetAt, products, src);
+        return postZaikoConsumed(consumed, opts);
       })
       .catch(e=>{
         console.warn('zaiko GET failed; fallback to month-only sum', e);
-        const consumed=_sumSuppliesFromDate('', products);
-        return postZaikoConsumed(consumed);
+        const consumed=_sumSuppliesFromDate('', products, src);
+        return postZaikoConsumed(consumed, opts);
       });
   }catch(_){
     return Promise.resolve(false);
   }
+}
+
+function postZaikoConsumptionWeekly(){
+  return postZaikoConsumptionWeeklyFor('kaigo_nishi',{ sender:'kaigo_nishi_auto', field:'nishiConsumedSync' });
+}
+function postZaikoConsumptionWeeklyMinami(){
+  return postZaikoConsumptionWeeklyFor('kaigo_minami',{ sender:'kaigo_minami_auto', field:'minamiConsumedSync' });
 }
 
 function settingsSnapshotKey(){
@@ -1339,7 +1354,7 @@ const REC = {
 const N_RECORD_COLS = 57;
 
 /** デプロイのたびに上げる（設定→データ管理の「アプリ情報」で表示） */
-const APP_VERSION='1.0.26';
+const APP_VERSION='1.0.28';
 function isStandaloneWebApp(){
   try{
     if(window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches) return true;
@@ -2667,6 +2682,7 @@ function runGasPushCycle(){
     })
     .then(()=>{
       persistLocalQuiet();
+      mirrorResidentTypesToLocalStorage();
       syncDirty=false;
       localStorage.removeItem(FAC.storageKey+'_dirty');
       renderMain();
@@ -2674,9 +2690,12 @@ function runGasPushCycle(){
       setSyncStatus(`反映済 ${n.getHours()}:${pad(n.getMinutes())}`,'green');
     })
     .catch(e=>{
-      if(e&&e.silent) return;
+      if(e&&e.silent){
+        return Promise.reject(e);
+      }
       console.error(e);
       setSyncStatus('同期失敗: '+(e.message||''),'orange');
+      return Promise.reject(e);
     });
 }
 
@@ -2692,10 +2711,10 @@ function scheduleGasSync(){
 }
 
 function syncNow(force){
-  if(!FAC){ setSyncStatus('施設未選択','orange'); return; }
-  if(!gasConfigured()){ setSyncStatusIfGasMissing(); return; }
+  if(!FAC){ setSyncStatus('施設未選択','orange'); return Promise.resolve(); }
+  if(!gasConfigured()){ setSyncStatusIfGasMissing(); return Promise.resolve(); }
   syncDirty=true;
-  runGasPushCycle();
+  return runGasPushCycle();
 }
 
 function startAutoSync(){
@@ -4932,7 +4951,20 @@ function residentMgmtPushSync(){
     alert('GAS が未設定のため、この端末への保存のみ行いました（データ管理で URL・トークンを設定してください）。');
     return;
   }
-  syncNow(true);
+  showBriefToast('スプレッドシートへ送信中…', 8000);
+  syncNow(true)
+    .then(()=>{
+      showBriefToast('同期が完了しました', 2600);
+      renderSettingsPanel('resident_mgmt');
+    })
+    .catch(e=>{
+      if(e&&e.silent&&String(e.message||'').indexOf('bad_sheet_marker')>=0){
+        showBriefToast('シートの先頭セル(A1マーカー)が無効です。反映されませんでした。', 5000, true);
+      }else{
+        showBriefToast('同期に失敗しました。画面上部の表示とデータ管理の接続設定を確認してください。', 4200, true);
+      }
+      renderSettingsPanel('resident_mgmt');
+    });
 }
 
 function buildResidentSettings(){
@@ -6327,13 +6359,24 @@ function saveMonthlyBackup(){
 }
 
 // ========== トースト通知 ==========
-function showSavedToast(){
+/** isErr が true のとき失敗トースト（半透明赤系） */
+function showBriefToast(text, durMs, isErr){
+  const dur=!durMs&&durMs!==0?2200:durMs;
   let t=document.getElementById('savedToast');
-  if(!t){ t=document.createElement('div'); t.id='savedToast';
-    t.style.cssText='position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.75);color:#fff;padding:10px 24px;border-radius:24px;font-size:15px;z-index:9999;opacity:0;transition:opacity .3s;pointer-events:none;';
-    t.textContent='保存しました'; document.body.appendChild(t); }
+  if(!t){
+    t=document.createElement('div');
+    t.id='savedToast';
+    t.style.cssText='position:fixed;bottom:80px;left:50%;transform:translateX(-50%);color:#fff;padding:12px 22px;border-radius:24px;font-size:15px;z-index:9999;opacity:0;transition:opacity .3s;pointer-events:none;max-width:min(520px,calc(100vw - 32px));text-align:center;line-height:1.4;box-shadow:0 2px 12px rgba(0,0,0,.25);';
+    document.body.appendChild(t);
+  }
+  t.style.background=isErr?'rgba(140,36,36,.92)':'rgba(0,0,0,.76)';
+  t.textContent=text;
   t.style.opacity='1';
-  clearTimeout(t._tid); t._tid=setTimeout(()=>t.style.opacity='0',1500);
+  clearTimeout(t._tid);
+  t._tid=setTimeout(()=>{ t.style.opacity='0'; }, dur);
+}
+function showSavedToast(){
+  showBriefToast('保存しました',1500,false);
 }
 
 // ========== 初期化 ==========
