@@ -394,6 +394,28 @@ input,select,textarea{font-family:inherit;font-size:30px;}
   color:var(--red);font-size:12px;padding:3px 8px;
   border:1px solid var(--red);border-radius:var(--r1);background:none;cursor:pointer;
 }
+.res-info-inp,.res-info-sel{
+  font-size:14px;
+  padding:6px 8px;
+  line-height:1.2;
+}
+.res-info-sel{padding:6px 6px;}
+.bill-inp,.bill-sel{
+  font-size:14px;
+  padding:6px 8px;
+  line-height:1.2;
+}
+.bill-sel{padding:6px 6px;}
+.bill-addon{
+  width:16px;
+  height:16px;
+  vertical-align:middle;
+}
+.sc-inp{
+  font-size:14px;
+  padding:6px 8px;
+  line-height:1.2;
+}
 /* 設定・利用者管理：枠リストではなく左寄せ表 */
 .resident-mgmt-table-wrap{width:100%;overflow-x:auto;margin:6px 0 14px;text-align:left;}
 .resident-mgmt-table{
@@ -507,7 +529,7 @@ input,select,textarea{font-family:inherit;font-size:30px;}
     <button class="hdr-btn no-print" onclick="openUpload()" style="background:#F3F0FF;color:#5B3FB5;border-color:#5B3FB5;font-weight:700;">📅予定</button>
     <button class="hdr-btn no-print" onclick="openPrint()" style="background:#E1F5EE;color:#0F6E56;border-color:#0F6E56;font-weight:700;">連絡帳</button>
     <button class="hdr-btn no-print" onclick="openSanteiDialog()" style="background:#F3F3F3;color:#3a3a3a;border-color:#9E9C94;font-weight:700;">📋算定確定</button>
-    <button class="hdr-btn no-print" onclick="openJissekiCSVDialog()" style="background:#F3F3F3;color:#3a3a3a;border-color:#9E9C94;font-weight:700;">📊実績CSV</button>
+    <button class="hdr-btn no-print" onclick="openScheduleScreen()" style="background:#F3F3F3;color:#3a3a3a;border-color:#9E9C94;font-weight:700;">📊実績CSV</button>
     <button class="hdr-btn no-print" onclick="saveMonthlyBackup()" style="background:var(--blue2);color:var(--blue);border-color:var(--blue);font-weight:700;">月次保存</button>
     <button class="hdr-btn no-print" onclick="syncNow()">🔄</button>
     <button class="hdr-btn no-print" onclick="openSettings()">⚙️</button>
@@ -516,7 +538,8 @@ input,select,textarea{font-family:inherit;font-size:30px;}
     <table class="res-table" id="resTable">
       <thead>
         <tr>
-          <th style="width:44px;min-width:44px;white-space:nowrap;">算定</th>
+          <th style="width:36px;min-width:36px;white-space:nowrap;text-align:center;">予定</th>
+          <th style="width:36px;min-width:36px;white-space:nowrap;text-align:center;">実績</th>
           <th style="width:32px;min-width:32px;">申送</th>
           <th class="res-div-r" style="min-width:80px;">氏名</th>
           <th class="res-div-l">体温</th>
@@ -557,6 +580,25 @@ input,select,textarea{font-family:inherit;font-size:30px;}
   </div>
   <div class="tabs no-print" id="detTabs"></div>
   <div id="detPanel"></div>
+</div>
+
+<!-- ========== 予定実績画面 ========== -->
+<div id="scheduleScreen" class="screen">
+  <div class="hdr no-print">
+    <button class="back-btn" onclick="closeScheduleScreen()">◀ メイン</button>
+    <select id="schedResSelect" style="font-size:15px;padding:5px 8px;border-radius:var(--r1);border:1px solid var(--border2);"
+      onchange="renderScheduleScreen()"></select>
+    <div class="hdr-center">
+      <button class="hdr-btn nav" onclick="moveScheduleMonth(-1)">◀</button>
+      <div id="schedMonthLabel" style="font-size:16px;font-weight:700;padding:6px 12px;white-space:nowrap;"></div>
+      <button class="hdr-btn nav" onclick="moveScheduleMonth(1)">▶</button>
+    </div>
+    <button class="hdr-btn no-print" onclick="openCSVExportDialog()"
+      style="background:var(--orange);color:#fff;border-color:var(--orange);font-weight:700;flex-shrink:0;">
+      📊 CSV出力
+    </button>
+  </div>
+  <div id="scheduleBody" style="overflow:auto;-webkit-overflow-scrolling:touch;padding:8px;"></div>
 </div>
 
 <!-- ========== 設定画面 ========== -->
@@ -905,6 +947,9 @@ const DEFAULT_SETTINGS = {
   officeNumber: '',
   serviceTypeCode: '',
   prefCode: '412023',
+  officeAddonCodes: [],
+  officeShoguCode: '',
+  officeShoguUnit: 0,
   serviceCodes: {
     basic: [
       { code: '781431', name: '地域通所介護41（5〜6時間）', unit: 666, timeFrom: 300, timeTo: 360 },
@@ -920,6 +965,7 @@ const DEFAULT_SETTINGS = {
       { code: '786107', name: '処遇改善加算Ⅱ' },
     ],
   },
+  careManagerList: [],
 };
 const LEGACY_DEFAULT_SUPPLY_JSON = JSON.stringify(["リハビリパンツM", "リハビリパンツL", "尿取りパッド 昼用", "尿取りパッド 夜用", "テープ型オムツM", "テープ型オムツL"]);
 const LEGACY_DEFAULT_CARE_JSON = JSON.stringify(['清拭','更衣','口腔ケア','体位変換','爪切り','髭剃り','洗髪','排痰','リハビリ','外出','送迎']);
@@ -932,6 +978,8 @@ let syncTimer = null;
 let curDate = new Date(); curDate.setHours(0,0,0,0);
 let curRes = null;
 let curTab = 'vital';
+let schedYear = new Date().getFullYear();
+let schedMonth = new Date().getMonth();
 let calY, calM;
 /** mergePulledDb 中のみ参照。同期マージ時に削除墓石を確実に適用する */
 let _mergeItemDelActive = null;
@@ -1059,6 +1107,10 @@ function loadDB(){
   if(db.settings.officeNumber === undefined) db.settings.officeNumber = '';
   if(db.settings.serviceTypeCode === undefined) db.settings.serviceTypeCode = '';
   if(!db.settings.prefCode) db.settings.prefCode = '412023';
+  if(!Array.isArray(db.settings.officeAddonCodes)) db.settings.officeAddonCodes = [];
+  if(db.settings.officeShoguCode === undefined) db.settings.officeShoguCode = '';
+  if(db.settings.officeShoguUnit === undefined) db.settings.officeShoguUnit = 0;
+  if(!Array.isArray(db.settings.careManagerList)) db.settings.careManagerList = [];
   Object.keys(db.records||{}).forEach(dk=>{
     const day=db.records[dk]||{};
     Object.keys(day).forEach(nm=>{
@@ -1394,7 +1446,7 @@ const REC = {
 const N_RECORD_COLS = 57;
 
 /** デプロイのたびに上げる（設定→データ管理の「アプリ情報」で表示） */
-const APP_VERSION='1.0.30';
+const APP_VERSION='1.0.32';
 function isStandaloneWebApp(){
   try{
     if(window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches) return true;
@@ -2934,7 +2986,22 @@ function _calcUnitForDay(rec, resident){
   return getServiceUnitByCode(code);
 }
 
+function ensureTimeDatalist(){
+  if(document.getElementById('timeOptions30min')) return;
+  const dl=document.createElement('datalist');
+  dl.id='timeOptions30min';
+  for(let h=6;h<=20;h++){
+    ['00','30'].forEach(m=>{
+      const opt=document.createElement('option');
+      opt.value=String(h).padStart(2,'0')+m;
+      dl.appendChild(opt);
+    });
+  }
+  document.body.appendChild(dl);
+}
+
 function openSanteiDialog(){
+  ensureTimeDatalist();
   const dayIdx=curDate.getDate()-1;
   const todayRes=residentsOnDaySorted(dayIdx,{forMainTable:true});
   const title=`本日の算定確認（${_fmtYmdJp(curDate)}）`;
@@ -2942,8 +3009,8 @@ function openSanteiDialog(){
     _ensureResidentBillingFields(r);
     const rec=getRec(r.name, dk());
     const checked=((r.sched||[])[dayIdx]===1)?'checked':'';
-    const st=_cleanTimeHHMM(r.startTime)||'';
-    const et=_cleanTimeHHMM(r.endTime)||'';
+    const st=_cleanTimeHHMM(r.startTime)||'0900';
+    const et=_cleanTimeHHMM(r.endTime)||'1630';
     const m=resolveServiceCodeByTime(st,et);
     const code=m?String(m.code||''):'';
     const unit=m?Number(m.unit||0):0;
@@ -2955,9 +3022,9 @@ function openSanteiDialog(){
         <span style="font-size:18px;font-weight:600;">${escapeHtml(r.name)}</span>
       </label>
       <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
-        <input type="text" class="santei-time" data-kind="start" data-res-name="${escapeAttr(r.name)}" value="${escapeAttr(st)}" placeholder="0900" style="width:72px;font-size:16px;padding:6px 8px;">
+        <input type="text" class="santei-time" data-kind="start" data-res-name="${escapeAttr(r.name)}" value="${escapeAttr(st)}" list="timeOptions30min" placeholder="0900" style="width:80px;font-size:16px;padding:6px 8px;">
         <span>〜</span>
-        <input type="text" class="santei-time" data-kind="end" data-res-name="${escapeAttr(r.name)}" value="${escapeAttr(et)}" placeholder="1630" style="width:72px;font-size:16px;padding:6px 8px;">
+        <input type="text" class="santei-time" data-kind="end" data-res-name="${escapeAttr(r.name)}" value="${escapeAttr(et)}" list="timeOptions30min" placeholder="1630" style="width:80px;font-size:16px;padding:6px 8px;">
         <span style="margin-left:8px;color:var(--text2);">→</span>
         <span class="santei-auto" data-res-name="${escapeAttr(r.name)}" style="font-weight:700;color:var(--text2);">${escapeHtml(label)}</span>
       </div>
@@ -3013,7 +3080,7 @@ function execSanteiConfirm(){
     rec.calcEndTime=et;
     rec.calcServiceCodeKey=m?String(m.code||''):'';
     if(!rec.calcAddons || rec.calcAddons.length===0){
-      rec.calcAddons=[...((r&&r.addonCodes)||[])];
+      rec.calcAddons=[...((db.settings&&db.settings.officeAddonCodes)||[])];
     }
   });
   saveDB();
@@ -3078,6 +3145,300 @@ function toggleJissekiDay(name, dkKey){
   renderJissekiCalendar();
 }
 
+function _fmtTimeColon(hhmm){
+  const s=_cleanTimeHHMM(String(hhmm||''));
+  if(!s||s.length<4) return '';
+  return `${s.slice(0,2)}:${s.slice(2,4)}`;
+}
+
+function openScheduleScreen(){
+  schedYear=curDate.getFullYear();
+  schedMonth=curDate.getMonth();
+  const sel=document.getElementById('schedResSelect');
+  const list=[...(db.residents||[])].sort(compareResidentsStable);
+  if(sel){
+    sel.innerHTML=list.map(r=>`<option value="${escapeAttr(r.name)}">${escapeHtml(r.name)}</option>`).join('');
+    if(list.length){
+      if(curRes){
+        const hit=list.find(r=>normalizeResidentName(r.name)===normalizeResidentName(curRes));
+        sel.value=hit?hit.name:list[0].name;
+      }else{
+        sel.value=list[0].name;
+      }
+    }
+  }
+  renderScheduleScreen();
+  showScreen('scheduleScreen');
+}
+
+function closeScheduleScreen(){
+  showScreen('mainScreen');
+  renderMain();
+}
+
+function moveScheduleMonth(dir){
+  schedMonth+=dir;
+  if(schedMonth>11){schedMonth=0;schedYear++;}
+  if(schedMonth<0){schedMonth=11;schedYear--;}
+  renderScheduleScreen();
+}
+
+function renderScheduleScreen(){
+  const lbl=document.getElementById('schedMonthLabel');
+  const body=document.getElementById('scheduleBody');
+  const sel=document.getElementById('schedResSelect');
+  if(lbl) lbl.textContent=`${schedYear}年${schedMonth+1}月`;
+  if(!body||!sel) return;
+  const name=sel.value;
+  const resident=(db.residents||[]).find(r=>normalizeResidentName(r.name)===normalizeResidentName(name))||dbResidentByNameLoose(name);
+  if(!resident){
+    body.innerHTML='<div class="text-gray">利用者を選択してください</div>';
+    return;
+  }
+  _ensureResidentBillingFields(resident);
+  const svcKey=String(resident.serviceCodeKey||'').trim();
+  if(!svcKey){
+    body.innerHTML='<p style="color:var(--text2);padding:12px;">請求設定でサービスコードを設定してください</p>';
+    return;
+  }
+  const S=db.settings||{};
+  const basics=(_svcMaster().basic||[]);
+  const addonsM=(_svcMaster().addons||[]);
+  const shoguM=(_svcMaster().shogu||[]);
+  const basicEntry=basics.find(x=>String(x.code||'')===svcKey)||null;
+  const svcName=basicEntry?String(basicEntry.name||''):svcKey;
+  const stDef=_cleanTimeHHMM(resident.startTime)||'0900';
+  const etDef=_cleanTimeHHMM(resident.endTime)||'1630';
+  const timeRange=`${_fmtTimeColon(stDef)}〜${_fmtTimeColon(etDef)}`;
+  const facName=String(S.facilityName||'').trim()||'—';
+  const days=new Date(schedYear,schedMonth+1,0).getDate();
+  const wdJp=['日','月','火','水','木','金','土'];
+  const officeAddons=Array.isArray(S.officeAddonCodes)?S.officeAddonCodes:[];
+  const shoguCode=String(S.officeShoguCode||'').trim();
+  const thNums=[...Array(days)].map((_,i)=>`<th style="border:1px solid var(--border1);padding:4px 6px;">${i+1}</th>`).join('');
+  const thWds=[...Array(days)].map((_,i)=>{
+    const wd=new Date(schedYear,schedMonth,i+1).getDay();
+    return `<th style="border:1px solid var(--border1);padding:4px 6px;">${wdJp[wd]}</th>`;
+  }).join('');
+
+  function rowPair(labelSvc,getYotei,getJisseki){
+    let cntY=0,cntJ=0;
+    const yCells=[];
+    const jCells=[];
+    for(let i=0;i<days;i++){
+      const y=getYotei(i);
+      const j=getJisseki(i);
+      if(y==='1') cntY++;
+      if(j==='1') cntJ++;
+      const wd=new Date(schedYear,schedMonth,i+1).getDay();
+      const bg=wd===0?'background:#FFE0E8':(wd===6?'background:#DDEEFF':'');
+      const bs='text-align:center;border:1px solid var(--border1);'+bg;
+      yCells.push(`<td style="${bs};font-weight:700;">${y}</td>`);
+      jCells.push(`<td style="${bs};font-weight:700;">${j}</td>`);
+    }
+    return `<tr>
+      <td rowspan="2" style="border:1px solid var(--border1);vertical-align:middle;padding:6px;">${escapeHtml(timeRange)}</td>
+      <td rowspan="2" style="border:1px solid var(--border1);vertical-align:middle;padding:6px;">${escapeHtml(labelSvc)}</td>
+      <td rowspan="2" style="border:1px solid var(--border1);vertical-align:middle;padding:6px;">${escapeHtml(facName)}</td>
+      <td style="font-size:11px;color:var(--text3);border:1px solid var(--border1);">予定</td>
+      ${yCells.join('')}
+      <td style="text-align:center;border:1px solid var(--border1);font-weight:700;">${cntY}</td>
+      <td style="border:1px solid var(--border1);"></td>
+    </tr>
+    <tr>
+      <td style="font-size:11px;color:var(--text3);border:1px solid var(--border1);">実績</td>
+      ${jCells.join('')}
+      <td style="border:1px solid var(--border1);"></td>
+      <td style="text-align:center;border:1px solid var(--border1);font-weight:700;">${cntJ}</td>
+    </tr>`;
+  }
+
+  const schedArr=resident.sched||[];
+  let html=`<table style="border-collapse:collapse;font-size:13px;white-space:nowrap;">
+  <thead>
+    <tr>
+      <th rowspan="2" style="border:1px solid var(--border1);padding:6px;">提供時間</th>
+      <th rowspan="2" style="border:1px solid var(--border1);padding:6px;">サービス内容</th>
+      <th rowspan="2" style="border:1px solid var(--border1);padding:6px;">事業所名</th>
+      <th rowspan="2" style="border:1px solid var(--border1);"></th>
+      ${thNums}
+      <th rowspan="2" style="border:1px solid var(--border1);padding:6px;">予定<br>合計</th>
+      <th rowspan="2" style="border:1px solid var(--border1);padding:6px;">実績<br>合計</th>
+    </tr>
+    <tr>${thWds}</tr>
+  </thead>
+  <tbody>`;
+
+  html+=rowPair(svcName,(dayIdx)=>(schedArr[dayIdx]===1?'1':''),(dayIdx)=>{
+    const dkKey=`${schedYear}-${pad(schedMonth+1)}-${pad(dayIdx+1)}`;
+    const rec=getRec(resident.name,dkKey);
+    if(rec.calculated!==true) return '';
+    const ck=String(rec.calcServiceCodeKey||'').trim();
+    return (ck===svcKey||ck==='')?'1':'';
+  });
+
+  officeAddons.forEach(code=>{
+    const ad=addonsM.find(x=>String(x.code||'')===String(code));
+    const nm=ad?String(ad.name||code):code;
+    html+=rowPair(nm,(dayIdx)=>(schedArr[dayIdx]===1?'1':''),(dayIdx)=>{
+      const dkKey=`${schedYear}-${pad(schedMonth+1)}-${pad(dayIdx+1)}`;
+      const rec=getRec(resident.name,dkKey);
+      if(rec.calculated!==true) return '';
+      const list=Array.isArray(rec.calcAddons)?rec.calcAddons:[];
+      return list.includes(code)?'1':'';
+    });
+  });
+
+  if(shoguCode){
+    const sg=shoguM.find(x=>String(x.code||'')===shoguCode);
+    const nm=sg?String(sg.name||shoguCode):shoguCode;
+    let firstNum=-1;
+    for(let d=1;d<=days;d++){
+      const dkKey=`${schedYear}-${pad(schedMonth+1)}-${pad(d)}`;
+      if(getRec(resident.name,dkKey).calculated===true){ firstNum=d; break; }
+    }
+    html+=rowPair(nm,(dayIdx)=>(dayIdx===0?'1':''),(dayIdx)=>((firstNum===dayIdx+1)?'1':''));
+  }
+
+  html+='</tbody></table>';
+  body.innerHTML=html;
+}
+
+function openCSVExportDialog(){
+  const list=[...(db.residents||[])].sort(compareResidentsStable);
+  const rows=list.map(r=>{
+    const hasCode=!!(r.serviceCodeKey);
+    const checked=hasCode?'checked':'';
+    const style=hasCode?'':'opacity:0.5;';
+    return `<label style="display:flex;align-items:center;gap:8px;padding:6px 0;${style}cursor:pointer;">
+      <input type="checkbox" class="csv-export-chk"
+        data-res-name="${escapeAttr(r.name)}" ${checked}>
+      <span style="font-size:16px;">${escapeHtml(r.name)}</span>
+      ${hasCode?'':'<span style="font-size:12px;color:var(--text3);">（コード未設定）</span>'}
+    </label>`;
+  }).join('');
+  const ym=`${schedYear}年${schedMonth+1}月`;
+  openMainOv(`
+    <div style="font-size:18px;font-weight:800;margin-bottom:4px;">CSV出力する利用者を選択</div>
+    <div style="font-size:13px;color:var(--text3);margin-bottom:10px;">対象：${ym}</div>
+    <div style="display:flex;gap:8px;margin-bottom:10px;">
+      <button type="button" class="btn btn-gray btn-sm" onclick="csvExportSelectAll(true)">全選択</button>
+      <button type="button" class="btn btn-gray btn-sm" onclick="csvExportSelectAll(false)">全解除</button>
+    </div>
+    <div style="max-height:50vh;overflow-y:auto;border:1px solid var(--border1);
+      border-radius:var(--r1);padding:8px;">${rows}</div>
+    <div style="display:flex;gap:10px;margin-top:14px;">
+      <button type="button" class="btn btn-primary" onclick="execCSVExport()">出力する</button>
+      <button type="button" class="btn btn-gray" onclick="closeMainOv()">キャンセル</button>
+    </div>
+  `);
+}
+
+function csvExportSelectAll(on){
+  document.querySelectorAll('.csv-export-chk').forEach(cb=>{ cb.checked=!!on; });
+}
+
+function execCSVExport(){
+  const S=db.settings||{};
+  const officeNumber=String(S.officeNumber||'').trim();
+  const serviceTypeCode=String(S.serviceTypeCode||'').trim();
+  if(!officeNumber){
+    alert('請求設定に「自事業所番号」が未設定です。');
+    return;
+  }
+  const targetYm=`${schedYear}${String(schedMonth+1).padStart(2,'0')}`;
+  const daysInMonth=new Date(schedYear,schedMonth+1,0).getDate();
+  const today=new Date();
+  const todayStr=`${today.getFullYear()}${String(today.getMonth()+1).padStart(2,'0')}${String(today.getDate()).padStart(2,'0')}`;
+  const ts=todayStr+String(today.getHours()).padStart(2,'0')
+    +String(today.getMinutes()).padStart(2,'0')
+    +String(today.getSeconds()).padStart(2,'0');
+
+  const checkedNames=[...document.querySelectorAll('.csv-export-chk:checked')]
+    .map(cb=>cb.getAttribute('data-res-name'));
+
+  if(!checkedNames.length){
+    alert('利用者を選択してください');
+    return;
+  }
+
+  const csvLines=[];
+
+  checkedNames.forEach(nm=>{
+    const resident=(db.residents||[]).find(r=>normalizeResidentName(r.name)===normalizeResidentName(nm));
+    if(!resident||!resident.serviceCodeKey) return;
+
+    let shoguAdded=false;
+    const resName=resident.name;
+    const cmOffice=_cleanDigits(resident.careManagerOffice||'');
+    const cmName=String(resident.careManagerName||'').trim();
+    const insured=_cleanDigits(resident.insuredNumber||'');
+    const st=_cleanTimeHHMM(resident.startTime)||'0900';
+    const et=_cleanTimeHHMM(resident.endTime)||'1630';
+
+    for(let d=1;d<=daysInMonth;d++){
+      const dateKey=`${schedYear}-${String(schedMonth+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+      const dateStr=`${schedYear}${String(schedMonth+1).padStart(2,'0')}${String(d).padStart(2,'0')}`;
+      const rec=getRec(resName, dateKey);
+      if(rec.calculated!==true) continue;
+
+      const recSt=_cleanTimeHHMM(rec.calcStartTime)||st;
+      const recEt=_cleanTimeHHMM(rec.calcEndTime)||et;
+      const scKey=String(rec.calcServiceCodeKey||'').trim()||String(resident.serviceCodeKey||'').trim();
+      const unit=getServiceUnitByCode(scKey);
+
+      csvLines.push([
+        '202407', S.prefCode||'412023', insured,
+        todayStr, targetYm, cmOffice, cmName,
+        unit, '', dateStr, '',
+        recSt, recEt, '1', scKey,
+        '', '', '', '',
+        officeNumber, S.facilityName||'', '', '0', officeNumber, ''
+      ].join(','));
+
+      const addons=(rec.calcAddons&&rec.calcAddons.length>0)
+        ? rec.calcAddons:([...(S.officeAddonCodes||[])]);
+      addons.forEach(addonCode=>{
+        const c=String(addonCode||'').trim();
+        if(!c) return;
+        const addonUnit=getAddonUnit(c);
+        csvLines.push([
+          '202407', S.prefCode||'412023', insured,
+          todayStr, targetYm, cmOffice, cmName,
+          addonUnit, '', dateStr, '',
+          recSt, recEt, '1', c,
+          '', '', '', '',
+          officeNumber, S.facilityName||'', '', '0', officeNumber, ''
+        ].join(','));
+      });
+
+      const shC=String(S.officeShoguCode||'').trim();
+      const shU=Math.max(0,Number(S.officeShoguUnit||0)||0);
+      if(!shoguAdded && shC && shU>0){
+        csvLines.push([
+          '202407', S.prefCode||'412023', insured,
+          todayStr, targetYm, cmOffice, cmName,
+          shU, '', dateStr, '',
+          '9999', '9999', '1', shC,
+          '', '', '', '',
+          officeNumber, S.facilityName||'', '', '0', officeNumber, ''
+        ].join(','));
+        shoguAdded=true;
+      }
+    }
+  });
+
+  if(!csvLines.length){
+    alert('出力対象の算定データがありません。');
+    return;
+  }
+
+  const fname=`UPJSK_${targetYm}_${officeNumber}_${serviceTypeCode||'78'}_43_${ts}.CSV`;
+  downloadCSVasShiftJIS(csvLines.join('\r\n')+'\r\n', fname);
+  closeMainOv();
+  showBriefToast(`${fname} を出力しました`, 2500, false);
+}
+
 function buildCalcToggle(){
   if(!curRes) return '';
   const r=dbResidentByNameLoose(curRes);
@@ -3124,6 +3485,75 @@ function buildCalcToggle(){
     ${body}
   </div>`;
 }
+
+function buildSanteiPanel(){
+  ensureTimeDatalist();
+  if(!curRes) return '<div class="panel"><div class="panel-sec"><div class="text-gray">利用者が未選択です</div></div></div>';
+  const r=dbResidentByNameLoose(curRes);
+  if(!r) return '<div class="panel"><div class="panel-sec"><div class="text-gray">利用者が見つかりません</div></div></div>';
+  _ensureResidentBillingFields(r);
+  const rec=getRec(curRes, dk());
+  const on=rec.calculated===true;
+  let {st,et}=_calcEffectiveTime(rec,r);
+  st=_cleanTimeHHMM(st)||'0900';
+  et=_cleanTimeHHMM(et)||'1630';
+  const m=resolveServiceCodeByTime(st,et);
+  const code=m?String(m.code||''):_calcEffectiveServiceCode(rec,r);
+  const unit=code?getServiceUnitByCode(code):0;
+  const label=code?`${code}（${unit||0}単位）`:'—';
+  const addons=(_svcMaster().addons||[]);
+  if(!Array.isArray(rec.calcAddons)) rec.calcAddons=[];
+  const addonChecks=addons.map(a=>{
+    const c=String(a.code||'');
+    const onA=rec.calcAddons.includes(c);
+    return `<label style="display:inline-flex;align-items:center;gap:8px;margin:0 14px 10px 0;white-space:nowrap;font-size:16px;">
+      <input type="checkbox" ${onA?'checked':''} onchange="toggleCalcAddon('${escapeAttr(c)}', this.checked)">
+      <span>${escapeHtml(a.name||c)}</span>
+    </label>`;
+  }).join('');
+  const shCode=String((db.settings&&db.settings.officeShoguCode)||'').trim();
+  const shUnit=Math.max(0, Number((db.settings&&db.settings.officeShoguUnit)||0)||0);
+  const shoguLine = shCode
+    ? `<div style="margin-top:12px;padding:10px 12px;border:1px dashed var(--border2);border-radius:var(--r2);">
+        <div style="font-weight:800;margin-bottom:6px;">処遇改善加算</div>
+        <div style="color:var(--text2);font-size:16px;">コード: <b>${escapeHtml(shCode)}</b> / 単位: <b>${escapeHtml(String(shUnit))}</b></div>
+      </div>`
+    : `<div style="margin-top:12px;color:var(--text3);font-size:14px;">処遇改善加算は未設定です（請求設定で設定）</div>`;
+
+  const body=on?`
+    <div class="panel-sec" style="margin-top:12px;">
+      <h3>開始〜終了（HHMM）</h3>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;">
+        <div class="fg" style="min-width:140px;">
+          <label>開始</label>
+          <input type="text" id="calcStartTimeInp" value="${escapeAttr(st)}" list="timeOptions30min" placeholder="0900" oninput="saveCalcTime()" style="font-size:18px;padding:10px 12px;">
+        </div>
+        <div class="fg" style="min-width:140px;">
+          <label>終了</label>
+          <input type="text" id="calcEndTimeInp" value="${escapeAttr(et)}" list="timeOptions30min" placeholder="1630" oninput="saveCalcTime()" style="font-size:18px;padding:10px 12px;">
+        </div>
+        <div style="font-size:16px;color:var(--text2);padding-bottom:10px;">
+          → 自動判定: <span id="calcAutoCode" style="font-weight:900;">${escapeHtml(label)}</span>
+        </div>
+      </div>
+    </div>
+    <div class="panel-sec">
+      <h3>加算</h3>
+      <div>${addonChecks || '<span class="text-gray">（加算マスタがありません）</span>'}</div>
+      ${shoguLine}
+    </div>
+  `:`
+    <div class="panel-sec" style="margin-top:12px;">
+      <div style="font-size:16px;color:var(--text3);">この日は算定なし</div>
+    </div>
+  `;
+  return `<div class="panel">
+    <div class="panel-sec">
+      <button type="button" class="btn btn-block" style="${on?'background:var(--green);color:#fff;border-color:var(--green);':'background:var(--white);color:var(--text2);border:2px solid var(--border2);'}font-weight:900;font-size:18px;padding:14px 14px;" onclick="toggleCalculated()">${on?'✅ 算定済（タップでOFF）':'⬜ 算定（タップでON）'}</button>
+    </div>
+    ${body}
+  </div>`;
+}
 function toggleCalculated(){
   if(!curRes) return;
   const r=dbResidentByNameLoose(curRes);
@@ -3137,12 +3567,12 @@ function toggleCalculated(){
     rec.calcAddons=[];
   }else{
     _ensureResidentBillingFields(r);
-    rec.calcStartTime=_cleanTimeHHMM(r.startTime)||'';
-    rec.calcEndTime=_cleanTimeHHMM(r.endTime)||'';
+    rec.calcStartTime=_cleanTimeHHMM(r.startTime)||'0900';
+    rec.calcEndTime=_cleanTimeHHMM(r.endTime)||'1630';
     const m=resolveServiceCodeByTime(rec.calcStartTime, rec.calcEndTime);
     rec.calcServiceCodeKey=m?String(m.code||''):'';
     if(!rec.calcAddons || rec.calcAddons.length===0){
-      rec.calcAddons=[...((r&&r.addonCodes)||[])];
+      rec.calcAddons=[...((db.settings&&db.settings.officeAddonCodes)||[])];
     }
   }
   saveDB();
@@ -3312,9 +3742,10 @@ function execJissekiCSV(){
         });
       }
       // 処遇改善：月1回（最初の算定日）
-      if(firstDayKey && String(r.shoguCode||'').trim()){
-        const recFirst=getRec(r.name, firstDayKey);
-        const useCode=String(r.shoguCode||'').trim();
+      const shCode=String((S.officeShoguCode||'')||'').trim();
+      const shUnit=Math.max(0, Number((S.officeShoguUnit||0)||0)||0);
+      if(firstDayKey && shCode){
+        const useCode=shCode;
         const cols=[
           csvVer,
           prefCode,
@@ -3323,7 +3754,7 @@ function execJissekiCSV(){
           targetYm,
           _cleanDigits(r.careManagerOffice||''),
           String(r.careManagerName||'').trim(),
-          Math.max(0, Number(r.shoguUnit||0)||0),
+          shUnit,
           '',
           firstDayKey.replace(/-/g,''),
           '',
@@ -3535,7 +3966,10 @@ function recordDayHasMainListData(rec){
  * @param opts.forMainTable true のとき、選択日が「今日」より前なら、スケジュール外・削除済みでもその日の記録があれば一覧に含める（メイン画面の履歴表示用）
  */
 function residentsOnDaySorted(dayIdx, opts){
-  const fromSched=(db.residents||[]).filter(r=>r.sched&&r.sched[dayIdx]===1);
+  const fromSched=(db.residents||[]).filter(r=>
+    (r.sched&&r.sched[dayIdx]===1)||
+    getResidentClassification(r.name)==='inpatient'
+  );
   if(!opts||!opts.forMainTable){
     return fromSched.slice().sort(compareResidentsStable);
   }
@@ -3571,21 +4005,17 @@ function renderMain(){
   const tbody=document.getElementById('resBody');
   if(!tbody) return;
   if(todayRes.length===0){
-    tbody.innerHTML=`<tr><td colspan="12" style="padding:20px;color:var(--text3);text-align:center;">本日の利用者はいません</td></tr>
-    <tr class="res-add-row no-print"><td></td><td><button class="res-add-btn" onclick="openAddResOv()">＋ 利用者を追加</button></td><td colspan="10"></td></tr>`;
+    tbody.innerHTML=`<tr><td colspan="14" style="padding:20px;color:var(--text3);text-align:center;">本日の利用者はいません</td></tr>
+    <tr class="res-add-row no-print"><td></td><td></td><td><button class="res-add-btn" onclick="openAddResOv()">＋ 利用者を追加</button></td><td colspan="11"></td></tr>`;
     return;
   }
   tbody.innerHTML=todayRes.map(r=>{
     const rec=getDayRecordByResidentName(dk(),r.name)||{};
     const _rTodayRec=getRec(r.name, dk());
-    let santeiCell='';
-    if(_rTodayRec && _rTodayRec.calculated===true){
-      santeiCell='<span class="cell-ok">✅</span>';
-    }else if((r.sched||[])[day]===1){
-      santeiCell='<span class="cell-empty" style="color:var(--text3);font-weight:700;">〇</span>';
-    }else{
-      santeiCell='';
-    }
+    const yoteiCell=(r.sched||[])[day]===1
+      ? '<span style="font-weight:700;color:var(--text2);">1</span>' : '';
+    const jissekiCell=(_rTodayRec && _rTodayRec.calculated===true)
+      ? '<span style="font-weight:700;color:var(--green);">1</span>' : '';
     // 申送（選択日当日終了時点から72時間以内のメモ：複数日チェック／履歴と同基準）
     const refEnd=historyRefEndMs(), winMs=72*3600000;
     const _h48chk=()=>{
@@ -3670,7 +4100,8 @@ function renderMain(){
     const mdc=_mParts.length?`<span class="cell-val" style="font-size:18px;letter-spacing:1px;">${_mParts.join('')}</span>`:'<span class="cell-empty">—</span>';
 
     return `<tr>
-      <td style="width:44px;min-width:44px;padding:4px;" onclick="openDetail('${r.name}','notes')">${santeiCell}</td>
+      <td style="width:36px;min-width:36px;padding:4px;text-align:center;" onclick="openDetail('${r.name}','santei')">${yoteiCell}</td>
+      <td style="width:36px;min-width:36px;padding:4px;text-align:center;" onclick="openDetail('${r.name}','santei')">${jissekiCell}</td>
       <td style="width:32px;min-width:32px;padding:4px;" onclick="openDetail('${r.name}','notes')">${nc}</td>
       <td class="name-cell res-div-r">
         <div class="name-cell-inner">
@@ -3695,7 +4126,7 @@ function renderMain(){
   }).join('');
   // ＋ 利用者追加行（最下部・氏名列に配置）
   tbody.innerHTML += `<tr class="res-add-row no-print">
-    <td></td><td></td><td><button class="res-add-btn" onclick="openAddResOv()">＋ 利用者を追加</button></td><td colspan="10"></td>
+    <td></td><td></td><td></td><td><button class="res-add-btn" onclick="openAddResOv()">＋ 利用者を追加</button></td><td colspan="10"></td>
   </tr>`;
 }
 
@@ -3730,6 +4161,7 @@ const TAB_LIST = [
   {id:'rec',      label:'レク'},
   {id:'day',      label:'1日の様子'},
   {id:'care',     label:'ケア記録'},
+  {id:'santei',   label:'算定'},
   {id:'summary',  label:'サマリー'},
 ];
 
@@ -3797,18 +4229,18 @@ function showPanel(tab){ refreshPanel(tab); }
 function refreshPanel(tab){
   const el=document.getElementById('detPanel');
   if(!el) return;
-  const calcHtml=buildCalcToggle();
   switch(tab){
-    case 'notes':     el.innerHTML=calcHtml+buildNotesPanel(); break;
-    case 'vital':     el.innerHTML=calcHtml+buildVitalPanel(); break;
-    case 'excretion': el.innerHTML=calcHtml+buildExPanel(); break;
-    case 'bath':      el.innerHTML=calcHtml+buildBathPanel(); break;
-    case 'care':      el.innerHTML=calcHtml+buildCarePanel(); break;
-    case 'med':       el.innerHTML=calcHtml+buildMedPanel(); break;
-    case 'meal':      el.innerHTML=calcHtml+buildMealPanel(); break;
-    case 'rec':       el.innerHTML=calcHtml+buildRecPanel(); break;
-    case 'day':       el.innerHTML=calcHtml+buildDayPanel(); break;
-    case 'summary':   el.innerHTML=calcHtml+buildSummaryPanel(); break;
+    case 'notes':     el.innerHTML=buildNotesPanel(); break;
+    case 'vital':     el.innerHTML=buildVitalPanel(); break;
+    case 'excretion': el.innerHTML=buildExPanel(); break;
+    case 'bath':      el.innerHTML=buildBathPanel(); break;
+    case 'care':      el.innerHTML=buildCarePanel(); break;
+    case 'med':       el.innerHTML=buildMedPanel(); break;
+    case 'meal':      el.innerHTML=buildMealPanel(); break;
+    case 'rec':       el.innerHTML=buildRecPanel(); break;
+    case 'day':       el.innerHTML=buildDayPanel(); break;
+    case 'santei':    el.innerHTML=buildSanteiPanel(); break;
+    case 'summary':   el.innerHTML=buildSummaryPanel(); break;
   }
 }
 
@@ -5300,9 +5732,8 @@ function delSupply(id){
 // ========== 設定画面 ==========
 const SETTINGS_TABS=[
   {id:'facility', label:'施設・ロゴ'},
-  {id:'resident_mgmt', label:'利用者管理'},
+  {id:'resident_info', label:'利用者基本情報'},
   {id:'billing',       label:'請求設定'},
-  {id:'service_codes', label:'サービスコード'},
   {id:'staff',    label:'スタッフ'},
   {id:'supply',   label:'消耗品マスタ'},
   {id:'ex_opts',   label:'排泄項目'},
@@ -5338,6 +5769,7 @@ function renderSettingsPanel(id){
   switch(id){
     case 'facility':  el.innerHTML=buildFacilitySettings(); break;
     case 'resident_mgmt': el.innerHTML=buildResidentMgmtSettings(); break;
+    case 'resident_info': el.innerHTML=buildResidentInfoSettings(); break;
     case 'billing':       el.innerHTML=buildBillingSettings(); break;
     case 'service_codes': el.innerHTML=buildServiceCodesSettings(); break;
     case 'staff':     el.innerHTML=buildStaffSettings(); break;
@@ -5520,99 +5952,109 @@ function buildBillingSettings(){
   const addons=(sv.addons||[]);
   const shogus=(sv.shogu||[]);
   const resList=[...(db.residents||[])].sort(compareResidentsStable);
-  const basicOpts=`<option value="">（選択）</option>` + basics.map(m=>{
-    const c=escapeAttr(String(m.code||''));
-    const lbl=escapeHtml(`${m.code||''} ${m.name||''}`);
-    return `<option value="${c}">${lbl}</option>`;
-  }).join('');
   const shoguOpts=`<option value="">（なし）</option>` + shogus.map(m=>{
     const c=escapeAttr(String(m.code||''));
     const lbl=escapeHtml(`${m.code||''} ${m.name||''}`);
     return `<option value="${c}">${lbl}</option>`;
   }).join('');
-  const addonCols=addons.map(a=>`<th style="white-space:nowrap;">${escapeHtml(a.name||a.code||'')}</th>`).join('');
-  const addonCells=(r)=>addons.map(a=>{
+  const officeAddonCodes=Array.isArray(S.officeAddonCodes)?S.officeAddonCodes:[];
+  const addonChecks=addons.map(a=>{
     const code=String(a.code||'');
-    const on=(Array.isArray(r.addonCodes)?r.addonCodes:[]).includes(code);
-    return `<td style="text-align:center;"><input type="checkbox" data-res-id="${escapeAttr(String(r.id))}" data-addon-code="${escapeAttr(code)}" ${on?'checked':''}></td>`;
+    const on=officeAddonCodes.includes(code);
+    return `<label style="display:inline-flex;align-items:center;gap:6px;margin:0 14px 8px 0;white-space:nowrap;">
+      <input type="checkbox" class="bill-addon" data-addon-code="${escapeAttr(code)}" ${on?'checked':''}>
+      <span>${escapeHtml(a.name||a.code||'')}</span>
+    </label>`;
   }).join('');
-  const rows=resList.map(r=>{
-    const insured=escapeAttr(String(r.insuredNumber||''));
-    const cmOfc=escapeAttr(String(r.careManagerOffice||''));
-    const cmName=escapeAttr(String(r.careManagerName||''));
-    const sc=escapeAttr(String(r.serviceCodeKey||''));
-    const st=escapeAttr(String(r.startTime||''));
-    const et=escapeAttr(String(r.endTime||''));
-    const shc=escapeAttr(String(r.shoguCode||''));
-    const shu=escapeAttr(String(r.shoguUnit||0));
-    const mu=getServiceUnitByCode(r.serviceCodeKey);
-    const m=basics.find(x=>String(x.code||'')===String(r.serviceCodeKey||''))||null;
-    const timeLbl=m?`${m.timeFrom}〜${m.timeTo}分`:'—';
-    return `<tr>
-      <td style="white-space:nowrap;">${escapeHtml(r.name||'')}</td>
-      <td><input type="text" class="bill-inp" data-res-id="${escapeAttr(String(r.id))}" data-field="insuredNumber" value="${insured}" placeholder="10桁"></td>
-      <td>
-        <select class="bill-sel" data-res-id="${escapeAttr(String(r.id))}" data-field="serviceCodeKey" onchange="onBillingServiceCodeChanged(this)">
-          ${basicOpts.replace(`value="${sc}"`,`value="${sc}" selected`)}
-        </select>
-        <div style="font-size:12px;color:var(--text3);margin-top:4px;">
-          単位:<span data-unit-for="${escapeAttr(String(r.id))}">${mu||0}</span> / 時間:<span data-time-for="${escapeAttr(String(r.id))}">${escapeHtml(timeLbl)}</span>
-        </div>
-      </td>
-      <td style="white-space:nowrap;">
-        <input type="text" class="bill-inp" style="width:70px;" data-res-id="${escapeAttr(String(r.id))}" data-field="startTime" value="${st}" placeholder="0900">〜
-        <input type="text" class="bill-inp" style="width:70px;" data-res-id="${escapeAttr(String(r.id))}" data-field="endTime" value="${et}" placeholder="1630">
-      </td>
-      ${addonCells(r)}
-      <td><input type="text" class="bill-inp" data-res-id="${escapeAttr(String(r.id))}" data-field="careManagerOffice" value="${cmOfc}" placeholder="10桁"></td>
-      <td><input type="text" class="bill-inp" data-res-id="${escapeAttr(String(r.id))}" data-field="careManagerName" value="${cmName}" placeholder="担当者名"></td>
-      <td>
-        <select class="bill-sel" data-res-id="${escapeAttr(String(r.id))}" data-field="shoguCode">
-          ${shoguOpts.replace(`value="${shc}"`,`value="${shc}" selected`)}
-        </select>
-      </td>
-      <td><input type="number" class="bill-inp" style="width:90px;" data-res-id="${escapeAttr(String(r.id))}" data-field="shoguUnit" value="${shu}" min="0"></td>
-    </tr>`;
-  }).join('');
+  const shc=escapeAttr(String(S.officeShoguCode||''));
+  const shu=escapeAttr(String(S.officeShoguUnit||0));
+
+  const _svcBasicRows=(sv.basic||[]).map((x,i)=>`<tr>
+    <td><input class="sc-inp" data-type="basic" data-idx="${i}" data-field="code" value="${escapeAttr(String(x.code||''))}"></td>
+    <td><input class="sc-inp" data-type="basic" data-idx="${i}" data-field="name" value="${escapeAttr(String(x.name||''))}"></td>
+    <td><input class="sc-inp" type="number" data-type="basic" data-idx="${i}" data-field="unit" value="${escapeAttr(String(x.unit==null?'':x.unit))}"></td>
+    <td><input class="sc-inp" type="number" data-type="basic" data-idx="${i}" data-field="timeFrom" value="${escapeAttr(String(x.timeFrom==null?'':x.timeFrom))}"></td>
+    <td><input class="sc-inp" type="number" data-type="basic" data-idx="${i}" data-field="timeTo" value="${escapeAttr(String(x.timeTo==null?'':x.timeTo))}"></td>
+    <td><button type="button" class="btn btn-gray btn-sm" onclick="delServiceCode('basic',${i})">削除</button></td>
+  </tr>`).join('');
+  const _svcAddonRows=(sv.addons||[]).map((x,i)=>`<tr>
+    <td><input class="sc-inp" data-type="addons" data-idx="${i}" data-field="code" value="${escapeAttr(String(x.code||''))}"></td>
+    <td><input class="sc-inp" data-type="addons" data-idx="${i}" data-field="name" value="${escapeAttr(String(x.name||''))}"></td>
+    <td><input class="sc-inp" type="number" data-type="addons" data-idx="${i}" data-field="unit" value="${escapeAttr(String(x.unit==null?'':x.unit))}"></td>
+    <td><button type="button" class="btn btn-gray btn-sm" onclick="delServiceCode('addons',${i})">削除</button></td>
+  </tr>`).join('');
+  const _svcShoguRows=(sv.shogu||[]).map((x,i)=>`<tr>
+    <td><input class="sc-inp" data-type="shogu" data-idx="${i}" data-field="code" value="${escapeAttr(String(x.code||''))}"></td>
+    <td><input class="sc-inp" data-type="shogu" data-idx="${i}" data-field="name" value="${escapeAttr(String(x.name||''))}"></td>
+    <td><button type="button" class="btn btn-gray btn-sm" onclick="delServiceCode('shogu',${i})">削除</button></td>
+  </tr>`).join('');
 
   return `<div class="settings-panel active">
     <div class="panel-sec">
       <h3>事業所基本情報</h3>
       <div class="fg-row fg-cols-3">
-        <div class="fg"><label>自事業所番号</label><input type="text" id="stOfficeNumber" value="${escapeAttr(String(S.officeNumber||''))}" placeholder="4170201000"></div>
-        <div class="fg"><label>サービス種類コード</label><input type="text" id="stServiceTypeCode" value="${escapeAttr(String(S.serviceTypeCode||''))}" placeholder="78"></div>
-        <div class="fg"><label>保険者番号</label><input type="text" id="stPrefCode" value="${escapeAttr(String(S.prefCode||'412023'))}" placeholder="412023"></div>
+        <div class="fg"><label>自事業所番号</label><input type="text" class="bill-inp" id="stOfficeNumber" value="${escapeAttr(String(S.officeNumber||''))}" placeholder="4170201000"></div>
+        <div class="fg"><label>サービス種類コード</label><input type="text" class="bill-inp" id="stServiceTypeCode" value="${escapeAttr(String(S.serviceTypeCode||''))}" placeholder="78"></div>
+        <div class="fg"><label>保険者番号</label><input type="text" class="bill-inp" id="stPrefCode" value="${escapeAttr(String(S.prefCode||'412023'))}" placeholder="412023"></div>
+      </div>
+      <div style="margin-top:10px;">
+        <div style="font-weight:800;margin-bottom:6px;">加算</div>
+        <div>${addonChecks || '<span class="text-gray">（加算マスタがありません）</span>'}</div>
+      </div>
+      <div style="margin-top:12px;display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;">
+        <div class="fg" style="min-width:240px;">
+          <label>処遇改善加算コード</label>
+          <select id="stOfficeShoguCode" class="bill-sel">
+            ${shoguOpts.replace(`value="${shc}"`,`value="${shc}" selected`)}
+          </select>
+        </div>
+        <div class="fg" style="min-width:160px;">
+          <label>処遇改善加算単位</label>
+          <input type="number" id="stOfficeShoguUnit" class="bill-inp" value="${shu}" min="0">
+        </div>
       </div>
       <button type="button" class="btn btn-primary btn-sm" onclick="saveBillingBase()">基本情報を保存</button>
     </div>
     <div class="panel-sec">
-      <h3>利用者別 請求情報</h3>
+      <h3>サービスコードマスタ</h3>
+      <h4 style="margin:6px 0 8px;font-size:14px;color:var(--text2);">基本サービスコード</h4>
       <div style="overflow:auto;">
         <table class="resident-mgmt-table">
-          <thead>
-            <tr>
-              <th>氏名</th>
-              <th>被保険者番号</th>
-              <th>基本サービス</th>
-              <th>開始〜終了</th>
-              ${addonCols}
-              <th>ケアマネ事業所番号</th>
-              <th>ケアマネ担当者</th>
-              <th>処遇改善コード</th>
-              <th>処遇改善単位</th>
-            </tr>
-          </thead>
-          <tbody>${rows||''}</tbody>
+          <thead><tr><th>コード</th><th>名称</th><th>単位数</th><th>時間From(分)</th><th>時間To(分)</th><th></th></tr></thead>
+          <tbody>${_svcBasicRows}</tbody>
         </table>
       </div>
-      <div style="margin-top:10px;">
-        <button type="button" class="btn btn-primary btn-sm" onclick="saveBillingResidents()">利用者情報を一括保存</button>
+      <button type="button" class="btn btn-gray btn-sm" onclick="addServiceCodeRow('basic')">行追加</button>
+      <h4 style="margin:14px 0 8px;font-size:14px;color:var(--text2);">加算コード</h4>
+      <div style="overflow:auto;">
+        <table class="resident-mgmt-table">
+          <thead><tr><th>コード</th><th>名称</th><th>単位数</th><th></th></tr></thead>
+          <tbody>${_svcAddonRows}</tbody>
+        </table>
       </div>
-      <p style="font-size:12px;color:var(--text3);margin-top:8px;line-height:1.45;">※ residents にはコードのみ保存し、単位数は serviceCodes マスタから自動取得します。</p>
+      <button type="button" class="btn btn-gray btn-sm" onclick="addServiceCodeRow('addons')">行追加</button>
+      <h4 style="margin:14px 0 8px;font-size:14px;color:var(--text2);">処遇改善加算コード</h4>
+      <div style="overflow:auto;">
+        <table class="resident-mgmt-table">
+          <thead><tr><th>コード</th><th>名称</th><th></th></tr></thead>
+          <tbody>${_svcShoguRows}</tbody>
+        </table>
+      </div>
+      <button type="button" class="btn btn-gray btn-sm" onclick="addServiceCodeRow('shogu')">行追加</button>
+      <div style="margin-top:12px;">
+        <button type="button" class="btn btn-primary btn-sm" onclick="saveServiceCodes()">マスタを保存</button>
+      </div>
+      <div style="margin-top:14px;">
+        <h4 style="margin:0 0 6px;font-size:14px;color:var(--text2);">サービスコードCSV取込（厚労省）</h4>
+        <input type="file" accept=".csv,text/csv" onchange="importServiceCodeCSV(this.files&&this.files[0])">
+        <div id="svcImportPreview" style="margin-top:10px;font-size:12px;color:var(--text2);"></div>
+      </div>
     </div>
   </div>`;
 }
 function onBillingServiceCodeChanged(sel){
+  // v4: 請求設定タブでは基本サービス選択UIを非表示にした（利用者基本情報タブへ移動）
+  // 互換のため関数は残す
   const rid=sel.getAttribute('data-res-id');
   const code=sel.value||'';
   const unit=getServiceUnitByCode(code);
@@ -5628,10 +6070,20 @@ function saveBillingBase(){
   const on=_cleanDigits(document.getElementById('stOfficeNumber')?.value||'');
   const st=_cleanDigits(document.getElementById('stServiceTypeCode')?.value||'');
   const pc=_cleanDigits(document.getElementById('stPrefCode')?.value||'')||'412023';
+  const shc=String(document.getElementById('stOfficeShoguCode')?.value||'').trim();
+  const shu=Math.max(0, Number(document.getElementById('stOfficeShoguUnit')?.value||0)||0);
+  const addonCodes=[...document.querySelectorAll('.bill-addon[data-addon-code]')]
+    .filter(x=>x && x.checked)
+    .map(x=>String(x.getAttribute('data-addon-code')||'').trim())
+    .filter(Boolean);
   db.settings.officeNumber=on;
   db.settings.serviceTypeCode=st;
   db.settings.prefCode=pc;
+  db.settings.officeAddonCodes=addonCodes;
+  db.settings.officeShoguCode=shc;
+  db.settings.officeShoguUnit=shu;
   touchSetU('officeNumber'); touchSetU('serviceTypeCode'); touchSetU('prefCode');
+  touchSetU('officeAddonCodes'); touchSetU('officeShoguCode'); touchSetU('officeShoguUnit');
   saveDB();
   showBriefToast('保存しました',1600,false);
 }
@@ -5644,46 +6096,32 @@ function _ensureResidentBillingFields(r){
   if(r.serviceCodeKey===undefined) r.serviceCodeKey='';
   if(r.startTime===undefined) r.startTime='';
   if(r.endTime===undefined) r.endTime='';
+  if(!r.startTime) r.startTime='0900';
+  if(!r.endTime) r.endTime='1630';
   if(!Array.isArray(r.addonCodes)) r.addonCodes=[];
   if(r.shoguCode===undefined) r.shoguCode='';
   if(r.shoguUnit===undefined) r.shoguUnit=0;
+  if(r.birthDate === undefined) r.birthDate = '';
+  if(r.gender === undefined) r.gender = '';
+  if(r.phone === undefined) r.phone = '';
+  if(r.careExpiry === undefined) r.careExpiry = '';
+  if(r.costShare === undefined) r.costShare = '';
 }
 function saveBillingResidents(){
-  const inputs=[...document.querySelectorAll('.bill-inp, .bill-sel, input[type="checkbox"][data-addon-code]')];
+  const inputs=[...document.querySelectorAll('.bill-inp, .bill-sel')];
   if(!inputs.length) return;
-  const byId=new Map();
-  const getR=(id)=>{
-    const r=(db.residents||[]).find(x=>String(x.id)===String(id));
-    if(!r) return null;
-    _ensureResidentBillingFields(r);
-    return r;
-  };
+  let touched=false;
   inputs.forEach(el=>{
     const rid=el.getAttribute('data-res-id');
     if(!rid) return;
-    const r=getR(rid);
+    const r=(db.residents||[]).find(x=>String(x.id)===String(rid));
     if(!r) return;
-    byId.set(rid,true);
-    const addon=el.getAttribute('data-addon-code');
-    if(addon){
-      const arr=r.addonCodes;
-      const has=arr.includes(addon);
-      if(el.checked && !has) arr.push(addon);
-      if(!el.checked && has) r.addonCodes=arr.filter(c=>c!==addon);
-      return;
-    }
+    _ensureResidentBillingFields(r);
     const f=el.getAttribute('data-field');
     if(!f) return;
-    if(f==='insuredNumber') r.insuredNumber=_cleanDigits(el.value);
-    else if(f==='careManagerOffice') r.careManagerOffice=_cleanDigits(el.value);
-    else if(f==='careManagerName') r.careManagerName=String(el.value||'').trim();
-    else if(f==='serviceCodeKey') r.serviceCodeKey=String(el.value||'').trim();
-    else if(f==='startTime') r.startTime=_cleanTimeHHMM(el.value);
-    else if(f==='endTime') r.endTime=_cleanTimeHHMM(el.value);
-    else if(f==='shoguCode') r.shoguCode=String(el.value||'').trim();
-    else if(f==='shoguUnit') r.shoguUnit=Math.max(0, Number(el.value||0)||0);
+    if(f==='serviceCodeKey'){ r.serviceCodeKey=String(el.value||'').trim(); touched=true; }
   });
-  if(byId.size) saveDB();
+  if(touched) saveDB();
   showBriefToast('保存しました',1600,false);
 }
 
@@ -5852,6 +6290,320 @@ function applyImportedServiceCodes(data){
   }else{
     showBriefToast('変更はありません',1600,false);
   }
+}
+
+function buildResidentInfoSettings(){
+  ensureTimeDatalist();
+  db.settings=db.settings||{};
+  if(!Array.isArray(db.settings.careManagerList)) db.settings.careManagerList=[];
+  const cmList=db.settings.careManagerList||[];
+  const offices=getCareManagerOffices(cmList);
+  const officeOpts=`<option value="-1">（未設定）</option>` + offices.map((o,i)=>{
+    const lbl=escapeHtml(`${o.officeName||''}（${o.officeCode||''}）`);
+    return `<option value="${i}">${lbl}</option>`;
+  }).join('');
+  const resList=[...(db.residents||[])].sort(compareResidentsStable);
+
+  const careOpts=[
+    '要支援１','要支援２','要介護１','要介護２','要介護３','要介護４','要介護５'
+  ].map(v=>`<option>${v}</option>`).join('');
+
+  const rows=resList.map(r=>{
+    _ensureResidentBillingFields(r);
+    const checked=getResidentClassification(r.name)==='inpatient'?' checked':'';
+    const rid=escapeAttr(String(r.id));
+    const delBtn=r._mainGhost?'':`<button type="button" class="res-del-btn no-print" onclick="delResidentFromMgmtById('${rid}')">×</button>`;
+    const officeIdx=offices.findIndex(o=>String(o.officeCode||'')===String(r.careManagerOffice||''));
+    const cmIdx=cmList.findIndex(cm=>String(cm.officeCode||'')===String(r.careManagerOffice||'') && String(cm.name||'')===String(r.careManagerName||''));
+    const cmOptsForRow=buildCareManagerOptionsForOffice(cmList, r.careManagerOffice, cmIdx);
+    return `<tr>
+      <td style="white-space:nowrap;">${escapeHtml(r.name||'')}</td>
+      <td style="text-align:center;"><input type="checkbox" data-resident-id="${rid}"${checked} onchange="onResidentInpatientCheckbox(this)"></td>
+      <td><input type="text" class="res-info-inp" list="timeOptions30min" data-res-id="${rid}" data-field="startTime" value="${escapeAttr(String(r.startTime||'0900'))}" style="width:80px;font-size:13px;"></td>
+      <td><input type="text" class="res-info-inp" list="timeOptions30min" data-res-id="${rid}" data-field="endTime" value="${escapeAttr(String(r.endTime||'1630'))}" style="width:80px;font-size:13px;"></td>
+      <td><input type="text" class="res-info-inp" data-res-id="${rid}" data-field="birthDate" value="${escapeAttr(String(r.birthDate||''))}" placeholder="YYYY/MM/DD"></td>
+      <td><input type="text" class="res-info-inp" data-res-id="${rid}" data-field="gender" value="${escapeAttr(String(r.gender||''))}" placeholder="男/女"></td>
+      <td>
+        <select class="res-info-sel" data-res-id="${rid}" data-field="care">
+          ${careOpts.replace(`<option>${escapeHtml(r.care||'')}</option>`, `<option selected>${escapeHtml(r.care||'')}</option>`)}
+        </select>
+      </td>
+      <td><input type="text" class="res-info-inp" data-res-id="${rid}" data-field="insuredNumber" value="${escapeAttr(String(r.insuredNumber||''))}" placeholder="10桁"></td>
+      <td><input type="text" class="res-info-inp" data-res-id="${rid}" data-field="careExpiry" value="${escapeAttr(String(r.careExpiry||''))}" placeholder="YYYY/MM/DD"></td>
+      <td><input type="text" class="res-info-inp" data-res-id="${rid}" data-field="costShare" value="${escapeAttr(String(r.costShare||''))}" placeholder="1割"></td>
+      <td>
+        <select class="res-info-sel" data-res-id="${rid}" data-field="careManagerOfficeKey" onchange="onCareManagerOfficeChanged(this)">
+          ${officeOpts.replace(`value=\"${officeIdx}\"`, `value=\"${officeIdx}\" selected`)}
+        </select>
+      </td>
+      <td>
+        <select class="res-info-sel" data-res-id="${rid}" data-field="careManagerKey">
+          ${cmOptsForRow}
+        </select>
+      </td>
+      <td><input type="text" class="res-info-inp" data-res-id="${rid}" data-field="phone" value="${escapeAttr(String(r.phone||''))}" placeholder="連絡先"></td>
+      <td style="text-align:center;">${delBtn}</td>
+    </tr>`;
+  }).join('');
+
+  return `<div class="settings-panel active">
+    <div class="panel-sec">
+      <h3>ナーシングCSVインポート</h3>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;">
+        <label class="btn btn-gray btn-sm" style="cursor:pointer;">基本情報CSV取込<input type="file" accept=".csv,text/csv" style="display:none" onchange="importBasicInfoCSV(this.files&&this.files[0])"></label>
+        <label class="btn btn-gray btn-sm" style="cursor:pointer;">証書情報CSV取込<input type="file" accept=".csv,text/csv" style="display:none" onchange="importCertInfoCSV(this.files&&this.files[0])"></label>
+        <label class="btn btn-gray btn-sm" style="cursor:pointer;">ケアマネCSV取込<input type="file" accept=".csv,text/csv" style="display:none" onchange="importCareManagerCSV(this.files&&this.files[0])"></label>
+      </div>
+      <div id="resInfoImportPreview" style="margin-top:10px;font-size:12px;color:var(--text2);"></div>
+    </div>
+    <div class="panel-sec">
+      <h3>利用者一覧</h3>
+      <div style="overflow:auto;">
+        <table class="resident-mgmt-table">
+          <thead>
+            <tr>
+              <th>氏名</th><th>入所者</th><th>標準開始</th><th>標準終了</th><th>生年月日</th><th>性別</th><th>要介護度</th><th>被保険者番号</th><th>認定終了日</th><th>負担割合</th><th>居宅介護支援事業所</th><th>ケアマネ</th><th>連絡先</th><th>削除</th>
+            </tr>
+          </thead>
+          <tbody>${rows||''}</tbody>
+        </table>
+      </div>
+      <div style="margin-top:10px;">
+        <button type="button" class="btn btn-primary btn-sm" onclick="saveResidentInfoAll()">一括保存</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function saveResidentInfoAll(){
+  const cmOfficeSel=new Map(); // rid -> officeIdx
+  const cmSel=new Map(); // rid -> cmIdx (cmList index)
+  document.querySelectorAll('.res-info-inp, .res-info-sel').forEach(el=>{
+    const rid = el.getAttribute('data-res-id');
+    const r = (db.residents||[]).find(x => String(x.id) === String(rid));
+    if(!r) return;
+    _ensureResidentBillingFields(r);
+    const f = el.getAttribute('data-field');
+    if(!f) return;
+    if(f === 'care') r.care = el.value;
+    else if(f === 'insuredNumber') r.insuredNumber = _cleanDigits(el.value);
+    else if(f === 'birthDate') r.birthDate = String(el.value||'').trim();
+    else if(f === 'gender') r.gender = String(el.value||'').trim();
+    else if(f === 'careExpiry') r.careExpiry = String(el.value||'').trim();
+    else if(f === 'costShare') r.costShare = String(el.value||'').trim();
+    else if(f === 'phone') r.phone = String(el.value||'').trim();
+    else if(f === 'startTime') r.startTime = _cleanTimeHHMM(el.value) || '0900';
+    else if(f === 'endTime') r.endTime = _cleanTimeHHMM(el.value) || '1630';
+    else if(f === 'careManagerOfficeKey'){
+      cmOfficeSel.set(rid, parseInt(el.value,10));
+    }else if(f === 'careManagerKey'){
+      cmSel.set(rid, parseInt(el.value,10));
+    }
+  });
+  // ケアマネ関連は一括で反映（事業所→担当者の順で整合）
+  const cmList=(db.settings.careManagerList||[]);
+  const offices=getCareManagerOffices(cmList);
+  (db.residents||[]).forEach(r=>{
+    const rid=String(r.id);
+    if(!cmOfficeSel.has(rid) && !cmSel.has(rid)) return;
+    _ensureResidentBillingFields(r);
+    const oIdx=cmOfficeSel.has(rid)?cmOfficeSel.get(rid):-1;
+    const cmIdx=cmSel.has(rid)?cmSel.get(rid):-1;
+    if(Number.isFinite(oIdx) && oIdx>=0 && offices[oIdx]){
+      r.careManagerOffice=String(offices[oIdx].officeCode||'');
+      if(!Number.isFinite(cmIdx) || cmIdx<0){
+        r.careManagerName='';
+      }
+    }else{
+      // 未設定
+      r.careManagerOffice='';
+      r.careManagerName='';
+    }
+    if(Number.isFinite(cmIdx) && cmIdx>=0 && cmList[cmIdx]){
+      const cm=cmList[cmIdx];
+      r.careManagerName=cm.name;
+      r.careManagerOffice=cm.officeCode;
+    }
+    r._u=Date.now();
+  });
+  saveDB();
+  showBriefToast('利用者基本情報を保存しました', 1800, false);
+}
+
+function getCareManagerOffices(cmList){
+  const m=new Map(); // officeCode -> officeName
+  (cmList||[]).forEach(cm=>{
+    const code=String(cm&&cm.officeCode||'').trim();
+    const name=String(cm&&cm.officeName||'').trim();
+    if(!code) return;
+    if(!m.has(code)) m.set(code,name);
+  });
+  return [...m.entries()].map(([officeCode,officeName])=>({officeCode,officeName}))
+    .sort((a,b)=>String(a.officeName||'').localeCompare(String(b.officeName||''),'ja') || String(a.officeCode||'').localeCompare(String(b.officeCode||'')));
+}
+function buildCareManagerOptionsForOffice(cmList, officeCode, selectedIdx){
+  const code=String(officeCode||'').trim();
+  const opts=[`<option value="-1">（未設定）</option>`];
+  (cmList||[]).forEach((cm,i)=>{
+    if(code && String(cm.officeCode||'')!==code) return;
+    const lbl=escapeHtml(String(cm.name||''));
+    const sel=(i===selectedIdx)?' selected':'';
+    opts.push(`<option value="${i}"${sel}>${lbl}</option>`);
+  });
+  return opts.join('');
+}
+function onCareManagerOfficeChanged(sel){
+  const rid=sel.getAttribute('data-res-id');
+  const oIdx=parseInt(sel.value,10);
+  const cmList=(db.settings.careManagerList||[]);
+  const offices=getCareManagerOffices(cmList);
+  const code=(Number.isFinite(oIdx)&&oIdx>=0&&offices[oIdx])?String(offices[oIdx].officeCode||''):'';
+  const cmSel=document.querySelector(`select.res-info-sel[data-res-id="${CSS.escape(rid)}"][data-field="careManagerKey"]`);
+  if(cmSel){
+    cmSel.innerHTML=buildCareManagerOptionsForOffice(cmList, code, -1);
+    cmSel.value='-1';
+  }
+}
+
+function _parseCsvText(text){
+  const lines=String(text||'').replace(/\uFEFF/g,'').split(/\r?\n/).filter(l=>l.trim()!=='');
+  const out=[];
+  lines.forEach(line=>{
+    const row=[];
+    let cur='', inQ=false;
+    for(let i=0;i<line.length;i++){
+      const ch=line[i];
+      if(ch==='"'){
+        if(inQ && line[i+1]==='"'){ cur+='"'; i++; }
+        else inQ=!inQ;
+      }else if(ch===',' && !inQ){
+        row.push(cur); cur='';
+      }else{
+        cur+=ch;
+      }
+    }
+    row.push(cur);
+    out.push(row.map(x=>String(x||'').trim()));
+  });
+  return out;
+}
+function _previewToEl(html){
+  const el=document.getElementById('resInfoImportPreview');
+  if(el) el.innerHTML=html;
+}
+function importBasicInfoCSV(file){
+  if(!file) return;
+  const reader=new FileReader();
+  reader.onload=e=>{
+    const rows=_parseCsvText(e.target.result||'');
+    const body=rows.slice(1);
+    const matches=[];
+    const skips=[];
+    body.forEach(r=>{
+      const name=normalizeResidentName(r[0]||'');
+      if(!name) return;
+      const hit=(db.residents||[]).find(x=>normalizeResidentName(x.name)===name);
+      if(!hit){ skips.push(name); return; }
+      matches.push({id:hit.id,name:hit.name,birthDate:r[2]||'',gender:r[4]||'',phone:r[5]||''});
+    });
+    window.__resInfoImport={kind:'basic',data:matches};
+    _previewToEl(`<div style="font-weight:700;margin-bottom:6px;">基本情報CSV プレビュー</div>
+      <div style="color:var(--text3);font-size:12px;margin-bottom:8px;">一致: ${matches.length}件 / スキップ: ${skips.length}件</div>
+      <div style="max-height:180px;overflow:auto;border:1px solid var(--border2);border-radius:var(--r1);padding:8px;">${matches.slice(0,50).map(x=>`${escapeHtml(x.name)} / ${escapeHtml(x.birthDate)} / ${escapeHtml(x.gender)} / ${escapeHtml(x.phone)}`).join('<br>')||'（一致なし）'}</div>
+      ${skips.length?`<div style="margin-top:8px;color:var(--text3);font-size:12px;">取込スキップ（利用者未登録）: ${escapeHtml(skips.slice(0,30).join('、'))}${skips.length>30?'…':''}</div>`:''}
+      <div style="margin-top:10px;"><button type="button" class="btn btn-primary btn-sm" onclick="applyResidentInfoImport()">反映する</button></div>`);
+  };
+  reader.readAsText(file);
+}
+function importCertInfoCSV(file){
+  if(!file) return;
+  const reader=new FileReader();
+  reader.onload=e=>{
+    const rows=_parseCsvText(e.target.result||'');
+    const body=rows.slice(1);
+    const matches=[];
+    const skips=[];
+    body.forEach(r=>{
+      const name=normalizeResidentName(r[0]||'');
+      if(!name) return;
+      const hit=(db.residents||[]).find(x=>normalizeResidentName(x.name)===name);
+      if(!hit){ skips.push(name); return; }
+      const cost=(String(r[5]||'').trim()||'1割');
+      matches.push({id:hit.id,name:hit.name,insuredNumber:_cleanDigits(r[2]||''),care:r[3]||'',careExpiry:r[4]||'',costShare:cost});
+    });
+    window.__resInfoImport={kind:'cert',data:matches};
+    _previewToEl(`<div style="font-weight:700;margin-bottom:6px;">証書情報CSV プレビュー</div>
+      <div style="color:var(--text3);font-size:12px;margin-bottom:8px;">一致: ${matches.length}件 / スキップ: ${skips.length}件</div>
+      <div style="max-height:180px;overflow:auto;border:1px solid var(--border2);border-radius:var(--r1);padding:8px;">${matches.slice(0,50).map(x=>`${escapeHtml(x.name)} / ${escapeHtml(x.insuredNumber)} / ${escapeHtml(x.care)} / ${escapeHtml(x.careExpiry)} / ${escapeHtml(x.costShare)}`).join('<br>')||'（一致なし）'}</div>
+      ${skips.length?`<div style="margin-top:8px;color:var(--text3);font-size:12px;">取込スキップ（利用者未登録）: ${escapeHtml(skips.slice(0,30).join('、'))}${skips.length>30?'…':''}</div>`:''}
+      <div style="margin-top:10px;"><button type="button" class="btn btn-primary btn-sm" onclick="applyResidentInfoImport()">反映する</button></div>`);
+  };
+  reader.readAsText(file);
+}
+function importCareManagerCSV(file){
+  if(!file) return;
+  const reader=new FileReader();
+  reader.onload=e=>{
+    const rows=_parseCsvText(e.target.result||'');
+    const body=rows.slice(1);
+    const map=new Map(); // name -> cm
+    body.forEach(r=>{
+      const name=String(r[0]||'').trim();
+      if(!name) return;
+      const stop=String(r[8]||'').trim(); // 列9
+      if(stop) return;
+      const raw=String(r[2]||'').trim(); // 列3
+      const parts=raw.split(' : ');
+      const officeCode=_cleanDigits(parts[0]||'');
+      const officeName=String(parts[1]||'').trim();
+      if(!officeCode) return;
+      const cur=map.get(name);
+      const next={name,officeCode,officeName};
+      if(!cur){ map.set(name,next); return; }
+      if(!cur.officeCode && officeCode) map.set(name,next);
+      else map.set(name,next); // 最後優先
+    });
+    const list=[...map.values()];
+    window.__resInfoImport={kind:'careManager',data:list};
+    _previewToEl(`<div style="font-weight:700;margin-bottom:6px;">ケアマネCSV プレビュー</div>
+      <div style="color:var(--text3);font-size:12px;margin-bottom:8px;">${list.length}件</div>
+      <div style="max-height:180px;overflow:auto;border:1px solid var(--border2);border-radius:var(--r1);padding:8px;">${list.slice(0,80).map(x=>`${escapeHtml(x.name)}（${escapeHtml(x.officeName)}）`).join('<br>')||'（0件）'}</div>
+      <div style="margin-top:10px;"><button type="button" class="btn btn-primary btn-sm" onclick="applyResidentInfoImport()">反映する</button></div>`);
+  };
+  reader.readAsText(file);
+}
+function applyResidentInfoImport(){
+  const imp=window.__resInfoImport;
+  if(!imp||!imp.kind){ alert('取込データがありません'); return; }
+  if(imp.kind==='careManager'){
+    db.settings=db.settings||{};
+    db.settings.careManagerList=Array.isArray(imp.data)?imp.data:[];
+    touchSetU('careManagerList');
+    saveDB();
+    renderSettingsPanel('resident_info');
+    showBriefToast('ケアマネ一覧を反映しました',1800,false);
+    return;
+  }
+  const data=Array.isArray(imp.data)?imp.data:[];
+  data.forEach(x=>{
+    const r=(db.residents||[]).find(rr=>String(rr.id)===String(x.id));
+    if(!r) return;
+    _ensureResidentBillingFields(r);
+    if(imp.kind==='basic'){
+      r.birthDate=String(x.birthDate||'').trim();
+      r.gender=String(x.gender||'').trim();
+      r.phone=String(x.phone||'').trim();
+    }else if(imp.kind==='cert'){
+      r.insuredNumber=_cleanDigits(x.insuredNumber||'');
+      if(String(x.care||'').trim()) r.care=String(x.care||'').trim();
+      r.careExpiry=String(x.careExpiry||'').trim();
+      r.costShare=String(x.costShare||'').trim()||'1割';
+    }
+    r._u=Date.now();
+  });
+  saveDB();
+  renderSettingsPanel('resident_info');
+  showBriefToast('反映しました',1800,false);
 }
 
 function buildResidentSettings(){
