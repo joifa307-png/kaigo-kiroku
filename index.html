@@ -9,6 +9,7 @@
 <meta http-equiv="Cache-Control" content="max-age=0, must-revalidate">
 <title id="pageTitle">介護記録</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/encoding-japanese/2.0.0/encoding.min.js"></script>
 <style>
 /* ===== CSS変数 ===== */
 :root{
@@ -505,6 +506,8 @@ input,select,textarea{font-family:inherit;font-size:30px;}
     <button type="button" class="hdr-btn no-print" onclick="openSupplyRecord()" style="background:var(--green);color:#fff;border-color:var(--green);font-weight:700;">卸記録</button>
     <button class="hdr-btn no-print" onclick="openUpload()" style="background:#F3F0FF;color:#5B3FB5;border-color:#5B3FB5;font-weight:700;">📅予定</button>
     <button class="hdr-btn no-print" onclick="openPrint()" style="background:#E1F5EE;color:#0F6E56;border-color:#0F6E56;font-weight:700;">連絡帳</button>
+    <button class="hdr-btn no-print" onclick="openSanteiDialog()" style="background:#F3F3F3;color:#3a3a3a;border-color:#9E9C94;font-weight:700;">📋算定確定</button>
+    <button class="hdr-btn no-print" onclick="openJissekiCSVDialog()" style="background:#F3F3F3;color:#3a3a3a;border-color:#9E9C94;font-weight:700;">📊実績CSV</button>
     <button class="hdr-btn no-print" onclick="saveMonthlyBackup()" style="background:var(--blue2);color:var(--blue);border-color:var(--blue);font-weight:700;">月次保存</button>
     <button class="hdr-btn no-print" onclick="syncNow()">🔄</button>
     <button class="hdr-btn no-print" onclick="openSettings()">⚙️</button>
@@ -513,6 +516,7 @@ input,select,textarea{font-family:inherit;font-size:30px;}
     <table class="res-table" id="resTable">
       <thead>
         <tr>
+          <th style="width:44px;min-width:44px;white-space:nowrap;">算定</th>
           <th style="width:32px;min-width:32px;">申送</th>
           <th class="res-div-r" style="min-width:80px;">氏名</th>
           <th class="res-div-l">体温</th>
@@ -898,6 +902,24 @@ const DEFAULT_SETTINGS = {
   _recordItemDel: {},
   /** 利用者ごとの表示・集計区分 { 氏名: 'inpatient' | 'day' }。設定「利用者管理」・Excel追加・GAS同期の対象 */
   residentTypes: {},
+  officeNumber: '',
+  serviceTypeCode: '',
+  prefCode: '412023',
+  serviceCodes: {
+    basic: [
+      { code: '781431', name: '地域通所介護41（5〜6時間）', unit: 666, timeFrom: 300, timeTo: 360 },
+      { code: '781441', name: '地域通所介護51（6〜7時間）', unit: 753, timeFrom: 360, timeTo: 420 },
+      { code: '781443', name: '地域通所介護53（7〜8時間）', unit: 858, timeFrom: 420, timeTo: 480 },
+      { code: '781445', name: '地域通所介護55（8〜9時間）', unit: 915, timeFrom: 480, timeTo: 540 },
+    ],
+    addons: [
+      { code: '785301', name: '入浴介助加算Ⅰ', unit: 40 },
+      { code: '785302', name: '入浴介助加算Ⅱ', unit: 55 },
+    ],
+    shogu: [
+      { code: '786107', name: '処遇改善加算Ⅱ' },
+    ],
+  },
 };
 const LEGACY_DEFAULT_SUPPLY_JSON = JSON.stringify(["リハビリパンツM", "リハビリパンツL", "尿取りパッド 昼用", "尿取りパッド 夜用", "テープ型オムツM", "テープ型オムツL"]);
 const LEGACY_DEFAULT_CARE_JSON = JSON.stringify(['清拭','更衣','口腔ケア','体位変換','爪切り','髭剃り','洗髪','排痰','リハビリ','外出','送迎']);
@@ -1029,6 +1051,14 @@ function loadDB(){
     touchSetU('dayItems');
     needSaveAfterMigrate=true;
   }
+  // v3マイグレーション：サービスコードマスタ・請求フィールドの初期化
+  if(!db.settings.serviceCodes || !db.settings.serviceCodes.basic){
+    db.settings.serviceCodes = JSON.parse(JSON.stringify(DEFAULT_SETTINGS.serviceCodes));
+    needSaveAfterMigrate = true;
+  }
+  if(db.settings.officeNumber === undefined) db.settings.officeNumber = '';
+  if(db.settings.serviceTypeCode === undefined) db.settings.serviceTypeCode = '';
+  if(!db.settings.prefCode) db.settings.prefCode = '412023';
   Object.keys(db.records||{}).forEach(dk=>{
     const day=db.records[dk]||{};
     Object.keys(day).forEach(nm=>{
@@ -1336,6 +1366,12 @@ function getRec(name, dateKey){
           time:'11:50',menu:'',snack:'',main:100,side:100,water:'',
           dTime:'17:30',dMain:100,dSide:100,dWater:''};
   }
+  // v3追加フィールド
+  if(r.calculated === undefined) r.calculated = false;
+  if(r.calcStartTime === undefined) r.calcStartTime = '';
+  if(r.calcEndTime === undefined) r.calcEndTime = '';
+  if(r.calcServiceCodeKey === undefined) r.calcServiceCodeKey = '';
+  if(!r.calcAddons) r.calcAddons = [];
   return r;
 }
 
@@ -1358,7 +1394,7 @@ const REC = {
 const N_RECORD_COLS = 57;
 
 /** デプロイのたびに上げる（設定→データ管理の「アプリ情報」で表示） */
-const APP_VERSION='1.0.29';
+const APP_VERSION='1.0.30';
 function isStandaloneWebApp(){
   try{
     if(window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches) return true;
@@ -2866,6 +2902,458 @@ function openMainOv(html){
   document.getElementById('ovMainBody').innerHTML=html;
   openOv('ovMain');
 }
+
+function closeMainOv(){
+  closeOv('ovMain');
+}
+
+// ========== v3: 算定（メインダイアログ／実績CSV） ==========
+function _ymdNoDash(d){
+  const dt=d||new Date();
+  return `${dt.getFullYear()}${pad(dt.getMonth()+1)}${pad(dt.getDate())}`;
+}
+function _ymNoDash(d){
+  const dt=d||new Date();
+  return `${dt.getFullYear()}${pad(dt.getMonth()+1)}`;
+}
+function _fmtYmdJp(d){
+  const dt=d||new Date();
+  return `${dt.getFullYear()}年${dt.getMonth()+1}月${dt.getDate()}日`;
+}
+function _calcEffectiveTime(rec, resident){
+  const st=_cleanTimeHHMM((rec&&rec.calcStartTime)||'') || _cleanTimeHHMM((resident&&resident.startTime)||'');
+  const et=_cleanTimeHHMM((rec&&rec.calcEndTime)||'') || _cleanTimeHHMM((resident&&resident.endTime)||'');
+  return {st,et};
+}
+function _calcEffectiveServiceCode(rec, resident){
+  const c=String((rec&&rec.calcServiceCodeKey)||'').trim() || String((resident&&resident.serviceCodeKey)||'').trim();
+  return c;
+}
+function _calcUnitForDay(rec, resident){
+  const code=_calcEffectiveServiceCode(rec,resident);
+  return getServiceUnitByCode(code);
+}
+
+function openSanteiDialog(){
+  const dayIdx=curDate.getDate()-1;
+  const todayRes=residentsOnDaySorted(dayIdx,{forMainTable:true});
+  const title=`本日の算定確認（${_fmtYmdJp(curDate)}）`;
+  const rows=todayRes.map(r=>{
+    _ensureResidentBillingFields(r);
+    const rec=getRec(r.name, dk());
+    const checked=((r.sched||[])[dayIdx]===1)?'checked':'';
+    const st=_cleanTimeHHMM(r.startTime)||'';
+    const et=_cleanTimeHHMM(r.endTime)||'';
+    const m=resolveServiceCodeByTime(st,et);
+    const code=m?String(m.code||''):'';
+    const unit=m?Number(m.unit||0):0;
+    const label=code?`${code} (${unit||0}単位)`:'—';
+    const dis=((r.sched||[])[dayIdx]===1)?'':'style="opacity:.55"';
+    return `<div class="settings-list-item" ${dis} style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+      <label style="display:flex;align-items:center;gap:8px;min-width:180px;">
+        <input type="checkbox" class="santei-chk" data-res-name="${escapeAttr(r.name)}" ${checked}>
+        <span style="font-size:18px;font-weight:600;">${escapeHtml(r.name)}</span>
+      </label>
+      <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+        <input type="text" class="santei-time" data-kind="start" data-res-name="${escapeAttr(r.name)}" value="${escapeAttr(st)}" placeholder="0900" style="width:72px;font-size:16px;padding:6px 8px;">
+        <span>〜</span>
+        <input type="text" class="santei-time" data-kind="end" data-res-name="${escapeAttr(r.name)}" value="${escapeAttr(et)}" placeholder="1630" style="width:72px;font-size:16px;padding:6px 8px;">
+        <span style="margin-left:8px;color:var(--text2);">→</span>
+        <span class="santei-auto" data-res-name="${escapeAttr(r.name)}" style="font-weight:700;color:var(--text2);">${escapeHtml(label)}</span>
+      </div>
+    </div>`;
+  }).join('');
+  openMainOv(`
+    <div style="font-size:18px;font-weight:800;margin-bottom:10px;">${title}</div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px;">
+      <button type="button" class="btn btn-gray btn-sm" onclick="santeiSelectAll(true)">全選択</button>
+      <button type="button" class="btn btn-gray btn-sm" onclick="santeiSelectAll(false)">全解除</button>
+    </div>
+    <div>${rows||'<div class="text-gray">本日の利用者がいません</div>'}</div>
+    <p style="font-size:12px;color:var(--text3);margin-top:10px;">※時刻を変更するとサービスコードが自動更新されます</p>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:12px;">
+      <button type="button" class="btn btn-primary btn-sm" onclick="execSanteiConfirm()">確定する</button>
+      <button type="button" class="btn btn-gray btn-sm" onclick="closeMainOv()">キャンセル</button>
+    </div>
+  `);
+  setTimeout(()=>{
+    [...document.querySelectorAll('.santei-time')].forEach(inp=>{
+      inp.addEventListener('input', ()=>updateSanteiAutoFor(inp.getAttribute('data-res-name')));
+    });
+  },0);
+}
+function santeiSelectAll(on){
+  [...document.querySelectorAll('.santei-chk')].forEach(ch=>{ ch.checked=!!on; });
+}
+function updateSanteiAutoFor(resName){
+  const nm=String(resName||'');
+  const st=document.querySelector(`.santei-time[data-kind="start"][data-res-name="${CSS.escape(nm)}"]`)?.value||'';
+  const et=document.querySelector(`.santei-time[data-kind="end"][data-res-name="${CSS.escape(nm)}"]`)?.value||'';
+  const m=resolveServiceCodeByTime(st,et);
+  const label=m?`${m.code||''} (${Number(m.unit||0)||0}単位)`:'—';
+  const el=document.querySelector(`.santei-auto[data-res-name="${CSS.escape(nm)}"]`);
+  if(el) el.textContent=label;
+}
+function execSanteiConfirm(){
+  const dayIdx=curDate.getDate()-1;
+  const chks=[...document.querySelectorAll('.santei-chk')];
+  chks.forEach(ch=>{
+    const name=ch.getAttribute('data-res-name');
+    if(!name) return;
+    if(!ch.checked) return;
+    const r=(db.residents||[]).find(x=>x.name===name) || dbResidentByNameLoose(name);
+    const rec=getRec(name, dk());
+    const stInp=document.querySelector(`.santei-time[data-kind="start"][data-res-name="${CSS.escape(name)}"]`)?.value||'';
+    const etInp=document.querySelector(`.santei-time[data-kind="end"][data-res-name="${CSS.escape(name)}"]`)?.value||'';
+    const st=_cleanTimeHHMM(stInp);
+    const et=_cleanTimeHHMM(etInp);
+    const m=resolveServiceCodeByTime(st,et);
+    rec.calculated=true;
+    rec.calcStartTime=st;
+    rec.calcEndTime=et;
+    rec.calcServiceCodeKey=m?String(m.code||''):'';
+    if(!rec.calcAddons || rec.calcAddons.length===0){
+      rec.calcAddons=[...((r&&r.addonCodes)||[])];
+    }
+  });
+  saveDB();
+  closeMainOv();
+  renderMain();
+  showBriefToast('算定を確定しました',2000,false);
+}
+
+function openJissekiCSVDialog(){
+  const defYm=`${curDate.getFullYear()}-${pad(curDate.getMonth()+1)}`;
+  const html=`
+    <div style="font-size:18px;font-weight:800;margin-bottom:10px;">月次実績CSV</div>
+    <div class="fg" style="max-width:220px;">
+      <label>対象年月</label>
+      <input type="month" id="jissekiMonth" value="${defYm}" onchange="renderJissekiCalendar()">
+    </div>
+    <div id="jissekiCalWrap" style="margin-top:10px;"></div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:12px;">
+      <button type="button" class="btn btn-primary btn-sm" onclick="execJissekiCSV()">CSV出力</button>
+      <button type="button" class="btn btn-gray btn-sm" onclick="closeMainOv()">閉じる</button>
+    </div>
+    <p style="font-size:12px;color:var(--text3);margin-top:10px;line-height:1.45;">✅をタップで取り消し、空欄をタップで追加します（即時保存）。</p>
+  `;
+  openMainOv(html);
+  renderJissekiCalendar();
+}
+function renderJissekiCalendar(){
+  const ym=document.getElementById('jissekiMonth')?.value||'';
+  if(!ym){ return; }
+  const [yS,mS]=ym.split('-');
+  const y=parseInt(yS,10), m=parseInt(mS,10);
+  const days=new Date(y,m,0).getDate();
+  const resList=[...(db.residents||[])].sort(compareResidentsStable);
+  const ths=[...Array.from({length:days},(_,i)=>`<th style="min-width:26px;">${i+1}</th>`),'<th style="min-width:60px;">算定日数</th>'].join('');
+  const rows=resList.map(r=>{
+    let cnt=0;
+    const tds=Array.from({length:days},(_,i)=>{
+      const d=i+1;
+      const dkKey=`${yS}-${pad(m)}-${pad(d)}`;
+      const rec=getRec(r.name, dkKey);
+      const on=rec.calculated===true;
+      if(on) cnt++;
+      const mark=on?'✅':'';
+      return `<td style="text-align:center;cursor:pointer;user-select:none;" onclick="toggleJissekiDay('${escapeAttr(r.name)}','${dkKey}')">${mark}</td>`;
+    }).join('');
+    return `<tr><td style="white-space:nowrap;">${escapeHtml(r.name||'')}</td>${tds}<td style="text-align:center;font-weight:700;">${cnt}</td></tr>`;
+  }).join('');
+  const table=`<div style="overflow:auto;"><table class="resident-mgmt-table"><thead><tr><th style="position:sticky;left:0;background:#F0EFE9;z-index:2;">氏名</th>${ths}</tr></thead><tbody>${rows}</tbody></table></div>`;
+  const el=document.getElementById('jissekiCalWrap');
+  if(el) el.innerHTML=table;
+}
+function toggleJissekiDay(name, dkKey){
+  const rec=getRec(name, dkKey);
+  rec.calculated=!rec.calculated;
+  if(!rec.calculated){
+    rec.calcStartTime='';
+    rec.calcEndTime='';
+    rec.calcServiceCodeKey='';
+    rec.calcAddons=[];
+  }
+  saveDB();
+  renderJissekiCalendar();
+}
+
+function buildCalcToggle(){
+  if(!curRes) return '';
+  const r=dbResidentByNameLoose(curRes);
+  if(!r) return '';
+  _ensureResidentBillingFields(r);
+  const rec=getRec(curRes, dk());
+  const on=rec.calculated===true;
+  const {st,et}=_calcEffectiveTime(rec,r);
+  const m=resolveServiceCodeByTime(st,et);
+  const code=m?String(m.code||''):_calcEffectiveServiceCode(rec,r);
+  const unit=code?getServiceUnitByCode(code):0;
+  const label=code?`${code}（${unit||0}単位）`:'—';
+  const addons=(_svcMaster().addons||[]);
+  if(!Array.isArray(rec.calcAddons)) rec.calcAddons=[];
+  const addonChecks=addons.map(a=>{
+    const c=String(a.code||'');
+    const onA=rec.calcAddons.includes(c);
+    return `<label style="display:inline-flex;align-items:center;gap:6px;margin-right:12px;white-space:nowrap;">
+      <input type="checkbox" ${onA?'checked':''} onchange="toggleCalcAddon('${escapeAttr(c)}', this.checked)">
+      <span>${escapeHtml(a.name||c)}</span>
+    </label>`;
+  }).join('');
+  const body=on?`
+    <div style="margin-top:10px;display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;">
+      <div class="fg" style="min-width:120px;">
+        <label>開始（HHMM）</label>
+        <input type="text" id="calcStartTimeInp" value="${escapeAttr(st)}" placeholder="0900" oninput="saveCalcTime()">
+      </div>
+      <div class="fg" style="min-width:120px;">
+        <label>終了（HHMM）</label>
+        <input type="text" id="calcEndTimeInp" value="${escapeAttr(et)}" placeholder="1630" oninput="saveCalcTime()">
+      </div>
+      <div style="font-size:14px;color:var(--text2);padding-bottom:8px;">
+        → 自動判定: <span id="calcAutoCode" style="font-weight:800;">${escapeHtml(label)}</span>
+      </div>
+    </div>
+    <div style="margin-top:10px;font-size:14px;color:var(--text2);">
+      <div style="font-weight:700;margin-bottom:6px;">加算</div>
+      <div>${addonChecks || '<span class="text-gray">（加算マスタがありません）</span>'}</div>
+    </div>
+  `:'';
+  return `<div class="panel-sec" style="margin:10px 12px 0;background:var(--white);border:1px solid var(--border2);border-radius:var(--r2);padding:12px 14px;">
+    <button type="button" class="btn btn-sm" style="${on?'background:var(--green);color:#fff;border-color:var(--green);':'background:var(--white);color:var(--text2);border:1px solid var(--border2);'}font-weight:800;" onclick="toggleCalculated()">${on?'✅ 算定済':'⬜ 算定'}</button>
+    ${body}
+  </div>`;
+}
+function toggleCalculated(){
+  if(!curRes) return;
+  const r=dbResidentByNameLoose(curRes);
+  if(!r) return;
+  const rec=getRec(curRes, dk());
+  rec.calculated=!rec.calculated;
+  if(!rec.calculated){
+    rec.calcStartTime='';
+    rec.calcEndTime='';
+    rec.calcServiceCodeKey='';
+    rec.calcAddons=[];
+  }else{
+    _ensureResidentBillingFields(r);
+    rec.calcStartTime=_cleanTimeHHMM(r.startTime)||'';
+    rec.calcEndTime=_cleanTimeHHMM(r.endTime)||'';
+    const m=resolveServiceCodeByTime(rec.calcStartTime, rec.calcEndTime);
+    rec.calcServiceCodeKey=m?String(m.code||''):'';
+    if(!rec.calcAddons || rec.calcAddons.length===0){
+      rec.calcAddons=[...((r&&r.addonCodes)||[])];
+    }
+  }
+  saveDB();
+  refreshPanel(curTab);
+  renderMain();
+}
+function saveCalcTime(){
+  if(!curRes) return;
+  const r=dbResidentByNameLoose(curRes);
+  if(!r) return;
+  const rec=getRec(curRes, dk());
+  if(!rec.calculated) return;
+  const st=_cleanTimeHHMM(document.getElementById('calcStartTimeInp')?.value||'');
+  const et=_cleanTimeHHMM(document.getElementById('calcEndTimeInp')?.value||'');
+  rec.calcStartTime=st;
+  rec.calcEndTime=et;
+  const m=resolveServiceCodeByTime(st,et);
+  rec.calcServiceCodeKey=m?String(m.code||''):'';
+  const code=m?String(m.code||''):_calcEffectiveServiceCode(rec,r);
+  const unit=code?getServiceUnitByCode(code):0;
+  const lbl=code?`${code}（${unit||0}単位）`:'—';
+  const el=document.getElementById('calcAutoCode');
+  if(el) el.textContent=lbl;
+  saveDB();
+  renderMain();
+}
+function toggleCalcAddon(code, on){
+  if(!curRes) return;
+  const rec=getRec(curRes, dk());
+  if(!Array.isArray(rec.calcAddons)) rec.calcAddons=[];
+  const c=String(code||'').trim();
+  if(!c) return;
+  const has=rec.calcAddons.includes(c);
+  if(on && !has) rec.calcAddons.push(c);
+  if(!on && has) rec.calcAddons=rec.calcAddons.filter(x=>x!==c);
+  saveDB();
+}
+
+function downloadCSVasShiftJIS(csvContent, filename){
+  const text=String(csvContent||'');
+  try{
+    if(typeof Encoding==='undefined' || !Encoding || typeof Encoding.convert!=='function'){
+      console.warn('encoding-japanese not loaded; fallback to UTF-8 download');
+      showBriefToast('Shift-JIS変換ライブラリ未読込のためUTF-8で出力しました（取込エラーの可能性）', 4500, true);
+      downloadTextFile(text, filename);
+      return;
+    }
+    const unicodeArray = Encoding.stringToCode(text);
+    const sjisArray = Encoding.convert(unicodeArray, { to: 'SJIS', from: 'UNICODE' });
+    const uint8Array = new Uint8Array(sjisArray);
+    const blob = new Blob([uint8Array], { type: 'text/csv;charset=shift_jis;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    setTimeout(()=>URL.revokeObjectURL(url), 1000);
+  }catch(e){
+    console.error(e);
+    showBriefToast('Shift-JIS変換に失敗したためUTF-8で出力しました', 3500, true);
+    downloadTextFile(text, filename);
+  }
+}
+function downloadTextFile(text, filename){
+  const blob=new Blob([String(text||'')],{type:'text/csv;charset=utf-8;'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url;
+  a.download=filename;
+  a.click();
+  setTimeout(()=>URL.revokeObjectURL(url),1000);
+}
+
+function execJissekiCSV(){
+  const ym=document.getElementById('jissekiMonth')?.value||'';
+  if(!ym){ alert('対象年月を選択してください'); return; }
+  const [yS,mS]=ym.split('-');
+  const y=parseInt(yS,10), m=parseInt(mS,10);
+  if(!y||!m){ alert('対象年月が不正です'); return; }
+  const S=db.settings||{};
+  const csvVer='202407';
+  const prefCode=String(S.prefCode||'412023').trim()||'412023';
+  const officeNumber=String(S.officeNumber||'').trim();
+  const serviceTypeCode=String(S.serviceTypeCode||'').trim();
+  if(!officeNumber || officeNumber.length<10){
+    alert('請求設定で「自事業所番号」を設定してください');
+    return;
+  }
+  if(!serviceTypeCode){
+    alert('請求設定で「サービス種類コード」を設定してください（例: 78）');
+    return;
+  }
+  const outDate=_ymdNoDash(new Date());
+  const targetYm=_ymNoDash(new Date(y,m-1,1));
+  const days=new Date(y,m,0).getDate();
+
+  const resList=[...(db.residents||[])].sort(compareResidentsStable);
+  // ケアマネ事業所番号ごとに分割
+  const groups=new Map(); // key: careManagerOffice
+  resList.forEach(r=>{
+    _ensureResidentBillingFields(r);
+    const cm=_cleanDigits(r.careManagerOffice)||'';
+    if(!cm) return;
+    if(!groups.has(cm)) groups.set(cm,[]);
+    groups.get(cm).push(r);
+  });
+  if(groups.size===0){
+    alert('ケアマネ事業所番号が設定された利用者がいません（請求設定で入力してください）');
+    return;
+  }
+
+  const makeLine=(cols)=>cols.map(v=>{
+    const s=v==null?'':String(v);
+    if(s.includes(',')||s.includes('"')||s.includes('\n')) return `"${s.replace(/"/g,'""')}"`;
+    return s;
+  }).join(',');
+
+  const filenames=[];
+  groups.forEach((residents, cmOffice)=>{
+    let csvLines=[];
+    residents.forEach(r=>{
+      // 月内の算定日を列挙
+      let firstDayKey='';
+      for(let d=1; d<=days; d++){
+        const dkKey=`${yS}-${pad(m)}-${pad(d)}`;
+        const rec=getRec(r.name, dkKey);
+        if(rec.calculated!==true) continue;
+        if(!firstDayKey) firstDayKey=dkKey;
+        const recDay=getRec(r.name, dkKey);
+        const effTime=_calcEffectiveTime(recDay, r);
+        const useCode=_calcEffectiveServiceCode(recDay, r);
+        const unit=getServiceUnitByCode(useCode);
+        const baseCols=[
+          csvVer,
+          prefCode,
+          _cleanDigits(r.insuredNumber||''),
+          outDate,
+          targetYm,
+          _cleanDigits(r.careManagerOffice||''),
+          String(r.careManagerName||'').trim(),
+          unit||0,
+          '',
+          dkKey.replace(/-/g,''),
+          '',
+          effTime.st,
+          effTime.et,
+          '1',
+          useCode,
+          '', '', '', '',
+          officeNumber,
+          String(S.facilityName||'').trim(),
+          '',
+          '0',
+          officeNumber,
+          '',
+        ];
+        csvLines.push(makeLine(baseCols));
+        // 加算（その日）
+        const addList=Array.isArray(recDay.calcAddons)?recDay.calcAddons:[];
+        addList.forEach(code=>{
+          const c=String(code||'').trim(); if(!c) return;
+          const u=getAddonUnit(c);
+          const cols=baseCols.slice();
+          cols[7]=u||0; // 列8 単位数
+          cols[14]=c;   // 列15 サービスコード
+          csvLines.push(makeLine(cols));
+        });
+      }
+      // 処遇改善：月1回（最初の算定日）
+      if(firstDayKey && String(r.shoguCode||'').trim()){
+        const recFirst=getRec(r.name, firstDayKey);
+        const useCode=String(r.shoguCode||'').trim();
+        const cols=[
+          csvVer,
+          prefCode,
+          _cleanDigits(r.insuredNumber||''),
+          outDate,
+          targetYm,
+          _cleanDigits(r.careManagerOffice||''),
+          String(r.careManagerName||'').trim(),
+          Math.max(0, Number(r.shoguUnit||0)||0),
+          '',
+          firstDayKey.replace(/-/g,''),
+          '',
+          '9999',
+          '9999',
+          '1',
+          useCode,
+          '', '', '', '',
+          officeNumber,
+          String(S.facilityName||'').trim(),
+          '',
+          '0',
+          officeNumber,
+          '',
+        ];
+        csvLines.push(makeLine(cols));
+      }
+    });
+    if(!csvLines.length) return;
+    const ts=_ymdNoDash(new Date()) + pad(new Date().getHours()) + pad(new Date().getMinutes()) + pad(new Date().getSeconds());
+    const fname=`UPJSK_${targetYm}_${officeNumber}_${serviceTypeCode}_${cmOffice}_43_${ts}.CSV`;
+    filenames.push(fname);
+    downloadCSVasShiftJIS(csvLines.join('\r\n')+'\r\n', fname);
+  });
+  if(filenames.length){
+    showBriefToast(`CSVを出力しました（${filenames.length}ファイル）`, 2600, false);
+  }else{
+    alert('算定済みデータが見つかりませんでした');
+  }
+}
 function calcMealIntakeTotalPercent(rec, residentName){
   if(!rec||!rec.meal) return null;
   const m=rec.meal||{};
@@ -3089,6 +3577,15 @@ function renderMain(){
   }
   tbody.innerHTML=todayRes.map(r=>{
     const rec=getDayRecordByResidentName(dk(),r.name)||{};
+    const _rTodayRec=getRec(r.name, dk());
+    let santeiCell='';
+    if(_rTodayRec && _rTodayRec.calculated===true){
+      santeiCell='<span class="cell-ok">✅</span>';
+    }else if((r.sched||[])[day]===1){
+      santeiCell='<span class="cell-empty" style="color:var(--text3);font-weight:700;">〇</span>';
+    }else{
+      santeiCell='';
+    }
     // 申送（選択日当日終了時点から72時間以内のメモ：複数日チェック／履歴と同基準）
     const refEnd=historyRefEndMs(), winMs=72*3600000;
     const _h48chk=()=>{
@@ -3173,6 +3670,7 @@ function renderMain(){
     const mdc=_mParts.length?`<span class="cell-val" style="font-size:18px;letter-spacing:1px;">${_mParts.join('')}</span>`:'<span class="cell-empty">—</span>';
 
     return `<tr>
+      <td style="width:44px;min-width:44px;padding:4px;" onclick="openDetail('${r.name}','notes')">${santeiCell}</td>
       <td style="width:32px;min-width:32px;padding:4px;" onclick="openDetail('${r.name}','notes')">${nc}</td>
       <td class="name-cell res-div-r">
         <div class="name-cell-inner">
@@ -3197,7 +3695,7 @@ function renderMain(){
   }).join('');
   // ＋ 利用者追加行（最下部・氏名列に配置）
   tbody.innerHTML += `<tr class="res-add-row no-print">
-    <td></td><td><button class="res-add-btn" onclick="openAddResOv()">＋ 利用者を追加</button></td><td colspan="10"></td>
+    <td></td><td></td><td><button class="res-add-btn" onclick="openAddResOv()">＋ 利用者を追加</button></td><td colspan="10"></td>
   </tr>`;
 }
 
@@ -3299,17 +3797,18 @@ function showPanel(tab){ refreshPanel(tab); }
 function refreshPanel(tab){
   const el=document.getElementById('detPanel');
   if(!el) return;
+  const calcHtml=buildCalcToggle();
   switch(tab){
-    case 'notes':     el.innerHTML=buildNotesPanel(); break;
-    case 'vital':     el.innerHTML=buildVitalPanel(); break;
-    case 'excretion': el.innerHTML=buildExPanel(); break;
-    case 'bath':      el.innerHTML=buildBathPanel(); break;
-    case 'care':      el.innerHTML=buildCarePanel(); break;
-    case 'med':       el.innerHTML=buildMedPanel(); break;
-    case 'meal':      el.innerHTML=buildMealPanel(); break;
-    case 'rec':       el.innerHTML=buildRecPanel(); break;
-    case 'day':       el.innerHTML=buildDayPanel(); break;
-    case 'summary':   el.innerHTML=buildSummaryPanel(); break;
+    case 'notes':     el.innerHTML=calcHtml+buildNotesPanel(); break;
+    case 'vital':     el.innerHTML=calcHtml+buildVitalPanel(); break;
+    case 'excretion': el.innerHTML=calcHtml+buildExPanel(); break;
+    case 'bath':      el.innerHTML=calcHtml+buildBathPanel(); break;
+    case 'care':      el.innerHTML=calcHtml+buildCarePanel(); break;
+    case 'med':       el.innerHTML=calcHtml+buildMedPanel(); break;
+    case 'meal':      el.innerHTML=calcHtml+buildMealPanel(); break;
+    case 'rec':       el.innerHTML=calcHtml+buildRecPanel(); break;
+    case 'day':       el.innerHTML=calcHtml+buildDayPanel(); break;
+    case 'summary':   el.innerHTML=calcHtml+buildSummaryPanel(); break;
   }
 }
 
@@ -4802,6 +5301,8 @@ function delSupply(id){
 const SETTINGS_TABS=[
   {id:'facility', label:'施設・ロゴ'},
   {id:'resident_mgmt', label:'利用者管理'},
+  {id:'billing',       label:'請求設定'},
+  {id:'service_codes', label:'サービスコード'},
   {id:'staff',    label:'スタッフ'},
   {id:'supply',   label:'消耗品マスタ'},
   {id:'ex_opts',   label:'排泄項目'},
@@ -4837,6 +5338,8 @@ function renderSettingsPanel(id){
   switch(id){
     case 'facility':  el.innerHTML=buildFacilitySettings(); break;
     case 'resident_mgmt': el.innerHTML=buildResidentMgmtSettings(); break;
+    case 'billing':       el.innerHTML=buildBillingSettings(); break;
+    case 'service_codes': el.innerHTML=buildServiceCodesSettings(); break;
     case 'staff':     el.innerHTML=buildStaffSettings(); break;
     case 'supply':    el.innerHTML=buildSupplySettings(); break;
     case 'ex_opts':   el.innerHTML=buildListSettings('排泄項目','exUrineOptions','尿量オプション','exUrineMlOptions','尿量（㎖）オプション','exPadOptions','パッド汚染オプション','exStoolOptions','排便オプション'); break;
@@ -4969,6 +5472,386 @@ function residentMgmtPushSync(){
       }
       renderSettingsPanel('resident_mgmt');
     });
+}
+
+// ========== v3: 請求設定 / サービスコード ==========
+function _cleanDigits(s){
+  return String(s==null?'':s).replace(/[^\d]/g,'').trim();
+}
+function _cleanTimeHHMM(s){
+  const d=_cleanDigits(s);
+  if(!d) return '';
+  return d.padStart(4,'0').slice(0,4);
+}
+function _svcMaster(){
+  db.settings=db.settings||{};
+  if(!db.settings.serviceCodes || !db.settings.serviceCodes.basic){
+    db.settings.serviceCodes=JSON.parse(JSON.stringify(DEFAULT_SETTINGS.serviceCodes));
+  }
+  return db.settings.serviceCodes;
+}
+function getServiceUnitByCode(code){
+  const m=_svcMaster().basic||[];
+  const hit=m.find(x=>String(x&&x.code||'')===String(code||''));
+  const u=hit?Number(hit.unit):0;
+  return Number.isFinite(u)?u:0;
+}
+function getAddonUnit(code){
+  const m=_svcMaster().addons||[];
+  const hit=m.find(x=>String(x&&x.code||'')===String(code||''));
+  const u=hit?Number(hit.unit):0;
+  return Number.isFinite(u)?u:0;
+}
+function resolveServiceCodeByTime(startTime, endTime){
+  const st=_cleanTimeHHMM(startTime);
+  const et=_cleanTimeHHMM(endTime);
+  if(!st||!et) return null;
+  const toMin=t=>parseInt(t.slice(0,2),10)*60+parseInt(t.slice(2,4),10);
+  const diff=toMin(et)-toMin(st);
+  if(!Number.isFinite(diff) || diff<=0) return null;
+  const b=_svcMaster().basic||[];
+  return b.find(m=>diff>=Number(m.timeFrom) && diff<Number(m.timeTo)) || null;
+}
+
+function buildBillingSettings(){
+  const S=db.settings||{};
+  const sv=_svcMaster();
+  const basics=(sv.basic||[]);
+  const addons=(sv.addons||[]);
+  const shogus=(sv.shogu||[]);
+  const resList=[...(db.residents||[])].sort(compareResidentsStable);
+  const basicOpts=`<option value="">（選択）</option>` + basics.map(m=>{
+    const c=escapeAttr(String(m.code||''));
+    const lbl=escapeHtml(`${m.code||''} ${m.name||''}`);
+    return `<option value="${c}">${lbl}</option>`;
+  }).join('');
+  const shoguOpts=`<option value="">（なし）</option>` + shogus.map(m=>{
+    const c=escapeAttr(String(m.code||''));
+    const lbl=escapeHtml(`${m.code||''} ${m.name||''}`);
+    return `<option value="${c}">${lbl}</option>`;
+  }).join('');
+  const addonCols=addons.map(a=>`<th style="white-space:nowrap;">${escapeHtml(a.name||a.code||'')}</th>`).join('');
+  const addonCells=(r)=>addons.map(a=>{
+    const code=String(a.code||'');
+    const on=(Array.isArray(r.addonCodes)?r.addonCodes:[]).includes(code);
+    return `<td style="text-align:center;"><input type="checkbox" data-res-id="${escapeAttr(String(r.id))}" data-addon-code="${escapeAttr(code)}" ${on?'checked':''}></td>`;
+  }).join('');
+  const rows=resList.map(r=>{
+    const insured=escapeAttr(String(r.insuredNumber||''));
+    const cmOfc=escapeAttr(String(r.careManagerOffice||''));
+    const cmName=escapeAttr(String(r.careManagerName||''));
+    const sc=escapeAttr(String(r.serviceCodeKey||''));
+    const st=escapeAttr(String(r.startTime||''));
+    const et=escapeAttr(String(r.endTime||''));
+    const shc=escapeAttr(String(r.shoguCode||''));
+    const shu=escapeAttr(String(r.shoguUnit||0));
+    const mu=getServiceUnitByCode(r.serviceCodeKey);
+    const m=basics.find(x=>String(x.code||'')===String(r.serviceCodeKey||''))||null;
+    const timeLbl=m?`${m.timeFrom}〜${m.timeTo}分`:'—';
+    return `<tr>
+      <td style="white-space:nowrap;">${escapeHtml(r.name||'')}</td>
+      <td><input type="text" class="bill-inp" data-res-id="${escapeAttr(String(r.id))}" data-field="insuredNumber" value="${insured}" placeholder="10桁"></td>
+      <td>
+        <select class="bill-sel" data-res-id="${escapeAttr(String(r.id))}" data-field="serviceCodeKey" onchange="onBillingServiceCodeChanged(this)">
+          ${basicOpts.replace(`value="${sc}"`,`value="${sc}" selected`)}
+        </select>
+        <div style="font-size:12px;color:var(--text3);margin-top:4px;">
+          単位:<span data-unit-for="${escapeAttr(String(r.id))}">${mu||0}</span> / 時間:<span data-time-for="${escapeAttr(String(r.id))}">${escapeHtml(timeLbl)}</span>
+        </div>
+      </td>
+      <td style="white-space:nowrap;">
+        <input type="text" class="bill-inp" style="width:70px;" data-res-id="${escapeAttr(String(r.id))}" data-field="startTime" value="${st}" placeholder="0900">〜
+        <input type="text" class="bill-inp" style="width:70px;" data-res-id="${escapeAttr(String(r.id))}" data-field="endTime" value="${et}" placeholder="1630">
+      </td>
+      ${addonCells(r)}
+      <td><input type="text" class="bill-inp" data-res-id="${escapeAttr(String(r.id))}" data-field="careManagerOffice" value="${cmOfc}" placeholder="10桁"></td>
+      <td><input type="text" class="bill-inp" data-res-id="${escapeAttr(String(r.id))}" data-field="careManagerName" value="${cmName}" placeholder="担当者名"></td>
+      <td>
+        <select class="bill-sel" data-res-id="${escapeAttr(String(r.id))}" data-field="shoguCode">
+          ${shoguOpts.replace(`value="${shc}"`,`value="${shc}" selected`)}
+        </select>
+      </td>
+      <td><input type="number" class="bill-inp" style="width:90px;" data-res-id="${escapeAttr(String(r.id))}" data-field="shoguUnit" value="${shu}" min="0"></td>
+    </tr>`;
+  }).join('');
+
+  return `<div class="settings-panel active">
+    <div class="panel-sec">
+      <h3>事業所基本情報</h3>
+      <div class="fg-row fg-cols-3">
+        <div class="fg"><label>自事業所番号</label><input type="text" id="stOfficeNumber" value="${escapeAttr(String(S.officeNumber||''))}" placeholder="4170201000"></div>
+        <div class="fg"><label>サービス種類コード</label><input type="text" id="stServiceTypeCode" value="${escapeAttr(String(S.serviceTypeCode||''))}" placeholder="78"></div>
+        <div class="fg"><label>保険者番号</label><input type="text" id="stPrefCode" value="${escapeAttr(String(S.prefCode||'412023'))}" placeholder="412023"></div>
+      </div>
+      <button type="button" class="btn btn-primary btn-sm" onclick="saveBillingBase()">基本情報を保存</button>
+    </div>
+    <div class="panel-sec">
+      <h3>利用者別 請求情報</h3>
+      <div style="overflow:auto;">
+        <table class="resident-mgmt-table">
+          <thead>
+            <tr>
+              <th>氏名</th>
+              <th>被保険者番号</th>
+              <th>基本サービス</th>
+              <th>開始〜終了</th>
+              ${addonCols}
+              <th>ケアマネ事業所番号</th>
+              <th>ケアマネ担当者</th>
+              <th>処遇改善コード</th>
+              <th>処遇改善単位</th>
+            </tr>
+          </thead>
+          <tbody>${rows||''}</tbody>
+        </table>
+      </div>
+      <div style="margin-top:10px;">
+        <button type="button" class="btn btn-primary btn-sm" onclick="saveBillingResidents()">利用者情報を一括保存</button>
+      </div>
+      <p style="font-size:12px;color:var(--text3);margin-top:8px;line-height:1.45;">※ residents にはコードのみ保存し、単位数は serviceCodes マスタから自動取得します。</p>
+    </div>
+  </div>`;
+}
+function onBillingServiceCodeChanged(sel){
+  const rid=sel.getAttribute('data-res-id');
+  const code=sel.value||'';
+  const unit=getServiceUnitByCode(code);
+  const m=(_svcMaster().basic||[]).find(x=>String(x.code||'')===String(code||''))||null;
+  const timeLbl=m?`${m.timeFrom}〜${m.timeTo}分`:'—';
+  const uEl=document.querySelector(`[data-unit-for="${CSS.escape(rid)}"]`);
+  const tEl=document.querySelector(`[data-time-for="${CSS.escape(rid)}"]`);
+  if(uEl) uEl.textContent=String(unit||0);
+  if(tEl) tEl.textContent=timeLbl;
+}
+function saveBillingBase(){
+  db.settings=db.settings||{};
+  const on=_cleanDigits(document.getElementById('stOfficeNumber')?.value||'');
+  const st=_cleanDigits(document.getElementById('stServiceTypeCode')?.value||'');
+  const pc=_cleanDigits(document.getElementById('stPrefCode')?.value||'')||'412023';
+  db.settings.officeNumber=on;
+  db.settings.serviceTypeCode=st;
+  db.settings.prefCode=pc;
+  touchSetU('officeNumber'); touchSetU('serviceTypeCode'); touchSetU('prefCode');
+  saveDB();
+  showBriefToast('保存しました',1600,false);
+}
+function _ensureResidentBillingFields(r){
+  if(!r) return;
+  if(r.insuredNumber===undefined) r.insuredNumber='';
+  if(r.careLevel===undefined) r.careLevel='';
+  if(r.careManagerOffice===undefined) r.careManagerOffice='';
+  if(r.careManagerName===undefined) r.careManagerName='';
+  if(r.serviceCodeKey===undefined) r.serviceCodeKey='';
+  if(r.startTime===undefined) r.startTime='';
+  if(r.endTime===undefined) r.endTime='';
+  if(!Array.isArray(r.addonCodes)) r.addonCodes=[];
+  if(r.shoguCode===undefined) r.shoguCode='';
+  if(r.shoguUnit===undefined) r.shoguUnit=0;
+}
+function saveBillingResidents(){
+  const inputs=[...document.querySelectorAll('.bill-inp, .bill-sel, input[type="checkbox"][data-addon-code]')];
+  if(!inputs.length) return;
+  const byId=new Map();
+  const getR=(id)=>{
+    const r=(db.residents||[]).find(x=>String(x.id)===String(id));
+    if(!r) return null;
+    _ensureResidentBillingFields(r);
+    return r;
+  };
+  inputs.forEach(el=>{
+    const rid=el.getAttribute('data-res-id');
+    if(!rid) return;
+    const r=getR(rid);
+    if(!r) return;
+    byId.set(rid,true);
+    const addon=el.getAttribute('data-addon-code');
+    if(addon){
+      const arr=r.addonCodes;
+      const has=arr.includes(addon);
+      if(el.checked && !has) arr.push(addon);
+      if(!el.checked && has) r.addonCodes=arr.filter(c=>c!==addon);
+      return;
+    }
+    const f=el.getAttribute('data-field');
+    if(!f) return;
+    if(f==='insuredNumber') r.insuredNumber=_cleanDigits(el.value);
+    else if(f==='careManagerOffice') r.careManagerOffice=_cleanDigits(el.value);
+    else if(f==='careManagerName') r.careManagerName=String(el.value||'').trim();
+    else if(f==='serviceCodeKey') r.serviceCodeKey=String(el.value||'').trim();
+    else if(f==='startTime') r.startTime=_cleanTimeHHMM(el.value);
+    else if(f==='endTime') r.endTime=_cleanTimeHHMM(el.value);
+    else if(f==='shoguCode') r.shoguCode=String(el.value||'').trim();
+    else if(f==='shoguUnit') r.shoguUnit=Math.max(0, Number(el.value||0)||0);
+  });
+  if(byId.size) saveDB();
+  showBriefToast('保存しました',1600,false);
+}
+
+function buildServiceCodesSettings(){
+  const sc=_svcMaster();
+  const mkRows=(type, cols)=>{
+    const list=(sc[type]||[]);
+    return list.map((x,i)=>{
+      const code=escapeAttr(String(x.code||''));
+      const name=escapeAttr(String(x.name||''));
+      const unit=escapeAttr(String(x.unit==null?'':x.unit));
+      const tf=escapeAttr(String(x.timeFrom==null?'':x.timeFrom));
+      const tt=escapeAttr(String(x.timeTo==null?'':x.timeTo));
+      if(type==='basic'){
+        return `<tr>
+          <td><input class="sc-inp" data-type="${type}" data-idx="${i}" data-field="code" value="${code}"></td>
+          <td><input class="sc-inp" data-type="${type}" data-idx="${i}" data-field="name" value="${name}"></td>
+          <td><input class="sc-inp" type="number" data-type="${type}" data-idx="${i}" data-field="unit" value="${unit}"></td>
+          <td><input class="sc-inp" type="number" data-type="${type}" data-idx="${i}" data-field="timeFrom" value="${tf}"></td>
+          <td><input class="sc-inp" type="number" data-type="${type}" data-idx="${i}" data-field="timeTo" value="${tt}"></td>
+          <td><button type="button" class="btn btn-gray btn-sm" onclick="delServiceCode('${type}',${i})">削除</button></td>
+        </tr>`;
+      }
+      if(type==='addons'){
+        return `<tr>
+          <td><input class="sc-inp" data-type="${type}" data-idx="${i}" data-field="code" value="${code}"></td>
+          <td><input class="sc-inp" data-type="${type}" data-idx="${i}" data-field="name" value="${name}"></td>
+          <td><input class="sc-inp" type="number" data-type="${type}" data-idx="${i}" data-field="unit" value="${unit}"></td>
+          <td><button type="button" class="btn btn-gray btn-sm" onclick="delServiceCode('${type}',${i})">削除</button></td>
+        </tr>`;
+      }
+      return `<tr>
+        <td><input class="sc-inp" data-type="${type}" data-idx="${i}" data-field="code" value="${code}"></td>
+        <td><input class="sc-inp" data-type="${type}" data-idx="${i}" data-field="name" value="${name}"></td>
+        <td><button type="button" class="btn btn-gray btn-sm" onclick="delServiceCode('${type}',${i})">削除</button></td>
+      </tr>`;
+    }).join('');
+  };
+  return `<div class="settings-panel active">
+    <div class="panel-sec">
+      <h3>基本サービスコード</h3>
+      <div style="overflow:auto;">
+        <table class="resident-mgmt-table">
+          <thead><tr><th>コード</th><th>名称</th><th>単位数</th><th>時間From(分)</th><th>時間To(分)</th><th></th></tr></thead>
+          <tbody>${mkRows('basic')}</tbody>
+        </table>
+      </div>
+      <button type="button" class="btn btn-gray btn-sm" onclick="addServiceCodeRow('basic')">行追加</button>
+    </div>
+    <div class="panel-sec">
+      <h3>加算コード</h3>
+      <div style="overflow:auto;">
+        <table class="resident-mgmt-table">
+          <thead><tr><th>コード</th><th>名称</th><th>単位数</th><th></th></tr></thead>
+          <tbody>${mkRows('addons')}</tbody>
+        </table>
+      </div>
+      <button type="button" class="btn btn-gray btn-sm" onclick="addServiceCodeRow('addons')">行追加</button>
+    </div>
+    <div class="panel-sec">
+      <h3>処遇改善加算コード</h3>
+      <div style="overflow:auto;">
+        <table class="resident-mgmt-table">
+          <thead><tr><th>コード</th><th>名称</th><th></th></tr></thead>
+          <tbody>${mkRows('shogu')}</tbody>
+        </table>
+      </div>
+      <button type="button" class="btn btn-gray btn-sm" onclick="addServiceCodeRow('shogu')">行追加</button>
+    </div>
+    <div class="panel-sec">
+      <button type="button" class="btn btn-primary btn-sm" onclick="saveServiceCodes()">マスタを保存</button>
+    </div>
+    <div class="panel-sec">
+      <h3>サービスコードCSV取込（厚労省）</h3>
+      <p style="font-size:12px;color:var(--text3);margin:6px 0 10px;line-height:1.45;">列1=サービス種類コード、列2=サービス項目コード、列3=略称、列4=単位数 を使用し、種類+項目を結合してコードにします。削除は行いません。</p>
+      <input type="file" accept=".csv,text/csv" onchange="importServiceCodeCSV(this.files&&this.files[0])">
+      <div id="svcImportPreview" style="margin-top:10px;font-size:12px;color:var(--text2);"></div>
+    </div>
+  </div>`;
+}
+function addServiceCodeRow(type){
+  const sc=_svcMaster();
+  sc[type]=Array.isArray(sc[type])?sc[type]:[];
+  if(type==='basic') sc[type].push({code:'',name:'',unit:0,timeFrom:0,timeTo:0});
+  else if(type==='addons') sc[type].push({code:'',name:'',unit:0});
+  else sc[type].push({code:'',name:''});
+  renderSettingsPanel('service_codes');
+}
+function delServiceCode(type, idx){
+  const sc=_svcMaster();
+  sc[type]=Array.isArray(sc[type])?sc[type]:[];
+  if(idx<0||idx>=sc[type].length) return;
+  sc[type].splice(idx,1);
+  renderSettingsPanel('service_codes');
+}
+function saveServiceCodes(){
+  const sc=_svcMaster();
+  const els=[...document.querySelectorAll('.sc-inp')];
+  els.forEach(el=>{
+    const type=el.getAttribute('data-type');
+    const idx=parseInt(el.getAttribute('data-idx')||'-1',10);
+    const field=el.getAttribute('data-field');
+    if(!type||!field||!Number.isFinite(idx)||idx<0) return;
+    sc[type]=Array.isArray(sc[type])?sc[type]:[];
+    const row=sc[type][idx]; if(!row) return;
+    if(field==='code' || field==='name') row[field]=String(el.value||'').trim();
+    else row[field]=Number(el.value||0)||0;
+  });
+  db.settings.serviceCodes=sc;
+  touchSetU('serviceCodes');
+  saveDB();
+  showBriefToast('保存しました',1600,false);
+  renderSettingsPanel('service_codes');
+}
+function importServiceCodeCSV(file){
+  if(!file){ return; }
+  const reader=new FileReader();
+  reader.onload=e=>{
+    try{
+      const text=String(e.target.result||'');
+      const lines=text.split(/\r?\n/).filter(l=>l.trim()!=='');
+      const rows=lines.map(l=>l.split(',').map(x=>String(x||'').replace(/^"|"$/g,'').trim()));
+      const data=rows.map(r=>({type:r[0]||'', item:r[1]||'', name:r[2]||'', unit:r[3]||''})).filter(x=>x.type&&x.item);
+      const preview=data.slice(0,20).map(x=>`${x.type}${x.item} ${x.name} (${x.unit})`).join('<br>');
+      const el=document.getElementById('svcImportPreview');
+      if(el) el.innerHTML=`<div style="font-weight:600;margin-bottom:6px;">プレビュー（先頭20行）</div>${preview||'（空）'}<div style="margin-top:8px;"><button type="button" class="btn btn-primary btn-sm" onclick="applyImportedServiceCodes(window.__svcImportData)">反映</button></div>`;
+      window.__svcImportData=data;
+    }catch(err){
+      const el=document.getElementById('svcImportPreview');
+      if(el) el.textContent='取込に失敗しました: '+(err&&err.message||String(err));
+    }
+  };
+  reader.readAsText(file);
+}
+function applyImportedServiceCodes(data){
+  const list=Array.isArray(data)?data:[];
+  if(!list.length){ alert('取込データがありません'); return; }
+  const sc=_svcMaster();
+  sc.basic=Array.isArray(sc.basic)?sc.basic:[];
+  let changed=0;
+  list.forEach(x=>{
+    const code=String(x.type||'').trim()+String(x.item||'').trim();
+    const unit=Number(String(x.unit||'').replace(/[^\d]/g,''))||0;
+    const name=String(x.name||'').trim();
+    if(!code || !unit) return;
+    const hit=sc.basic.find(m=>String(m.code||'')===code);
+    if(hit){
+      if(Number(hit.unit||0)!==unit){
+        if(confirm(`${code} の単位数を更新しますか？\n${hit.unit} → ${unit}\n名称: ${hit.name||''}`)){
+          hit.unit=unit;
+          if(name && !hit.name) hit.name=name;
+          changed++;
+        }
+      }
+    }else{
+      sc.basic.push({code, name, unit, timeFrom:0, timeTo:0});
+      changed++;
+    }
+  });
+  if(changed){
+    db.settings.serviceCodes=sc;
+    touchSetU('serviceCodes');
+    saveDB();
+    showBriefToast(`反映しました（${changed}件）`,2000,false);
+    renderSettingsPanel('service_codes');
+  }else{
+    showBriefToast('変更はありません',1600,false);
+  }
 }
 
 function buildResidentSettings(){
