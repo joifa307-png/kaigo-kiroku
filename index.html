@@ -1731,8 +1731,22 @@ function medTargetChipSelectedByDefault(r, timingId){
 function buildResidentHeaderRow(){
   const h=['id','氏名','要介護度'];
   for(let d=1;d<=31;d++) h.push('d'+d);
-  h.push('updatedAt');
-  h.push('serviceType');
+  h.push('updatedAt');        // 34
+  h.push('serviceType');      // 35
+  h.push('insuredNumber');    // 36
+  h.push('careManagerOffice');// 37
+  h.push('careManagerName');  // 38
+  h.push('birthDate');        // 39
+  h.push('careExpiry');       // 40
+  h.push('costShare');        // 41
+  h.push('startTime');        // 42
+  h.push('endTime');          // 43
+  h.push('sameBuilding');     // 44
+  h.push('transportType');    // 45
+  h.push('serviceCodeKey');   // 46
+  h.push('addonCodes');       // 47
+  h.push('shoguCode');        // 48
+  h.push('shoguUnit');        // 49
   return h;
 }
 function buildRecordHeaderRow(){
@@ -2124,20 +2138,20 @@ function sheetToDb(rows){
     dbOut.residents.push({
       id:id||genId('r'), name, care, sched, _u:_numU(r[34]),
       serviceType:residentServiceTypeFromSheet(r[35], sched),
-      insuredNumber: String(r[36]||''),
-      careManagerOffice: String(r[37]||''),
-      careManagerName: String(r[38]||''),
-      birthDate: String(r[39]||''),
-      careExpiry: String(r[40]||''),
-      costShare: String(r[41]||''),
-      startTime: String(r[42]||''),
-      endTime: String(r[43]||''),
-      sameBuilding: r[44]==='1',
-      transportType: String(r[45]||'both'),
-      serviceCodeKey: String(r[46]||''),
-      addonCodes: (()=>{ try{ return JSON.parse(r[47]||'[]'); }catch(_){ return []; } })(),
-      shoguCode: String(r[48]||''),
-      shoguUnit: Number(r[49]||0)
+      insuredNumber:    String(r[36]||''),
+      careManagerOffice:String(r[37]||''),
+      careManagerName:  String(r[38]||''),
+      birthDate:        String(r[39]||''),
+      careExpiry:       String(r[40]||''),
+      costShare:        String(r[41]||''),
+      startTime:        String(r[42]||''),
+      endTime:          String(r[43]||''),
+      sameBuilding:     r[44]==='1',
+      transportType:    String(r[45]||'both'),
+      serviceCodeKey:   String(r[46]||''),
+      addonCodes:       (()=>{try{return JSON.parse(r[47]||'[]');}catch(_){return [];}}()),
+      shoguCode:        String(r[48]||''),
+      shoguUnit:        Number(r[49]||0),
     });
     i++;
   }
