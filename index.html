@@ -1824,6 +1824,20 @@ function dbToSheet(inDb){
     for(let di=0;di<31;di++) row.push(sch[di]===1?1:0);
     row.push(_numU(r._u));
     row.push(getResidentClassification(r.name, inDb.settings, inDb.residents)==='inpatient'?'resident':'day');
+    row.push(String(r.insuredNumber||''));
+    row.push(String(r.careManagerOffice||''));
+    row.push(String(r.careManagerName||''));
+    row.push(String(r.birthDate||''));
+    row.push(String(r.careExpiry||''));
+    row.push(String(r.costShare||''));
+    row.push(String(r.startTime||''));
+    row.push(String(r.endTime||''));
+    row.push(r.sameBuilding?'1':'0');
+    row.push(String(r.transportType||'both'));
+    row.push(String(r.serviceCodeKey||''));
+    row.push(JSON.stringify(r.addonCodes||[]));
+    row.push(String(r.shoguCode||''));
+    row.push(String(r.shoguUnit||0));
     rows.push(PR(row));
   });
   rows.push(PR([]));
@@ -2109,7 +2123,21 @@ function sheetToDb(rows){
     while(sched.length<31) sched.push(0);
     dbOut.residents.push({
       id:id||genId('r'), name, care, sched, _u:_numU(r[34]),
-      serviceType:residentServiceTypeFromSheet(r[35], sched)
+      serviceType:residentServiceTypeFromSheet(r[35], sched),
+      insuredNumber: String(r[36]||''),
+      careManagerOffice: String(r[37]||''),
+      careManagerName: String(r[38]||''),
+      birthDate: String(r[39]||''),
+      careExpiry: String(r[40]||''),
+      costShare: String(r[41]||''),
+      startTime: String(r[42]||''),
+      endTime: String(r[43]||''),
+      sameBuilding: r[44]==='1',
+      transportType: String(r[45]||'both'),
+      serviceCodeKey: String(r[46]||''),
+      addonCodes: (()=>{ try{ return JSON.parse(r[47]||'[]'); }catch(_){ return []; } })(),
+      shoguCode: String(r[48]||''),
+      shoguUnit: Number(r[49]||0)
     });
     i++;
   }
