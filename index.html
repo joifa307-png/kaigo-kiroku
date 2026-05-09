@@ -952,17 +952,47 @@ const DEFAULT_SETTINGS = {
   officeShoguUnit: 0,
   serviceCodes: {
     basic: [
-      { code: '781431', name: '地域通所介護41（5〜6時間）', unit: 666, timeFrom: 300, timeTo: 360 },
-      { code: '781441', name: '地域通所介護51（6〜7時間）', unit: 753, timeFrom: 360, timeTo: 420 },
-      { code: '781443', name: '地域通所介護53（7〜8時間）', unit: 858, timeFrom: 420, timeTo: 480 },
-      { code: '781445', name: '地域通所介護55（8〜9時間）', unit: 915, timeFrom: 480, timeTo: 540 },
+      { code:'781241', name:'地域通所介護１１', unit:416,  timeFrom:180, timeTo:240, careLevel:1 },
+      { code:'781242', name:'地域通所介護１２', unit:478,  timeFrom:180, timeTo:240, careLevel:2 },
+      { code:'781243', name:'地域通所介護１３', unit:540,  timeFrom:180, timeTo:240, careLevel:3 },
+      { code:'781244', name:'地域通所介護１４', unit:600,  timeFrom:180, timeTo:240, careLevel:4 },
+      { code:'781245', name:'地域通所介護１５', unit:663,  timeFrom:180, timeTo:240, careLevel:5 },
+      { code:'781246', name:'地域通所介護２１', unit:436,  timeFrom:240, timeTo:300, careLevel:1 },
+      { code:'781247', name:'地域通所介護２２', unit:501,  timeFrom:240, timeTo:300, careLevel:2 },
+      { code:'781248', name:'地域通所介護２３', unit:566,  timeFrom:240, timeTo:300, careLevel:3 },
+      { code:'781249', name:'地域通所介護２４', unit:629,  timeFrom:240, timeTo:300, careLevel:4 },
+      { code:'781250', name:'地域通所介護２５', unit:695,  timeFrom:240, timeTo:300, careLevel:5 },
+      { code:'781341', name:'地域通所介護３１', unit:657,  timeFrom:300, timeTo:360, careLevel:1 },
+      { code:'781342', name:'地域通所介護３２', unit:776,  timeFrom:300, timeTo:360, careLevel:2 },
+      { code:'781343', name:'地域通所介護３３', unit:896,  timeFrom:300, timeTo:360, careLevel:3 },
+      { code:'781344', name:'地域通所介護３４', unit:1013, timeFrom:300, timeTo:360, careLevel:4 },
+      { code:'781345', name:'地域通所介護３５', unit:1134, timeFrom:300, timeTo:360, careLevel:5 },
+      { code:'781346', name:'地域通所介護４１', unit:678,  timeFrom:360, timeTo:420, careLevel:1 },
+      { code:'781347', name:'地域通所介護４２', unit:801,  timeFrom:360, timeTo:420, careLevel:2 },
+      { code:'781348', name:'地域通所介護４３', unit:925,  timeFrom:360, timeTo:420, careLevel:3 },
+      { code:'781349', name:'地域通所介護４４', unit:1049, timeFrom:360, timeTo:420, careLevel:4 },
+      { code:'781350', name:'地域通所介護４５', unit:1172, timeFrom:360, timeTo:420, careLevel:5 },
+      { code:'781441', name:'地域通所介護５１', unit:753,  timeFrom:420, timeTo:480, careLevel:1 },
+      { code:'781442', name:'地域通所介護５２', unit:890,  timeFrom:420, timeTo:480, careLevel:2 },
+      { code:'781443', name:'地域通所介護５３', unit:1032, timeFrom:420, timeTo:480, careLevel:3 },
+      { code:'781444', name:'地域通所介護５４', unit:1172, timeFrom:420, timeTo:480, careLevel:4 },
+      { code:'781445', name:'地域通所介護５５', unit:1312, timeFrom:420, timeTo:480, careLevel:5 },
+      { code:'781446', name:'地域通所介護６１', unit:783,  timeFrom:480, timeTo:540, careLevel:1 },
+      { code:'781447', name:'地域通所介護６２', unit:925,  timeFrom:480, timeTo:540, careLevel:2 },
+      { code:'781448', name:'地域通所介護６３', unit:1072, timeFrom:480, timeTo:540, careLevel:3 },
+      { code:'781449', name:'地域通所介護６４', unit:1220, timeFrom:480, timeTo:540, careLevel:4 },
+      { code:'781450', name:'地域通所介護６５', unit:1365, timeFrom:480, timeTo:540, careLevel:5 },
     ],
     addons: [
-      { code: '785301', name: '入浴介助加算Ⅰ', unit: 40 },
-      { code: '785302', name: '入浴介助加算Ⅱ', unit: 55 },
+      { code:'785301', name:'地域通所介護入浴介助加算Ⅰ', unit:40 },
+      { code:'785303', name:'地域通所介護入浴介助加算Ⅱ', unit:55 },
+    ],
+    deducts: [
+      { code:'785611', name:'地域通所介護同一建物減算',    unit:-94 },
+      { code:'785612', name:'地域通所介護送迎減算（片道）', unit:-47 },
     ],
     shogu: [
-      { code: '786107', name: '処遇改善加算Ⅱ' },
+      { code:'786107', name:'地域通所介護処遇改善加算Ⅱ' },
     ],
   },
   careManagerList: [],
@@ -1099,9 +1129,14 @@ function loadDB(){
     touchSetU('dayItems');
     needSaveAfterMigrate=true;
   }
-  // v3マイグレーション：サービスコードマスタ・請求フィールドの初期化
-  if(!db.settings.serviceCodes || !db.settings.serviceCodes.basic){
+  // v3/v6マイグレーション：サービスコードマスタ（旧版 basic 件数少・deducts 無しを補完）
+  if(!db.settings.serviceCodes || !db.settings.serviceCodes.basic ||
+     (db.settings.serviceCodes.basic||[]).length < 10){
     db.settings.serviceCodes = JSON.parse(JSON.stringify(DEFAULT_SETTINGS.serviceCodes));
+    needSaveAfterMigrate = true;
+  }
+  if(!Array.isArray(db.settings.serviceCodes.deducts)){
+    db.settings.serviceCodes.deducts = JSON.parse(JSON.stringify((DEFAULT_SETTINGS.serviceCodes&&DEFAULT_SETTINGS.serviceCodes.deducts)||[]));
     needSaveAfterMigrate = true;
   }
   if(db.settings.officeNumber === undefined) db.settings.officeNumber = '';
@@ -1446,7 +1481,7 @@ const REC = {
 const N_RECORD_COLS = 57;
 
 /** デプロイのたびに上げる（設定→データ管理の「アプリ情報」で表示） */
-const APP_VERSION='1.0.32';
+const APP_VERSION='1.0.34';
 function isStandaloneWebApp(){
   try{
     if(window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches) return true;
@@ -3011,7 +3046,7 @@ function openSanteiDialog(){
     const checked=((r.sched||[])[dayIdx]===1)?'checked':'';
     const st=_cleanTimeHHMM(r.startTime)||'0900';
     const et=_cleanTimeHHMM(r.endTime)||'1630';
-    const m=resolveServiceCodeByTime(st,et);
+    const m=resolveServiceCodeByTime(st,et,r.name);
     const code=m?String(m.code||''):'';
     const unit=m?Number(m.unit||0):0;
     const label=code?`${code} (${unit||0}単位)`:'—';
@@ -3056,7 +3091,7 @@ function updateSanteiAutoFor(resName){
   const nm=String(resName||'');
   const st=document.querySelector(`.santei-time[data-kind="start"][data-res-name="${CSS.escape(nm)}"]`)?.value||'';
   const et=document.querySelector(`.santei-time[data-kind="end"][data-res-name="${CSS.escape(nm)}"]`)?.value||'';
-  const m=resolveServiceCodeByTime(st,et);
+  const m=resolveServiceCodeByTime(st,et,nm);
   const label=m?`${m.code||''} (${Number(m.unit||0)||0}単位)`:'—';
   const el=document.querySelector(`.santei-auto[data-res-name="${CSS.escape(nm)}"]`);
   if(el) el.textContent=label;
@@ -3068,20 +3103,19 @@ function execSanteiConfirm(){
     const name=ch.getAttribute('data-res-name');
     if(!name) return;
     if(!ch.checked) return;
-    const r=(db.residents||[]).find(x=>x.name===name) || dbResidentByNameLoose(name);
+    const r=(db.residents||[]).find(x=>normalizeResidentName(x.name)===normalizeResidentName(name)) || dbResidentByNameLoose(name);
     const rec=getRec(name, dk());
     const stInp=document.querySelector(`.santei-time[data-kind="start"][data-res-name="${CSS.escape(name)}"]`)?.value||'';
     const etInp=document.querySelector(`.santei-time[data-kind="end"][data-res-name="${CSS.escape(name)}"]`)?.value||'';
     const st=_cleanTimeHHMM(stInp);
     const et=_cleanTimeHHMM(etInp);
-    const m=resolveServiceCodeByTime(st,et);
+    const m=resolveServiceCodeByTime(st,et,name);
     rec.calculated=true;
     rec.calcStartTime=st;
     rec.calcEndTime=et;
     rec.calcServiceCodeKey=m?String(m.code||''):'';
-    if(!rec.calcAddons || rec.calcAddons.length===0){
-      rec.calcAddons=[...((db.settings&&db.settings.officeAddonCodes)||[])];
-    }
+    rec.calcAddons=[...((db.settings&&db.settings.officeAddonCodes)||[])];
+    applyDeductAddonsToRecord(rec,r);
   });
   saveDB();
   closeMainOv();
@@ -3401,7 +3435,7 @@ function execCSVExport(){
       addons.forEach(addonCode=>{
         const c=String(addonCode||'').trim();
         if(!c) return;
-        const addonUnit=getAddonUnit(c);
+        const addonUnit=getAddonOrDeductUnit(c);
         csvLines.push([
           '202407', S.prefCode||'412023', insured,
           todayStr, targetYm, cmOffice, cmName,
@@ -3447,7 +3481,7 @@ function buildCalcToggle(){
   const rec=getRec(curRes, dk());
   const on=rec.calculated===true;
   const {st,et}=_calcEffectiveTime(rec,r);
-  const m=resolveServiceCodeByTime(st,et);
+  const m=resolveServiceCodeByTime(st,et,curRes);
   const code=m?String(m.code||''):_calcEffectiveServiceCode(rec,r);
   const unit=code?getServiceUnitByCode(code):0;
   const label=code?`${code}（${unit||0}単位）`:'—';
@@ -3497,7 +3531,7 @@ function buildSanteiPanel(){
   let {st,et}=_calcEffectiveTime(rec,r);
   st=_cleanTimeHHMM(st)||'0900';
   et=_cleanTimeHHMM(et)||'1630';
-  const m=resolveServiceCodeByTime(st,et);
+  const m=resolveServiceCodeByTime(st,et,curRes);
   const code=m?String(m.code||''):_calcEffectiveServiceCode(rec,r);
   const unit=code?getServiceUnitByCode(code):0;
   const label=code?`${code}（${unit||0}単位）`:'—';
@@ -3511,6 +3545,27 @@ function buildSanteiPanel(){
       <span>${escapeHtml(a.name||c)}</span>
     </label>`;
   }).join('');
+  const dList=_svcMaster().deducts||[];
+  const u611=Number((dList.find(d=>String(d.code)==='785611')||{}).unit)||0;
+  const u612=Number((dList.find(d=>String(d.code)==='785612')||{}).unit)||0;
+  const ttp=r.transportType||'both';
+  const ttpLbl=ttp==='both'?'送迎あり':(ttp==='one_way'?'片道のみ':'送迎なし');
+  let deductEx='';
+  if(r.sameBuilding) deductEx=u611?`同一建物減算 ${u611}単位`:'';
+  else if(ttp==='one_way') deductEx=u612?`送迎減算（片道）${u612}単位`:'';
+  else if(ttp==='none') deductEx=u612?`送迎減算（片道）${u612}単位 ×2`:'';
+  const deductBlock=`
+    <div class="panel-sec" style="margin-top:10px;">
+      <h3>減算（参照）</h3>
+      <p style="font-size:12px;color:var(--text3);line-height:1.45;margin:0 0 8px;">利用者基本情報の設定を表示しています。変更は利用者基本情報で保存し、算定確定を再度行ってください。</p>
+      <div style="display:flex;flex-wrap:wrap;gap:14px;align-items:center;font-size:15px;color:var(--text2);">
+        <label style="display:inline-flex;align-items:center;gap:6px;opacity:.85;">
+          <input type="checkbox" disabled ${r.sameBuilding?'checked':''}> 同一建物減算
+        </label>
+        <span>送迎区分：${escapeHtml(ttpLbl)}</span>
+      </div>
+      ${deductEx?`<div style="margin-top:8px;font-size:14px;color:var(--text2);">見込み：${escapeHtml(deductEx)}</div>`:''}
+    </div>`;
   const shCode=String((db.settings&&db.settings.officeShoguCode)||'').trim();
   const shUnit=Math.max(0, Number((db.settings&&db.settings.officeShoguUnit)||0)||0);
   const shoguLine = shCode
@@ -3540,6 +3595,7 @@ function buildSanteiPanel(){
     <div class="panel-sec">
       <h3>加算</h3>
       <div>${addonChecks || '<span class="text-gray">（加算マスタがありません）</span>'}</div>
+      ${deductBlock}
       ${shoguLine}
     </div>
   `:`
@@ -3569,11 +3625,10 @@ function toggleCalculated(){
     _ensureResidentBillingFields(r);
     rec.calcStartTime=_cleanTimeHHMM(r.startTime)||'0900';
     rec.calcEndTime=_cleanTimeHHMM(r.endTime)||'1630';
-    const m=resolveServiceCodeByTime(rec.calcStartTime, rec.calcEndTime);
+    const m=resolveServiceCodeByTime(rec.calcStartTime, rec.calcEndTime, curRes);
     rec.calcServiceCodeKey=m?String(m.code||''):'';
-    if(!rec.calcAddons || rec.calcAddons.length===0){
-      rec.calcAddons=[...((db.settings&&db.settings.officeAddonCodes)||[])];
-    }
+    rec.calcAddons=[...((db.settings&&db.settings.officeAddonCodes)||[])];
+    applyDeductAddonsToRecord(rec,r);
   }
   saveDB();
   refreshPanel(curTab);
@@ -3589,7 +3644,7 @@ function saveCalcTime(){
   const et=_cleanTimeHHMM(document.getElementById('calcEndTimeInp')?.value||'');
   rec.calcStartTime=st;
   rec.calcEndTime=et;
-  const m=resolveServiceCodeByTime(st,et);
+  const m=resolveServiceCodeByTime(st,et,curRes);
   rec.calcServiceCodeKey=m?String(m.code||''):'';
   const code=m?String(m.code||''):_calcEffectiveServiceCode(rec,r);
   const unit=code?getServiceUnitByCode(code):0;
@@ -3601,6 +3656,7 @@ function saveCalcTime(){
 }
 function toggleCalcAddon(code, on){
   if(!curRes) return;
+  const r=dbResidentByNameLoose(curRes);
   const rec=getRec(curRes, dk());
   if(!Array.isArray(rec.calcAddons)) rec.calcAddons=[];
   const c=String(code||'').trim();
@@ -3608,6 +3664,7 @@ function toggleCalcAddon(code, on){
   const has=rec.calcAddons.includes(c);
   if(on && !has) rec.calcAddons.push(c);
   if(!on && has) rec.calcAddons=rec.calcAddons.filter(x=>x!==c);
+  if(r) applyDeductAddonsToRecord(rec,r);
   saveDB();
 }
 
@@ -3734,7 +3791,7 @@ function execJissekiCSV(){
         const addList=Array.isArray(recDay.calcAddons)?recDay.calcAddons:[];
         addList.forEach(code=>{
           const c=String(code||'').trim(); if(!c) return;
-          const u=getAddonUnit(c);
+          const u=getAddonOrDeductUnit(c);
           const cols=baseCols.slice();
           cols[7]=u||0; // 列8 単位数
           cols[14]=c;   // 列15 サービスコード
@@ -5934,15 +5991,67 @@ function getAddonUnit(code){
   const u=hit?Number(hit.unit):0;
   return Number.isFinite(u)?u:0;
 }
-function resolveServiceCodeByTime(startTime, endTime){
+function getAddonOrDeductUnit(code){
+  const c=String(code||'').trim();
+  const deducts=_svcMaster().deducts||[];
+  const dm=deducts.find(d=>String(d.code)===c);
+  if(dm){
+    const u=Number(dm.unit);
+    return Number.isFinite(u)?u:0;
+  }
+  return getAddonUnit(c);
+}
+function parseCareLevel(careStr){
+  const s=String(careStr||'');
+  const map={'１':1,'２':2,'３':3,'４':4,'５':5,'1':1,'2':2,'3':3,'4':4,'5':5};
+  const m=s.match(/[１２３４５1-5]$/);
+  return m?(map[m[0]]||0):0;
+}
+function resolveServiceCodeByTime(startTime, endTime, residentNameOrCareLevel){
   const st=_cleanTimeHHMM(startTime);
   const et=_cleanTimeHHMM(endTime);
   if(!st||!et) return null;
   const toMin=t=>parseInt(t.slice(0,2),10)*60+parseInt(t.slice(2,4),10);
   const diff=toMin(et)-toMin(st);
-  if(!Number.isFinite(diff) || diff<=0) return null;
+  if(!Number.isFinite(diff)||diff<=0) return null;
   const b=_svcMaster().basic||[];
+  let careLevel=0;
+  if(typeof residentNameOrCareLevel==='number'){
+    careLevel=residentNameOrCareLevel;
+  }else if(typeof residentNameOrCareLevel==='string' && residentNameOrCareLevel){
+    const r=(db.residents||[]).find(x=>
+      normalizeResidentName(x.name)===normalizeResidentName(residentNameOrCareLevel));
+    if(r) careLevel=parseCareLevel(r.care||'');
+  }
+  if(careLevel>=1 && careLevel<=5){
+    const hit=b.find(m=>
+      diff>=Number(m.timeFrom) && diff<Number(m.timeTo) &&
+      Number(m.careLevel)===careLevel
+    );
+    if(hit) return hit;
+  }
   return b.find(m=>diff>=Number(m.timeFrom) && diff<Number(m.timeTo)) || null;
+}
+function applyDeductAddonsToRecord(rec, resident){
+  if(!rec||!resident) return;
+  _ensureResidentBillingFields(resident);
+  const deducts=_svcMaster().deducts||[];
+  const isDed=c=>deducts.some(d=>String(d.code)===String(c));
+  let arr=Array.isArray(rec.calcAddons)?[...rec.calcAddons]:[];
+  arr=arr.filter(c=>!isDed(c));
+  if(resident.sameBuilding){
+    const dc=deducts.find(d=>String(d.code)==='785611');
+    if(dc && !arr.includes('785611')) arr.push('785611');
+  }else{
+    if(resident.transportType==='one_way'){
+      const dc=deducts.find(d=>String(d.code)==='785612');
+      if(dc && !arr.includes('785612')) arr.push('785612');
+    }else if(resident.transportType==='none'){
+      const dc=deducts.find(d=>String(d.code)==='785612');
+      if(dc){ arr.push('785612'); arr.push('785612'); }
+    }
+  }
+  rec.calcAddons=arr;
 }
 
 function buildBillingSettings(){
@@ -6101,6 +6210,8 @@ function _ensureResidentBillingFields(r){
   if(!Array.isArray(r.addonCodes)) r.addonCodes=[];
   if(r.shoguCode===undefined) r.shoguCode='';
   if(r.shoguUnit===undefined) r.shoguUnit=0;
+  if(r.transportType===undefined) r.transportType='both';
+  if(r.sameBuilding===undefined) r.sameBuilding=false;
   if(r.birthDate === undefined) r.birthDate = '';
   if(r.gender === undefined) r.gender = '';
   if(r.phone === undefined) r.phone = '';
@@ -6321,6 +6432,16 @@ function buildResidentInfoSettings(){
       <td style="text-align:center;"><input type="checkbox" data-resident-id="${rid}"${checked} onchange="onResidentInpatientCheckbox(this)"></td>
       <td><input type="text" class="res-info-inp" list="timeOptions30min" data-res-id="${rid}" data-field="startTime" value="${escapeAttr(String(r.startTime||'0900'))}" style="width:80px;font-size:13px;"></td>
       <td><input type="text" class="res-info-inp" list="timeOptions30min" data-res-id="${rid}" data-field="endTime" value="${escapeAttr(String(r.endTime||'1630'))}" style="width:80px;font-size:13px;"></td>
+      <td style="text-align:center;">
+        <input type="checkbox" class="res-info-inp" data-res-id="${rid}" data-field="sameBuilding" ${r.sameBuilding ? 'checked' : ''}>
+      </td>
+      <td>
+        <select class="res-info-sel" data-res-id="${rid}" data-field="transportType" style="font-size:12px;">
+          <option value="both"   ${(r.transportType||'both')==='both'    ? 'selected':''}>送迎あり</option>
+          <option value="one_way"${(r.transportType||'both')==='one_way' ? 'selected':''}>片道のみ</option>
+          <option value="none"   ${(r.transportType||'both')==='none'    ? 'selected':''}>送迎なし</option>
+        </select>
+      </td>
       <td><input type="text" class="res-info-inp" data-res-id="${rid}" data-field="birthDate" value="${escapeAttr(String(r.birthDate||''))}" placeholder="YYYY/MM/DD"></td>
       <td><input type="text" class="res-info-inp" data-res-id="${rid}" data-field="gender" value="${escapeAttr(String(r.gender||''))}" placeholder="男/女"></td>
       <td>
@@ -6362,7 +6483,7 @@ function buildResidentInfoSettings(){
         <table class="resident-mgmt-table">
           <thead>
             <tr>
-              <th>氏名</th><th>入所者</th><th>標準開始</th><th>標準終了</th><th>生年月日</th><th>性別</th><th>要介護度</th><th>被保険者番号</th><th>認定終了日</th><th>負担割合</th><th>居宅介護支援事業所</th><th>ケアマネ</th><th>連絡先</th><th>削除</th>
+              <th>氏名</th><th>入所者</th><th>標準開始</th><th>標準終了</th><th style="white-space:nowrap;">同一建物</th><th style="white-space:nowrap;">送迎区分</th><th>生年月日</th><th>性別</th><th>要介護度</th><th>被保険者番号</th><th>認定終了日</th><th>負担割合</th><th>居宅介護支援事業所</th><th>ケアマネ</th><th>連絡先</th><th>削除</th>
             </tr>
           </thead>
           <tbody>${rows||''}</tbody>
@@ -6394,6 +6515,8 @@ function saveResidentInfoAll(){
     else if(f === 'phone') r.phone = String(el.value||'').trim();
     else if(f === 'startTime') r.startTime = _cleanTimeHHMM(el.value) || '0900';
     else if(f === 'endTime') r.endTime = _cleanTimeHHMM(el.value) || '1630';
+    else if(f === 'sameBuilding') r.sameBuilding = !!el.checked;
+    else if(f === 'transportType') r.transportType = String(el.value||'both').trim();
     else if(f === 'careManagerOfficeKey'){
       cmOfficeSel.set(rid, parseInt(el.value,10));
     }else if(f === 'careManagerKey'){
