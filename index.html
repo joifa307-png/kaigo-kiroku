@@ -6636,7 +6636,7 @@ function importBasicInfoCSV(file){
       ${skips.length?`<div style="margin-top:8px;color:var(--text3);font-size:12px;">取込スキップ（利用者未登録）: ${escapeHtml(skips.slice(0,30).join('、'))}${skips.length>30?'…':''}</div>`:''}
       <div style="margin-top:10px;"><button type="button" class="btn btn-primary btn-sm" onclick="applyResidentInfoImport()">反映する</button></div>`);
   };
-  reader.readAsText(file);
+  reader.readAsText(file, 'Shift_JIS');
 }
 function importCertInfoCSV(file){
   if(!file) return;
@@ -6661,7 +6661,7 @@ function importCertInfoCSV(file){
       ${skips.length?`<div style="margin-top:8px;color:var(--text3);font-size:12px;">取込スキップ（利用者未登録）: ${escapeHtml(skips.slice(0,30).join('、'))}${skips.length>30?'…':''}</div>`:''}
       <div style="margin-top:10px;"><button type="button" class="btn btn-primary btn-sm" onclick="applyResidentInfoImport()">反映する</button></div>`);
   };
-  reader.readAsText(file);
+  reader.readAsText(file, 'Shift_JIS');
 }
 function importCareManagerCSV(file){
   if(!file) return;
@@ -6693,7 +6693,7 @@ function importCareManagerCSV(file){
       <div style="max-height:180px;overflow:auto;border:1px solid var(--border2);border-radius:var(--r1);padding:8px;">${list.slice(0,80).map(x=>`${escapeHtml(x.name)}（${escapeHtml(x.officeName)}）`).join('<br>')||'（0件）'}</div>
       <div style="margin-top:10px;"><button type="button" class="btn btn-primary btn-sm" onclick="applyResidentInfoImport()">反映する</button></div>`);
   };
-  reader.readAsText(file);
+  reader.readAsText(file, 'Shift_JIS');
 }
 function applyResidentInfoImport(){
   const imp=window.__resInfoImport;
@@ -6931,7 +6931,23 @@ function handleXlsx(file){
         newRes.push({id,name:n,care:v.care,sched:sched,serviceType:serviceTypeFallback,_u});
       });
       if(newRes.length>0){
-        db.residents=newRes;
+        // 既存メンバーを保持しつつ sched を更新、予定表にない人は sched を全0にする
+        const existingResidents = db.residents || [];
+        newRes.forEach(nr => {
+          const idx = existingResidents.findIndex(
+            r => normalizeResidentName(r.name) === normalizeResidentName(nr.name)
+          );
+          if(idx >= 0){
+            // 既存の人は sched と care だけ更新（他フィールドは保持）
+            existingResidents[idx].sched = nr.sched;
+            existingResidents[idx].care = nr.care;
+            existingResidents[idx]._u = nr._u;
+          } else {
+            // 新規の人は追加
+            existingResidents.push(nr);
+          }
+        });
+        db.residents = existingResidents;
         normalizeResidentsOrder();
         newRes.forEach(r=>ensureResidentTypeAbsentOnly(r.name));
         newRes.forEach(r=>{
