@@ -2149,7 +2149,7 @@ function sheetToDb(rows){
       sameBuilding:     r[44]==='1',
       transportType:    String(r[45]||'both'),
       serviceCodeKey:   String(r[46]||''),
-      addonCodes:       (()=>{try{return JSON.parse(r[47]||'[]');}catch(_){return [];}}()),
+      addonCodes:       (function(){try{return JSON.parse(r[47]||'[]');}catch(e){return [];}}()),
       shoguCode:        String(r[48]||''),
       shoguUnit:        Number(r[49]||0),
     });
