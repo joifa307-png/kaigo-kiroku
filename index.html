@@ -3256,14 +3256,20 @@ function renderScheduleScreen(){
   }).join('');
 
   function rowPair(labelSvc,getYotei,getJisseki){
+    const cellWt=v=>{
+      const s=String(v==null?'':v).trim();
+      if(!s) return 0;
+      const n=parseInt(s,10);
+      return Number.isFinite(n)?n:0;
+    };
     let cntY=0,cntJ=0;
     const yCells=[];
     const jCells=[];
     for(let i=0;i<days;i++){
       const y=getYotei(i);
       const j=getJisseki(i);
-      if(y==='1') cntY++;
-      if(j==='1') cntJ++;
+      cntY+=cellWt(y);
+      cntJ+=cellWt(j);
       const wd=new Date(schedYear,schedMonth,i+1).getDay();
       const bg=wd===0?'background:#FFE0E8':(wd===6?'background:#DDEEFF':'');
       const bs='text-align:center;border:1px solid var(--border1);'+bg;
@@ -3322,6 +3328,32 @@ function renderScheduleScreen(){
       return list.includes(code)?'1':'';
     });
   });
+
+  const deductsM=_svcMaster().deducts||[];
+  const d612=deductsM.find(d=>String(d.code)==='785612');
+  const d611=deductsM.find(d=>String(d.code)==='785611');
+  const nm612=d612?String(d612.name||'785612'):'785612';
+  const nm611=d611?String(d611.name||'785611'):'785611';
+  const showTransportRow=!resident.sameBuilding && resident.transportType!=='both';
+  const transportValue=(resident.transportType==='none')?'2':'1';
+  if(showTransportRow){
+    html+=rowPair(nm612,(dayIdx)=>(schedArr[dayIdx]===1?transportValue:''),(dayIdx)=>{
+      const dkKey=`${schedYear}-${pad(schedMonth+1)}-${pad(dayIdx+1)}`;
+      const rec=getRec(resident.name,dkKey);
+      if(rec.calculated!==true) return '';
+      const list=Array.isArray(rec.calcAddons)?rec.calcAddons:[];
+      return list.includes('785612')?transportValue:'';
+    });
+  }
+  if(resident.sameBuilding){
+    html+=rowPair(nm611,(dayIdx)=>(schedArr[dayIdx]===1?'1':''),(dayIdx)=>{
+      const dkKey=`${schedYear}-${pad(schedMonth+1)}-${pad(dayIdx+1)}`;
+      const rec=getRec(resident.name,dkKey);
+      if(rec.calculated!==true) return '';
+      const list=Array.isArray(rec.calcAddons)?rec.calcAddons:[];
+      return list.includes('785611')?'1':'';
+    });
+  }
 
   if(shoguCode){
     const sg=shoguM.find(x=>String(x.code||'')===shoguCode);
@@ -3435,7 +3467,20 @@ function execCSVExport(){
       addons.forEach(addonCode=>{
         const c=String(addonCode||'').trim();
         if(!c) return;
-        const addonUnit=getAddonOrDeductUnit(c);
+        const deducts=(_svcMaster().deducts)||[];
+        const dm=deducts.find(d=>String(d.code)===c);
+        const am=(_svcMaster().addons||[]).find(d=>String(d.code)===c);
+        let addonUnit;
+        if(c==='785612'){
+          const transport=resident.transportType||'both';
+          addonUnit=(transport==='none')?-94:-47;
+        }else if(dm){
+          addonUnit=dm.unit;
+        }else if(am){
+          addonUnit=am.unit;
+        }else{
+          addonUnit=getAddonOrDeductUnit(c);
+        }
         csvLines.push([
           '202407', S.prefCode||'412023', insured,
           todayStr, targetYm, cmOffice, cmName,
@@ -3549,11 +3594,11 @@ function buildSanteiPanel(){
   const u611=Number((dList.find(d=>String(d.code)==='785611')||{}).unit)||0;
   const u612=Number((dList.find(d=>String(d.code)==='785612')||{}).unit)||0;
   const ttp=r.transportType||'both';
-  const ttpLbl=ttp==='both'?'送迎あり':(ttp==='one_way'?'片道のみ':'送迎なし');
+  const ttpLbl=ttp==='both'?'往復あり':(ttp==='one_way'?'片道のみ':'送迎なし');
   let deductEx='';
   if(r.sameBuilding) deductEx=u611?`同一建物減算 ${u611}単位`:'';
   else if(ttp==='one_way') deductEx=u612?`送迎減算（片道）${u612}単位`:'';
-  else if(ttp==='none') deductEx=u612?`送迎減算（片道）${u612}単位 ×2`:'';
+  else if(ttp==='none') deductEx='送迎減算（送迎なし）-94単位（785612×1行）';
   const deductBlock=`
     <div class="panel-sec" style="margin-top:10px;">
       <h3>減算（参照）</h3>
@@ -6048,7 +6093,7 @@ function applyDeductAddonsToRecord(rec, resident){
       if(dc && !arr.includes('785612')) arr.push('785612');
     }else if(resident.transportType==='none'){
       const dc=deducts.find(d=>String(d.code)==='785612');
-      if(dc){ arr.push('785612'); arr.push('785612'); }
+      if(dc && !arr.includes('785612')) arr.push('785612');
     }
   }
   rec.calcAddons=arr;
@@ -6403,6 +6448,18 @@ function applyImportedServiceCodes(data){
   }
 }
 
+function onSameBuildingChange(cb){
+  const row=cb.closest('tr');
+  if(!row) return;
+  const sel=row.querySelector('select[data-field="transportType"]');
+  const note=row.querySelector('.transport-note');
+  if(sel){
+    sel.disabled=cb.checked;
+    sel.style.opacity=cb.checked?'0.4':'';
+  }
+  if(note) note.style.display=cb.checked?'inline':'none';
+}
+
 function buildResidentInfoSettings(){
   ensureTimeDatalist();
   db.settings=db.settings||{};
@@ -6427,20 +6484,24 @@ function buildResidentInfoSettings(){
     const officeIdx=offices.findIndex(o=>String(o.officeCode||'')===String(r.careManagerOffice||''));
     const cmIdx=cmList.findIndex(cm=>String(cm.officeCode||'')===String(r.careManagerOffice||'') && String(cm.name||'')===String(r.careManagerName||''));
     const cmOptsForRow=buildCareManagerOptionsForOffice(cmList, r.careManagerOffice, cmIdx);
+    const isSameBuilding=!!r.sameBuilding;
+    const transportAttrs=isSameBuilding?'disabled style="opacity:0.4;"':'';
+    const transportNote=`<span class="transport-note" style="font-size:11px;color:var(--text3);display:${isSameBuilding?'inline':'none'};">（同一建物のため不要）</span>`;
     return `<tr>
       <td style="white-space:nowrap;">${escapeHtml(r.name||'')}</td>
       <td style="text-align:center;"><input type="checkbox" data-resident-id="${rid}"${checked} onchange="onResidentInpatientCheckbox(this)"></td>
       <td><input type="text" class="res-info-inp" list="timeOptions30min" data-res-id="${rid}" data-field="startTime" value="${escapeAttr(String(r.startTime||'0900'))}" style="width:80px;font-size:13px;"></td>
       <td><input type="text" class="res-info-inp" list="timeOptions30min" data-res-id="${rid}" data-field="endTime" value="${escapeAttr(String(r.endTime||'1630'))}" style="width:80px;font-size:13px;"></td>
       <td style="text-align:center;">
-        <input type="checkbox" class="res-info-inp" data-res-id="${rid}" data-field="sameBuilding" ${r.sameBuilding ? 'checked' : ''}>
+        <input type="checkbox" class="res-info-inp" data-res-id="${rid}" data-field="sameBuilding" ${r.sameBuilding ? 'checked' : ''} onchange="onSameBuildingChange(this)">
       </td>
       <td>
-        <select class="res-info-sel" data-res-id="${rid}" data-field="transportType" style="font-size:12px;">
-          <option value="both"   ${(r.transportType||'both')==='both'    ? 'selected':''}>送迎あり</option>
+        <select class="res-info-inp" data-res-id="${rid}" data-field="transportType" ${transportAttrs} style="font-size:12px;">
+          <option value="both"   ${(r.transportType||'both')==='both'    ? 'selected':''}>往復あり</option>
           <option value="one_way"${(r.transportType||'both')==='one_way' ? 'selected':''}>片道のみ</option>
           <option value="none"   ${(r.transportType||'both')==='none'    ? 'selected':''}>送迎なし</option>
         </select>
+        ${transportNote}
       </td>
       <td><input type="text" class="res-info-inp" data-res-id="${rid}" data-field="birthDate" value="${escapeAttr(String(r.birthDate||''))}" placeholder="YYYY/MM/DD"></td>
       <td><input type="text" class="res-info-inp" data-res-id="${rid}" data-field="gender" value="${escapeAttr(String(r.gender||''))}" placeholder="男/女"></td>
