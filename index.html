@@ -593,6 +593,11 @@ input,select,textarea{font-family:inherit;font-size:30px;}
       <div id="schedMonthLabel" style="font-size:16px;font-weight:700;padding:6px 12px;white-space:nowrap;"></div>
       <button class="hdr-btn nav" onclick="moveScheduleMonth(1)">▶</button>
     </div>
+    <label class="hdr-btn no-print"
+      style="background:#E8F5E9;color:#2E7D32;border:1px solid #2E7D32;font-weight:700;cursor:pointer;padding:6px 10px;border-radius:var(--r1);flex-shrink:0;">
+      📂 提供票取込
+      <input type="file" accept=".xlsm,.xlsx" multiple style="display:none;" onchange="importTeikyo(this.files)">
+    </label>
     <button class="hdr-btn no-print" onclick="openCSVExportDialog()"
       style="background:var(--orange);color:#fff;border-color:var(--orange);font-weight:700;flex-shrink:0;">
       📊 CSV出力
@@ -1459,6 +1464,7 @@ function getRec(name, dateKey){
   if(r.calcEndTime === undefined) r.calcEndTime = '';
   if(r.calcServiceCodeKey === undefined) r.calcServiceCodeKey = '';
   if(!r.calcAddons) r.calcAddons = [];
+  if(r.bathCalculated === undefined) r.bathCalculated = false;
   return r;
 }
 
@@ -1481,7 +1487,7 @@ const REC = {
 const N_RECORD_COLS = 57;
 
 /** デプロイのたびに上げる（設定→データ管理の「アプリ情報」で表示） */
-const APP_VERSION='1.0.34';
+const APP_VERSION='1.1.2';
 function isStandaloneWebApp(){
   try{
     if(window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches) return true;
@@ -3046,10 +3052,10 @@ function openSanteiDialog(){
     const checked=((r.sched||[])[dayIdx]===1)?'checked':'';
     const st=_cleanTimeHHMM(r.startTime)||'0900';
     const et=_cleanTimeHHMM(r.endTime)||'1630';
-    const m=resolveServiceCodeByTime(st,et,r.name);
-    const code=m?String(m.code||''):'';
-    const unit=m?Number(m.unit||0):0;
-    const label=code?`${code} (${unit||0}単位)`:'—';
+    const hasBath=(rec.bath||[]).some(b=>b.type==='普通浴'||b.type==='シャワー浴');
+    const bathLabel=hasBath
+      ? '<span style="color:var(--green);font-weight:700;">🛁 入浴あり</span>'
+      : '<span style="color:var(--text3);">入浴なし</span>';
     const dis=((r.sched||[])[dayIdx]===1)?'':'style="opacity:.55"';
     return `<div class="settings-list-item" ${dis} style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
       <label style="display:flex;align-items:center;gap:8px;min-width:180px;">
@@ -3060,8 +3066,7 @@ function openSanteiDialog(){
         <input type="text" class="santei-time" data-kind="start" data-res-name="${escapeAttr(r.name)}" value="${escapeAttr(st)}" list="timeOptions30min" placeholder="0900" style="width:80px;font-size:16px;padding:6px 8px;">
         <span>〜</span>
         <input type="text" class="santei-time" data-kind="end" data-res-name="${escapeAttr(r.name)}" value="${escapeAttr(et)}" list="timeOptions30min" placeholder="1630" style="width:80px;font-size:16px;padding:6px 8px;">
-        <span style="margin-left:8px;color:var(--text2);">→</span>
-        <span class="santei-auto" data-res-name="${escapeAttr(r.name)}" style="font-weight:700;color:var(--text2);">${escapeHtml(label)}</span>
+        <span style="margin-left:12px;">${bathLabel}</span>
       </div>
     </div>`;
   }).join('');
@@ -3072,7 +3077,7 @@ function openSanteiDialog(){
       <button type="button" class="btn btn-gray btn-sm" onclick="santeiSelectAll(false)">全解除</button>
     </div>
     <div>${rows||'<div class="text-gray">本日の利用者がいません</div>'}</div>
-    <p style="font-size:12px;color:var(--text3);margin-top:10px;">※時刻を変更するとサービスコードが自動更新されます</p>
+    <p style="font-size:12px;color:var(--text3);margin-top:10px;">※時刻を変更するとサービスコードが自動算出されます（確認不要）</p>
     <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:12px;">
       <button type="button" class="btn btn-primary btn-sm" onclick="execSanteiConfirm()">確定する</button>
       <button type="button" class="btn btn-gray btn-sm" onclick="closeMainOv()">キャンセル</button>
@@ -3088,13 +3093,6 @@ function santeiSelectAll(on){
   [...document.querySelectorAll('.santei-chk')].forEach(ch=>{ ch.checked=!!on; });
 }
 function updateSanteiAutoFor(resName){
-  const nm=String(resName||'');
-  const st=document.querySelector(`.santei-time[data-kind="start"][data-res-name="${CSS.escape(nm)}"]`)?.value||'';
-  const et=document.querySelector(`.santei-time[data-kind="end"][data-res-name="${CSS.escape(nm)}"]`)?.value||'';
-  const m=resolveServiceCodeByTime(st,et,nm);
-  const label=m?`${m.code||''} (${Number(m.unit||0)||0}単位)`:'—';
-  const el=document.querySelector(`.santei-auto[data-res-name="${CSS.escape(nm)}"]`);
-  if(el) el.textContent=label;
 }
 function execSanteiConfirm(){
   const dayIdx=curDate.getDate()-1;
@@ -3220,7 +3218,6 @@ function moveScheduleMonth(dir){
 function toggleScheduleJisseki(name, dateKey){
   const rec=getRec(name, dateKey);
   if(rec.calculated){
-    if(!confirm(`${dateKey} の算定を取り消しますか？`)) return;
     rec.calculated=false;
     rec.calcStartTime='';
     rec.calcEndTime='';
@@ -3243,6 +3240,233 @@ function toggleScheduleJisseki(name, dateKey){
   saveDB();
   renderScheduleScreen();
 }
+function toggleScheduleBath(resName, dateKey, kind){
+  const resident=(db.residents||[]).find(r=>normalizeResidentName(r.name)===normalizeResidentName(resName));
+  if(!resident) return;
+  _ensureResidentBillingFields(resident);
+  if(kind==='yotei'){
+    const parts=String(dateKey||'').split('-');
+    const dayIdx=parseInt(parts[2],10)-1;
+    if(dayIdx<0||dayIdx>30) return;
+    while(resident.bathSched.length<31) resident.bathSched.push(0);
+    resident.bathSched[dayIdx]=resident.bathSched[dayIdx]?0:1;
+    resident._u=Date.now();
+    saveDB();
+    renderScheduleScreen();
+  }else if(kind==='jisseki'){
+    const rec=getRec(resName, dateKey);
+    rec.bathCalculated=!rec.bathCalculated;
+    saveDB();
+    renderScheduleScreen();
+  }
+}
+function toggleScheduleBathJisseki(name, dateKey){
+  toggleScheduleBath(name, dateKey, 'jisseki');
+}
+function toggleScheduleAddonJisseki(name, dateKey, code){
+  const rec=getRec(name, dateKey);
+  if(rec.calculated!==true) return;
+  const key=String(code||'').trim();
+  if(!key) return;
+  let list=Array.isArray(rec.calcAddons)?[...rec.calcAddons]:[];
+  if(list.includes(key)) list=list.filter(c=>c!==key);
+  else list.push(key);
+  rec.calcAddons=list;
+  const resident=(db.residents||[]).find(r=>normalizeResidentName(r.name)===normalizeResidentName(name));
+  if(resident) applyDeductAddonsToRecord(rec, resident);
+  saveDB();
+  renderScheduleScreen();
+}
+function _dailyEntryCode(entry){
+  if(entry==null||entry==='') return '';
+  if(typeof entry==='string') return String(entry);
+  return String(entry.code||'');
+}
+function getDailyServiceCode(resident, yyyymm, dd){
+  const daily=(resident.dailyServiceCodes||{})[yyyymm];
+  if(daily && daily[dd]) return _dailyEntryCode(daily[dd]);
+  const st=_cleanTimeHHMM(resident.startTime)||'0900';
+  const et=_cleanTimeHHMM(resident.endTime)||'1630';
+  const m=resolveServiceCodeByTime(st, et, resident.name);
+  return m ? String(m.code||'') : String(resident.serviceCodeKey||'');
+}
+function toggleScheduleYotei(resName, dateKey, code, kind){
+  const resident=(db.residents||[]).find(r=>normalizeResidentName(r.name)===normalizeResidentName(resName));
+  if(!resident) return;
+  _ensureResidentBillingFields(resident);
+  if(kind==='yotei'){
+    const parts=String(dateKey||'').split('-');
+    const dayIdx=parseInt(parts[2],10)-1;
+    if(dayIdx<0||dayIdx>30) return;
+    if(!resident.sched) resident.sched=new Array(31).fill(0);
+    while(resident.sched.length<31) resident.sched.push(0);
+    resident.sched[dayIdx]=resident.sched[dayIdx]===1?0:1;
+    resident._u=Date.now();
+    saveDB();
+    renderScheduleScreen();
+  }else if(kind==='jisseki'){
+    toggleScheduleJisseki(resName, dateKey);
+  }
+}
+function importTeikyo(files){
+  if(!files||!files.length) return;
+  const results=[];
+  let done=0;
+  const total=files.length;
+  Array.from(files).forEach(file=>{
+    const reader=new FileReader();
+    reader.onload=e=>{
+      try{
+        const wb=XLSX.read(e.target.result, {type:'array'});
+        const ws=wb.Sheets['スケジュール'];
+        if(!ws){ results.push({file:file.name, status:'error', msg:'シート「スケジュール」がありません'}); done++; checkDone(); return; }
+        const data=XLSX.utils.sheet_to_json(ws, {header:1, defval:''});
+        let residentName='';
+        for(let ri=5; ri<=10; ri++){
+          const row=data[ri]||[];
+          for(let ci=0; ci<row.length; ci++){
+            const val=String(row[ci]||'').trim();
+            if(val&&!val.includes('フリガナ')&&!val.includes('被保険者')&&!val.includes('番号')&&/[\u4e00-\u9fa5\u30a0-\u30ff]/.test(val)&&val.length>=2&&val.length<=10){
+              const nm=normalizeResidentName(val);
+              const hit=(db.residents||[]).find(r=>normalizeResidentName(r.name)===nm);
+              if(hit){ residentName=hit.name; break; }
+            }
+          }
+          if(residentName) break;
+        }
+        if(!residentName){
+          const fname=file.name.replace(/\.[^.]+$/,'');
+          const parts=fname.split('_');
+          if(parts[0]){
+            const nm=normalizeResidentName(parts[0]);
+            const hit=(db.residents||[]).find(r=>normalizeResidentName(r.name)===nm);
+            if(hit) residentName=hit.name;
+          }
+        }
+        if(!residentName){ results.push({file:file.name, status:'error', msg:'利用者名が特定できませんでした'}); done++; checkDone(); return; }
+        const resident=(db.residents||[]).find(r=>normalizeResidentName(r.name)===normalizeResidentName(residentName));
+        if(!resident){ results.push({file:file.name, status:'skip', msg:`${residentName}：未登録`}); done++; checkDone(); return; }
+        _ensureResidentBillingFields(resident);
+        let year=schedYear, month=schedMonth+1;
+        for(let ri=0; ri<=3; ri++){
+          const row=data[ri]||[];
+          const rowStr=row.join('');
+          const m=rowStr.match(/(\d{1,2})\s*年\s*(\d{1,2})\s*月/);
+          if(m){
+            const nengoMatch=rowStr.match(/令和\s*(\d+)/);
+            if(nengoMatch) year=2018+parseInt(nengoMatch[1],10);
+            month=parseInt(m[2],10);
+            break;
+          }
+        }
+        const yyyymm=`${year}-${pad(month)}`;
+        let dateHeaderRow=-1, dateColStart=-1;
+        for(let ri=13; ri<=17; ri++){
+          const row=data[ri]||[];
+          for(let ci=0; ci<row.length; ci++){
+            if(String(row[ci]||'').trim()==='1'){
+              const prev=String(row[ci-2]||'').trim();
+              if(prev==='日付'||prev===''){
+                dateHeaderRow=ri;
+                dateColStart=ci;
+                break;
+              }
+            }
+          }
+          if(dateHeaderRow>=0) break;
+        }
+        if(dateHeaderRow<0){ results.push({file:file.name, status:'error', msg:'日付行が見つかりません'}); done++; checkDone(); return; }
+        const dateRow=data[dateHeaderRow]||[];
+        const dateColMap={};
+        for(let ci=dateColStart; ci<dateRow.length; ci++){
+          const v=parseInt(String(dateRow[ci]||'').trim(),10);
+          if(v>=1&&v<=31) dateColMap[v]=ci;
+        }
+        const OUR_OFFICE='デイサービスおひさま';
+        const dailyCodes={};
+        const bathDays=new Array(31).fill(0);
+        const basicMaster=(_svcMaster().basic||[]);
+        let currentStartTime='', currentEndTime='', currentServiceName='', currentOffice='';
+        for(let ri=17; ri<data.length; ri++){
+          const row=data[ri]||[];
+          const cell0=String(row[0]||'').trim();
+          const cell5=String(row[5]||'').trim();
+          const cell12=String(row[12]||'').trim();
+          const cell35=String(row[35]||'').trim();
+          if(cell0.match(/^\d{1,2}:\d{2}/)){
+            currentStartTime=_cleanTimeHHMM(cell0)||currentStartTime;
+            currentEndTime='';
+          }
+          if(cell0.match(/^[～〜~]\s*\d{1,2}:\d{2}/)){
+            const etStr=cell0.replace(/^[～〜~]\s*/, '').trim();
+            currentEndTime=_cleanTimeHHMM(etStr)||'1630';
+          }
+          if(cell5) currentServiceName=cell5;
+          if(cell12) currentOffice=cell12;
+          if(cell35!=='予定') continue;
+          if(!currentOffice.includes('おひさま')&&!currentOffice.includes(OUR_OFFICE)) continue;
+          const svcName=currentServiceName;
+          const isBasic=basicMaster.some(m=>m.name===svcName)||
+            (svcName.includes('地域通所介護')&&!svcName.includes('加算')&&!svcName.includes('減算')&&!svcName.includes('処遇'));
+          const isBath=svcName.includes('入浴介助加算');
+          if(!isBasic&&!isBath) continue;
+          const endTime=currentEndTime||'1630';
+          for(let d=1; d<=31; d++){
+            const ci=dateColMap[d];
+            if(ci===undefined) continue;
+            const val=String(row[ci]||'').trim();
+            if(!val||val==='0') continue;
+            if(isBasic){
+              const dd=String(d).padStart(2,'0');
+              let code='';
+              const matched=basicMaster.find(m=>m.name===svcName);
+              if(matched){
+                code=String(matched.code||'');
+              }else{
+                const m=resolveServiceCodeByTime(currentStartTime||'0900', endTime, residentName);
+                if(m) code=String(m.code||'');
+              }
+              if(code){
+                const payload={code, startTime:currentStartTime||'0900', endTime};
+                if(!dailyCodes[dd]){
+                  dailyCodes[dd]=payload;
+                }else if(_dailyEntryCode(dailyCodes[dd])!==code){
+                  dailyCodes[dd+'_2']=payload;
+                }
+              }
+            }
+            if(isBath){
+              bathDays[d-1]=1;
+            }
+          }
+        }
+        resident.dailyServiceCodes[yyyymm]=dailyCodes;
+        resident.bathSched=bathDays;
+        resident._u=Date.now();
+        results.push({
+          file:file.name,
+          status:'ok',
+          msg:`${residentName}：${Object.keys(dailyCodes).length}日分のコード・入浴${bathDays.filter(v=>v).length}日を取込`
+        });
+      }catch(err){
+        results.push({file:file.name, status:'error', msg:String(err.message||err)});
+      }
+      done++;
+      checkDone();
+    };
+    reader.readAsArrayBuffer(file);
+  });
+  function checkDone(){
+    if(done<total) return;
+    saveDB();
+    const ok=results.filter(r=>r.status==='ok').length;
+    const skip=results.filter(r=>r.status==='skip').length;
+    const err=results.filter(r=>r.status==='error').length;
+    const detail=results.map(r=>`${r.status==='ok'?'✅':r.status==='skip'?'⚠️':'❌'} ${r.msg}`).join('\n');
+    alert(`取込完了\n✅成功:${ok}件 ⚠️スキップ:${skip}件 ❌エラー:${err}件\n\n${detail}`);
+    renderScheduleScreen();
+  }
+}
 
 function renderScheduleScreen(){
   const lbl=document.getElementById('schedMonthLabel');
@@ -3257,17 +3481,28 @@ function renderScheduleScreen(){
     return;
   }
   _ensureResidentBillingFields(resident);
+  const yyyymm=`${schedYear}-${pad(schedMonth+1)}`;
+  const stDef=_cleanTimeHHMM(resident.startTime)||'0900';
+  const etDef=_cleanTimeHHMM(resident.endTime)||'1630';
   let svcKey=String(resident.serviceCodeKey||'').trim();
-  let svcKeyIsEstimated=false;
   if(!svcKey){
     const stEst=_cleanTimeHHMM(resident.startTime)||'0900';
     const etEst=_cleanTimeHHMM(resident.endTime)||'1630';
-    const estimated=resolveServiceCodeByTime(stEst, etEst, resident.name);
-    if(estimated){
-      svcKey=String(estimated.code||'');
-      svcKeyIsEstimated=true;
-    }
+    const est=resolveServiceCodeByTime(stEst, etEst, resident.name);
+    if(est) svcKey=String(est.code||'');
   }
+  const daily=(resident.dailyServiceCodes||{})[yyyymm]||{};
+  const codeSet=new Set();
+  Object.values(daily).forEach(v=>{
+    const c=_dailyEntryCode(v);
+    if(c) codeSet.add(String(c));
+  });
+  if(codeSet.size===0){
+    const m=resolveServiceCodeByTime(stDef, etDef, resident.name);
+    if(m) codeSet.add(String(m.code||''));
+    else if(svcKey) codeSet.add(String(svcKey));
+  }
+  if(!svcKey&&codeSet.size) svcKey=[...codeSet][0];
   if(!svcKey){
     body.innerHTML='<p style="color:var(--text2);padding:12px;">介護度と利用時間を設定してください（利用者基本情報タブ）</p>';
     return;
@@ -3276,14 +3511,6 @@ function renderScheduleScreen(){
   const basics=(_svcMaster().basic||[]);
   const addonsM=(_svcMaster().addons||[]);
   const shoguM=(_svcMaster().shogu||[]);
-  const basicEntry=basics.find(x=>String(x.code||'')===svcKey)||null;
-  const svcNameStyle=svcKeyIsEstimated?'color:var(--text3);font-style:italic;':'';
-  const svcName=basicEntry
-    ? String(basicEntry.name||'')+(svcKeyIsEstimated?'（推定）':'')
-    : svcKey+(svcKeyIsEstimated?'（推定）':'');
-  const stDef=_cleanTimeHHMM(resident.startTime)||'0900';
-  const etDef=_cleanTimeHHMM(resident.endTime)||'1630';
-  const timeRange=`${_fmtTimeColon(stDef)}〜${_fmtTimeColon(etDef)}`;
   const facName=String(S.facilityName||'').trim()||'—';
   const days=new Date(schedYear,schedMonth+1,0).getDate();
   const wdJp=['日','月','火','水','木','金','土'];
@@ -3294,11 +3521,25 @@ function renderScheduleScreen(){
     const wd=new Date(schedYear,schedMonth,i+1).getDay();
     return `<th style="border:1px solid var(--border1);padding:4px 6px;">${wdJp[wd]}</th>`;
   }).join('');
+  const basicCodes=[...codeSet].sort();
+  const schedArr=resident.sched||[];
+  const bathArr=resident.bathSched||[];
+  const resNm=resident.name;
 
-  function rowPair(labelSvc,getYotei,getJisseki,opts){
+  function dayMatchesBasicRow(dd, rowCode){
+    const e1=daily[dd], e2=daily[dd+'_2'];
+    if(e1&&_dailyEntryCode(e1)===String(rowCode)) return true;
+    if(e2&&_dailyEntryCode(e2)===String(rowCode)) return true;
+    if(Object.keys(daily).length===0) return codeSet.size===1&&[...codeSet][0]===String(rowCode);
+    return false;
+  }
+
+  function rowPair(timeRangeHtml, labelSvc,getYotei,getJisseki,opts){
     opts=opts||{};
-    const svcExtraStyle=opts.svcExtraStyle||'';
-    const jissekiClickName=opts.jissekiClickName||'';
+    const jissekiMode=opts.jissekiMode||'none';
+    const jissekiAddonCode=opts.jissekiAddonCode;
+    const yoteiMode=opts.yoteiMode||'none';
+    const rowBasicCode=opts.rowBasicCode;
     const cellWt=v=>{
       const s=String(v==null?'':v).trim();
       if(!s) return 0;
@@ -3316,16 +3557,34 @@ function renderScheduleScreen(){
       const wd=new Date(schedYear,schedMonth,i+1).getDay();
       const bg=wd===0?'background:#FFE0E8':(wd===6?'background:#DDEEFF':'');
       const bs='text-align:center;border:1px solid var(--border1);'+bg;
-      yCells.push(`<td style="${bs};font-weight:700;">${y}</td>`);
       const dkKey=`${schedYear}-${pad(schedMonth+1)}-${pad(i+1)}`;
-      const jOnclick=jissekiClickName
-        ? ` onclick='toggleScheduleJisseki(${JSON.stringify(jissekiClickName)}, ${JSON.stringify(dkKey)})' style="${bs};font-weight:700;cursor:pointer;user-select:none;"`
-        : ` style="${bs};font-weight:700;"`;
+      let yOnclick='';
+      if(yoteiMode==='basic'){
+        const rc=escapeAttr(String(rowBasicCode||''));
+        yOnclick=` onclick="toggleScheduleYotei('${escapeAttr(resNm)}','${escapeAttr(dkKey)}','${rc}','yotei')" style="${bs};font-weight:700;cursor:pointer;user-select:none;"`;
+      }else if(yoteiMode==='bath'){
+        yOnclick=` onclick="toggleScheduleBath('${escapeAttr(resNm)}','${escapeAttr(dkKey)}','yotei')" style="${bs};font-weight:700;cursor:pointer;user-select:none;"`;
+      }else if(yoteiMode==='schedPlain'){
+        yOnclick=` onclick="toggleScheduleYotei('${escapeAttr(resNm)}','${escapeAttr(dkKey)}','','yotei')" style="${bs};font-weight:700;cursor:pointer;user-select:none;"`;
+      }else{
+        yOnclick=` style="${bs};font-weight:700;"`;
+      }
+      yCells.push(`<td${yOnclick}>${y}</td>`);
+      let jOnclick='';
+      if(jissekiMode==='basic'){
+        jOnclick=` onclick='toggleScheduleJisseki(${JSON.stringify(resNm)}, ${JSON.stringify(dkKey)})' style="${bs};font-weight:700;cursor:pointer;user-select:none;"`;
+      }else if(jissekiMode==='bath'){
+        jOnclick=` onclick="toggleScheduleBath('${escapeAttr(resNm)}','${escapeAttr(dkKey)}','jisseki')" style="${bs};font-weight:700;cursor:pointer;user-select:none;"`;
+      }else if(jissekiMode==='addon'&&jissekiAddonCode){
+        jOnclick=` onclick='toggleScheduleAddonJisseki(${JSON.stringify(resNm)}, ${JSON.stringify(dkKey)}, ${JSON.stringify(String(jissekiAddonCode))})' style="${bs};font-weight:700;cursor:pointer;user-select:none;"`;
+      }else{
+        jOnclick=` style="${bs};font-weight:700;"`;
+      }
       jCells.push(`<td${jOnclick}>${j}</td>`);
     }
     return `<tr>
-      <td rowspan="2" style="border:1px solid var(--border1);vertical-align:middle;padding:6px;">${escapeHtml(timeRange)}</td>
-      <td rowspan="2" style="border:1px solid var(--border1);vertical-align:middle;padding:6px;${svcExtraStyle}">${escapeHtml(labelSvc)}</td>
+      <td rowspan="2" style="border:1px solid var(--border1);vertical-align:middle;padding:6px;">${timeRangeHtml}</td>
+      <td rowspan="2" style="border:1px solid var(--border1);vertical-align:middle;padding:6px;">${escapeHtml(labelSvc)}</td>
       <td rowspan="2" style="border:1px solid var(--border1);vertical-align:middle;padding:6px;">${escapeHtml(facName)}</td>
       <td style="font-size:11px;color:var(--text3);border:1px solid var(--border1);">予定</td>
       ${yCells.join('')}
@@ -3340,7 +3599,6 @@ function renderScheduleScreen(){
     </tr>`;
   }
 
-  const schedArr=resident.sched||[];
   let html=`<table style="border-collapse:collapse;font-size:13px;white-space:nowrap;">
   <thead>
     <tr>
@@ -3356,50 +3614,69 @@ function renderScheduleScreen(){
   </thead>
   <tbody>`;
 
-  html+=rowPair(svcName,(dayIdx)=>(schedArr[dayIdx]===1?'1':''),(dayIdx)=>{
-    const dkKey=`${schedYear}-${pad(schedMonth+1)}-${pad(dayIdx+1)}`;
-    const rec=getRec(resident.name,dkKey);
-    if(rec.calculated!==true) return '';
-    const ck=String(rec.calcServiceCodeKey||'').trim();
-    return (ck===svcKey||ck==='')?'1':'';
-  },{svcExtraStyle:svcNameStyle,jissekiClickName:resident.name});
+  basicCodes.forEach(basicCode=>{
+    const masterEntry=basics.find(m=>String(m.code)===String(basicCode));
+    const labelSvc=masterEntry?String(masterEntry.name||''):String(basicCode);
+    let rowStart=stDef, rowEnd=etDef;
+    const firstEnt=Object.entries(daily).find(([k,v])=>v&&!String(k).endsWith('_2')&&_dailyEntryCode(v)===String(basicCode));
+    if(firstEnt&&firstEnt[1]&&typeof firstEnt[1]==='object'){
+      rowStart=_cleanTimeHHMM(firstEnt[1].startTime)||stDef;
+      rowEnd=_cleanTimeHHMM(firstEnt[1].endTime)||etDef;
+    }
+    const timeRangeHtml=escapeHtml(`${_fmtTimeColon(rowStart)}〜${_fmtTimeColon(rowEnd)}`);
+    html+=rowPair(timeRangeHtml,labelSvc,(dayIdx)=>{
+      const dd=pad(dayIdx+1);
+      if(schedArr[dayIdx]!==1) return '';
+      return dayMatchesBasicRow(dd, basicCode)?'1':'';
+    },(dayIdx)=>{
+      const dkKey=`${schedYear}-${pad(schedMonth+1)}-${pad(dayIdx+1)}`;
+      const rec=getRec(resident.name,dkKey);
+      if(rec.calculated!==true) return '';
+      const ck=String(rec.calcServiceCodeKey||'').trim();
+      const ok=ck?ck===String(basicCode):codeSet.size===1&&[...codeSet][0]===String(basicCode);
+      return ok?'1':'';
+    },{yoteiMode:'basic',jissekiMode:'basic',rowBasicCode:String(basicCode)});
+  });
 
   officeAddons.forEach(code=>{
+    if(code==='785301'||code==='785303') return;
     const ad=addonsM.find(x=>String(x.code||'')===String(code));
     const nm=ad?String(ad.name||code):code;
-    html+=rowPair(nm,(dayIdx)=>(schedArr[dayIdx]===1?'1':''),(dayIdx)=>{
+    html+=rowPair('', nm,(dayIdx)=>(schedArr[dayIdx]===1?'1':''),(dayIdx)=>{
       const dkKey=`${schedYear}-${pad(schedMonth+1)}-${pad(dayIdx+1)}`;
       const rec=getRec(resident.name,dkKey);
       if(rec.calculated!==true) return '';
       const list=Array.isArray(rec.calcAddons)?rec.calcAddons:[];
       return list.includes(code)?'1':'';
-    });
+    },{yoteiMode:'schedPlain',jissekiMode:'addon',jissekiAddonCode:code});
   });
 
-  const deductsM=_svcMaster().deducts||[];
-  const d612=deductsM.find(d=>String(d.code)==='785612');
-  const d611=deductsM.find(d=>String(d.code)==='785611');
-  const nm612=d612?String(d612.name||'785612'):'785612';
-  const nm611=d611?String(d611.name||'785611'):'785611';
-  const showTransportRow=!resident.sameBuilding && resident.transportType!=='both';
+  html+=rowPair('', '入浴介助加算Ⅰ',(dayIdx)=>(bathArr[dayIdx]===1?'1':''),(dayIdx)=>{
+    const dkKey=`${schedYear}-${pad(schedMonth+1)}-${pad(dayIdx+1)}`;
+    return getRec(resident.name,dkKey).bathCalculated?'1':'';
+  },{yoteiMode:'bath',jissekiMode:'bath'});
+
   const transportValue=(resident.transportType==='none')?'2':'1';
+  const showTransportRow=!resident.sameBuilding && resident.transportType!=='both';
   if(showTransportRow){
-    html+=rowPair(nm612,(dayIdx)=>(schedArr[dayIdx]===1?transportValue:''),(dayIdx)=>{
-      const dkKey=`${schedYear}-${pad(schedMonth+1)}-${pad(dayIdx+1)}`;
-      const rec=getRec(resident.name,dkKey);
-      if(rec.calculated!==true) return '';
-      const list=Array.isArray(rec.calcAddons)?rec.calcAddons:[];
-      return list.includes('785612')?transportValue:'';
-    });
+    html+=rowPair('', '地域通所介護送迎減算（'+(resident.transportType==='none'?'両道':'片道')+'）',
+      (dayIdx)=>(schedArr[dayIdx]===1?transportValue:''),
+      (dayIdx)=>{
+        const dkKey=`${schedYear}-${pad(schedMonth+1)}-${pad(dayIdx+1)}`;
+        const rec=getRec(resident.name,dkKey);
+        if(rec.calculated!==true) return '';
+        const list=Array.isArray(rec.calcAddons)?rec.calcAddons:[];
+        return list.includes('785612')?transportValue:'';
+      },{yoteiMode:'schedPlain',jissekiMode:'addon',jissekiAddonCode:'785612'});
   }
   if(resident.sameBuilding){
-    html+=rowPair(nm611,(dayIdx)=>(schedArr[dayIdx]===1?'1':''),(dayIdx)=>{
+    html+=rowPair('', '地域通所介護同一建物減算',(dayIdx)=>(schedArr[dayIdx]===1?'1':''),(dayIdx)=>{
       const dkKey=`${schedYear}-${pad(schedMonth+1)}-${pad(dayIdx+1)}`;
       const rec=getRec(resident.name,dkKey);
       if(rec.calculated!==true) return '';
       const list=Array.isArray(rec.calcAddons)?rec.calcAddons:[];
       return list.includes('785611')?'1':'';
-    });
+    },{yoteiMode:'schedPlain',jissekiMode:'addon',jissekiAddonCode:'785611'});
   }
 
   if(shoguCode){
@@ -3410,7 +3687,7 @@ function renderScheduleScreen(){
       const dkKey=`${schedYear}-${pad(schedMonth+1)}-${pad(d)}`;
       if(getRec(resident.name,dkKey).calculated===true){ firstNum=d; break; }
     }
-    html+=rowPair(nm,(dayIdx)=>(dayIdx===0?'1':''),(dayIdx)=>((firstNum===dayIdx+1)?'1':''));
+    html+=rowPair('', nm,(dayIdx)=>(dayIdx===0?'1':''),(dayIdx)=>((firstNum===dayIdx+1)?'1':''));
   }
 
   html+='</tbody></table>';
@@ -3420,14 +3697,10 @@ function renderScheduleScreen(){
 function openCSVExportDialog(){
   const list=[...(db.residents||[])].sort(compareResidentsStable);
   const rows=list.map(r=>{
-    const hasCode=!!(r.serviceCodeKey);
-    const checked=hasCode?'checked':'';
-    const style=hasCode?'':'opacity:0.5;';
-    return `<label style="display:flex;align-items:center;gap:8px;padding:6px 0;${style}cursor:pointer;">
+    return `<label style="display:flex;align-items:center;gap:8px;padding:6px 0;cursor:pointer;">
       <input type="checkbox" class="csv-export-chk"
-        data-res-name="${escapeAttr(r.name)}" ${checked}>
+        data-res-name="${escapeAttr(r.name)}" checked>
       <span style="font-size:16px;">${escapeHtml(r.name)}</span>
-      ${hasCode?'':'<span style="font-size:12px;color:var(--text3);">（コード未設定）</span>'}
     </label>`;
   }).join('');
   const ym=`${schedYear}年${schedMonth+1}月`;
@@ -3479,7 +3752,8 @@ function execCSVExport(){
 
   checkedNames.forEach(nm=>{
     const resident=(db.residents||[]).find(r=>normalizeResidentName(r.name)===normalizeResidentName(nm));
-    if(!resident||!resident.serviceCodeKey) return;
+    if(!resident) return;
+    _ensureResidentBillingFields(resident);
 
     let shoguAdded=false;
     const resName=resident.name;
@@ -3488,6 +3762,7 @@ function execCSVExport(){
     const insured=_cleanDigits(resident.insuredNumber||'');
     const st=_cleanTimeHHMM(resident.startTime)||'0900';
     const et=_cleanTimeHHMM(resident.endTime)||'1630';
+    const yyyymmCsv=`${schedYear}-${String(schedMonth+1).padStart(2,'0')}`;
 
     for(let d=1;d<=daysInMonth;d++){
       const dateKey=`${schedYear}-${String(schedMonth+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
@@ -3495,9 +3770,37 @@ function execCSVExport(){
       const rec=getRec(resName, dateKey);
       if(rec.calculated!==true) continue;
 
-      const recSt=_cleanTimeHHMM(rec.calcStartTime)||st;
-      const recEt=_cleanTimeHHMM(rec.calcEndTime)||et;
-      const scKey=String(rec.calcServiceCodeKey||'').trim()||String(resident.serviceCodeKey||'').trim();
+      const dd=String(d).padStart(2,'0');
+      const dailyM=(resident.dailyServiceCodes||{})[yyyymmCsv]||{};
+      let dayEntry=dailyM[dd];
+      const calcCk=String(rec.calcServiceCodeKey||'').trim();
+      if(dailyM[dd]&&dailyM[dd+'_2']){
+        const c1=_dailyEntryCode(dailyM[dd]);
+        const c2=_dailyEntryCode(dailyM[dd+'_2']);
+        if(calcCk&&(calcCk===c1||calcCk===c2)){
+          dayEntry=(calcCk===c2)?dailyM[dd+'_2']:dailyM[dd];
+        }
+      }
+      let recSt, recEt, scKey;
+      if(dayEntry&&_dailyEntryCode(dayEntry)){
+        scKey=_dailyEntryCode(dayEntry);
+        const ent=typeof dayEntry==='object'?dayEntry:null;
+        recSt=_cleanTimeHHMM(ent&&ent.startTime)||_cleanTimeHHMM(rec.calcStartTime)||st;
+        recEt=_cleanTimeHHMM(ent&&ent.endTime)||_cleanTimeHHMM(rec.calcEndTime)||et;
+      }else{
+        recSt=_cleanTimeHHMM(rec.calcStartTime)||st;
+        recEt=_cleanTimeHHMM(rec.calcEndTime)||et;
+        scKey=String(rec.calcServiceCodeKey||resident.serviceCodeKey||'').trim();
+        if(!scKey){
+          const m=resolveServiceCodeByTime(recSt, recEt, resName);
+          if(m) scKey=String(m.code||'');
+        }
+      }
+      if(!scKey){
+        const m=resolveServiceCodeByTime(recSt, recEt, resName);
+        if(m) scKey=String(m.code||'');
+      }
+      if(!scKey) continue;
       const unit=getServiceUnitByCode(scKey);
 
       csvLines.push([
@@ -4829,6 +5132,11 @@ function editBath(dkStr,idx){
   }
   document.getElementById('bathForm').scrollIntoView({behavior:'smooth'});
 }
+function _updateBathCalculated(resName, dateKey){
+  const rec=getRec(resName, dateKey);
+  const hasBath=(rec.bath||[]).some(b=>b.type==='普通浴'||b.type==='シャワー浴');
+  rec.bathCalculated=hasBath;
+}
 function saveBath(){
   const time=document.getElementById('baTime').value||nowTime();
   const type=document.getElementById('baType').value;
@@ -4836,9 +5144,11 @@ function saveBath(){
   if(_editBath){
     const r=getRec(curRes,_editBath.dkStr);
     r.bath[_editBath.idx]={...r.bath[_editBath.idx],time,type,staff,sheetU:Date.now()};
+    _updateBathCalculated(curRes, _editBath.dkStr);
     _editBath=null;
   } else {
     getRec(curRes).bath.push({id:genId('b'),time,type,staff,sheetU:Date.now()});
+    _updateBathCalculated(curRes, dk());
   }
   saveDB(); showSavedToast(); goBack();
 }
@@ -4849,6 +5159,7 @@ function delBath(dkStr,idx){
   const id=row&&row.id;
   if(id) markRecordItemDeleted('b', id);
   r.bath.splice(idx,1);
+  _updateBathCalculated(curRes, dkStr);
   saveDB(); refreshPanel('bath');
 }
 
@@ -6328,6 +6639,18 @@ function _ensureResidentBillingFields(r){
   if(r.phone === undefined) r.phone = '';
   if(r.careExpiry === undefined) r.careExpiry = '';
   if(r.costShare === undefined) r.costShare = '';
+  if(!r.dailyServiceCodes) r.dailyServiceCodes = {};
+  if(!r.bathSched) r.bathSched = new Array(31).fill(0);
+  Object.keys(r.dailyServiceCodes||{}).forEach(ym=>{
+    const mo=r.dailyServiceCodes[ym];
+    if(!mo||typeof mo!=='object') return;
+    Object.keys(mo).forEach(k=>{
+      const v=mo[k];
+      if(typeof v==='string'){
+        mo[k]={code:v,startTime:_cleanTimeHHMM(r.startTime)||'0900',endTime:_cleanTimeHHMM(r.endTime)||'1630'};
+      }
+    });
+  });
 }
 function saveBillingResidents(){
   const inputs=[...document.querySelectorAll('.bill-inp, .bill-sel')];
@@ -7023,39 +7346,39 @@ function handleXlsx(file){
         var cat=String(row[2]||'').trim();
         if(!cat) continue;
         if(cats.indexOf(cat)<0) cats.push(cat);
-        if(!byName[curName]) byName[curName]={care:curCare,riyou:null,otomari:null};
+        if(!byName[curName]) byName[curName]={care:curCare,riyou:null,otomari:null,nyuyoku:null};
         if(cat==='利用') byName[curName].riyou=row;
         if(cat.indexOf('泊')>=0) byName[curName].otomari=row;
+        if(cat==='入浴') byName[curName].nyuyoku=row;
       }
       var newRes=[], dailyCount=0;
       var importUBase=Date.now();
       Object.keys(byName).forEach(function(n){
-        var v=byName[n], uRow=v.riyou, oRow=v.otomari;
+        var v=byName[n], uRow=v.riyou, oRow=v.otomari, nyRow=v.nyuyoku;
         // D列（col 3 = 1日目）のお泊行に入力があれば常時利用者
         var d1Val=oRow?String(oRow[3]||'').trim():'';
         var isDaily=(oRow&&d1Val.length>0);
-        if(!isDaily&&!uRow) return;
+        if(!uRow) return;  // 利用行がない人はスキップ
         var sched=[];
         for(var c=3;c<=33;c++){
-          var dayIdx=c-3;
-          if(isDaily){
-            sched.push(1);
-          } else {
-            var uv=uRow[c];
-            var val=(uv&&['〇','○','◯'].indexOf(String(uv).trim())>=0)?1:0;
-            // 翌日ルール：前日のお泊行に入力があれば翌日も利用扱い（ショートステイ）
-            if(oRow&&dayIdx>0&&String(oRow[c-1]||'').trim().length>0) val=1;
-            sched.push(val);
-          }
+          // 入所者・デイ問わず全員Excelの利用行〇のみ1
+          var uv=uRow[c];
+          var val=(uv&&['〇','○','◯'].indexOf(String(uv).trim())>=0)?1:0;
+          sched.push(val);
         }
-        if(isDaily) dailyCount++;
+        var bathSched=[];
+        for(var cb=3;cb<=33;cb++){
+          var bv=nyRow?String(nyRow[cb]||'').trim():'';
+          bathSched.push((bv==='◆'||bv==='●')?1:0);
+        }
+        if(isDaily) dailyCount++;  // 入所者カウントは維持
         // 既存利用者のIDを引き継ぐ（空白差で別人扱いにならないよう氏名は正規化して照合）
         const nn=normalizeResidentName(n);
         const existing=(db.residents||[]).find(r=>normalizeResidentName(r.name)===nn);
         const id=existing?existing.id:genId('r');
         const serviceTypeFallback=existing?residentServiceTypeOrDefault(existing):inferServiceTypeFromSched(sched);
         const _u=importUBase+newRes.length;
-        newRes.push({id,name:n,care:v.care,sched:sched,serviceType:serviceTypeFallback,_u});
+        newRes.push({id,name:n,care:v.care,sched:sched,bathSched:bathSched,serviceType:serviceTypeFallback,_u});
       });
       if(newRes.length>0){
         // 既存メンバーを保持しつつ sched を更新、予定表にない人は sched を全0にする
@@ -7065,8 +7388,9 @@ function handleXlsx(file){
             r => normalizeResidentName(r.name) === normalizeResidentName(nr.name)
           );
           if(idx >= 0){
-            // 既存の人は sched と care だけ更新（他フィールドは保持）
+            // 既存の人は sched・bathSched・care を更新（他フィールドは保持）
             existingResidents[idx].sched = nr.sched;
+            existingResidents[idx].bathSched = nr.bathSched;
             existingResidents[idx].care = nr.care;
             existingResidents[idx]._u = nr._u;
           } else {
