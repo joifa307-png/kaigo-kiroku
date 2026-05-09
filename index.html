@@ -2660,6 +2660,21 @@ function mergeResidentGroup(versions){
     if(u>bestU){ best=cloneDeep(v0[i]); bestU=u; }
   }
   best._u=Math.max(...v0.map(r=>_numU(r._u)));
+  // 請求フィールドは空でない値を優先して引き継ぐ
+  const billingFields=['insuredNumber','careManagerOffice','careManagerName',
+    'birthDate','careExpiry','costShare','serviceCodeKey','shoguCode','shoguUnit',
+    'addonCodes','sameBuilding','transportType','startTime','endTime'];
+  billingFields.forEach(f=>{
+    if(!best[f]||best[f]===''||best[f]==='0'||
+       (Array.isArray(best[f])&&best[f].length===0)){
+      v0.forEach(v=>{
+        if(v[f]&&v[f]!==''&&v[f]!=='0'&&
+           !(Array.isArray(v[f])&&v[f].length===0)){
+          best[f]=v[f];
+        }
+      });
+    }
+  });
   best.serviceType=residentServiceTypeOrDefault(best);
   return best;
 }
