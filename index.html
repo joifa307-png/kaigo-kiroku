@@ -3217,6 +3217,33 @@ function moveScheduleMonth(dir){
   renderScheduleScreen();
 }
 
+function toggleScheduleJisseki(name, dateKey){
+  const rec=getRec(name, dateKey);
+  if(rec.calculated){
+    if(!confirm(`${dateKey} の算定を取り消しますか？`)) return;
+    rec.calculated=false;
+    rec.calcStartTime='';
+    rec.calcEndTime='';
+    rec.calcServiceCodeKey='';
+    rec.calcAddons=[];
+  }else{
+    const resident=(db.residents||[]).find(r=>normalizeResidentName(r.name)===normalizeResidentName(name));
+    rec.calculated=true;
+    rec.calcStartTime=_cleanTimeHHMM(resident&&resident.startTime)||'0900';
+    rec.calcEndTime=_cleanTimeHHMM(resident&&resident.endTime)||'1630';
+    const m=resolveServiceCodeByTime(rec.calcStartTime, rec.calcEndTime, name);
+    rec.calcServiceCodeKey=m?String(m.code||''):'';
+    if(resident){
+      rec.calcAddons=[...((db.settings&&db.settings.officeAddonCodes)||[])];
+      applyDeductAddonsToRecord(rec, resident);
+    }else{
+      rec.calcAddons=[];
+    }
+  }
+  saveDB();
+  renderScheduleScreen();
+}
+
 function renderScheduleScreen(){
   const lbl=document.getElementById('schedMonthLabel');
   const body=document.getElementById('scheduleBody');
@@ -3230,9 +3257,19 @@ function renderScheduleScreen(){
     return;
   }
   _ensureResidentBillingFields(resident);
-  const svcKey=String(resident.serviceCodeKey||'').trim();
+  let svcKey=String(resident.serviceCodeKey||'').trim();
+  let svcKeyIsEstimated=false;
   if(!svcKey){
-    body.innerHTML='<p style="color:var(--text2);padding:12px;">請求設定でサービスコードを設定してください</p>';
+    const stEst=_cleanTimeHHMM(resident.startTime)||'0900';
+    const etEst=_cleanTimeHHMM(resident.endTime)||'1630';
+    const estimated=resolveServiceCodeByTime(stEst, etEst, resident.name);
+    if(estimated){
+      svcKey=String(estimated.code||'');
+      svcKeyIsEstimated=true;
+    }
+  }
+  if(!svcKey){
+    body.innerHTML='<p style="color:var(--text2);padding:12px;">介護度と利用時間を設定してください（利用者基本情報タブ）</p>';
     return;
   }
   const S=db.settings||{};
@@ -3240,7 +3277,10 @@ function renderScheduleScreen(){
   const addonsM=(_svcMaster().addons||[]);
   const shoguM=(_svcMaster().shogu||[]);
   const basicEntry=basics.find(x=>String(x.code||'')===svcKey)||null;
-  const svcName=basicEntry?String(basicEntry.name||''):svcKey;
+  const svcNameStyle=svcKeyIsEstimated?'color:var(--text3);font-style:italic;':'';
+  const svcName=basicEntry
+    ? String(basicEntry.name||'')+(svcKeyIsEstimated?'（推定）':'')
+    : svcKey+(svcKeyIsEstimated?'（推定）':'');
   const stDef=_cleanTimeHHMM(resident.startTime)||'0900';
   const etDef=_cleanTimeHHMM(resident.endTime)||'1630';
   const timeRange=`${_fmtTimeColon(stDef)}〜${_fmtTimeColon(etDef)}`;
@@ -3255,7 +3295,10 @@ function renderScheduleScreen(){
     return `<th style="border:1px solid var(--border1);padding:4px 6px;">${wdJp[wd]}</th>`;
   }).join('');
 
-  function rowPair(labelSvc,getYotei,getJisseki){
+  function rowPair(labelSvc,getYotei,getJisseki,opts){
+    opts=opts||{};
+    const svcExtraStyle=opts.svcExtraStyle||'';
+    const jissekiClickName=opts.jissekiClickName||'';
     const cellWt=v=>{
       const s=String(v==null?'':v).trim();
       if(!s) return 0;
@@ -3274,11 +3317,15 @@ function renderScheduleScreen(){
       const bg=wd===0?'background:#FFE0E8':(wd===6?'background:#DDEEFF':'');
       const bs='text-align:center;border:1px solid var(--border1);'+bg;
       yCells.push(`<td style="${bs};font-weight:700;">${y}</td>`);
-      jCells.push(`<td style="${bs};font-weight:700;">${j}</td>`);
+      const dkKey=`${schedYear}-${pad(schedMonth+1)}-${pad(i+1)}`;
+      const jOnclick=jissekiClickName
+        ? ` onclick='toggleScheduleJisseki(${JSON.stringify(jissekiClickName)}, ${JSON.stringify(dkKey)})' style="${bs};font-weight:700;cursor:pointer;user-select:none;"`
+        : ` style="${bs};font-weight:700;"`;
+      jCells.push(`<td${jOnclick}>${j}</td>`);
     }
     return `<tr>
       <td rowspan="2" style="border:1px solid var(--border1);vertical-align:middle;padding:6px;">${escapeHtml(timeRange)}</td>
-      <td rowspan="2" style="border:1px solid var(--border1);vertical-align:middle;padding:6px;">${escapeHtml(labelSvc)}</td>
+      <td rowspan="2" style="border:1px solid var(--border1);vertical-align:middle;padding:6px;${svcExtraStyle}">${escapeHtml(labelSvc)}</td>
       <td rowspan="2" style="border:1px solid var(--border1);vertical-align:middle;padding:6px;">${escapeHtml(facName)}</td>
       <td style="font-size:11px;color:var(--text3);border:1px solid var(--border1);">予定</td>
       ${yCells.join('')}
@@ -3315,7 +3362,7 @@ function renderScheduleScreen(){
     if(rec.calculated!==true) return '';
     const ck=String(rec.calcServiceCodeKey||'').trim();
     return (ck===svcKey||ck==='')?'1':'';
-  });
+  },{svcExtraStyle:svcNameStyle,jissekiClickName:resident.name});
 
   officeAddons.forEach(code=>{
     const ad=addonsM.find(x=>String(x.code||'')===String(code));
@@ -3576,10 +3623,12 @@ function buildSanteiPanel(){
   let {st,et}=_calcEffectiveTime(rec,r);
   st=_cleanTimeHHMM(st)||'0900';
   et=_cleanTimeHHMM(et)||'1630';
-  const m=resolveServiceCodeByTime(st,et,curRes);
-  const code=m?String(m.code||''):_calcEffectiveServiceCode(rec,r);
-  const unit=code?getServiceUnitByCode(code):0;
-  const label=code?`${code}（${unit||0}単位）`:'—';
+  const stEff=_cleanTimeHHMM(rec.calcStartTime)||st;
+  const etEff=_cleanTimeHHMM(rec.calcEndTime)||et;
+  const mAuto=resolveServiceCodeByTime(stEff, etEff, curRes);
+  const autoCodeLabel=mAuto
+    ? `→ ${escapeHtml(String(mAuto.code||''))} ${escapeHtml(String(mAuto.name||''))}（${Number(mAuto.unit||0)||0}単位）`
+    : '→ （判定できません）';
   const addons=(_svcMaster().addons||[]);
   if(!Array.isArray(rec.calcAddons)) rec.calcAddons=[];
   const addonChecks=addons.map(a=>{
@@ -3632,14 +3681,13 @@ function buildSanteiPanel(){
           <label>終了</label>
           <input type="text" id="calcEndTimeInp" value="${escapeAttr(et)}" list="timeOptions30min" placeholder="1630" oninput="saveCalcTime()" style="font-size:18px;padding:10px 12px;">
         </div>
-        <div style="font-size:16px;color:var(--text2);padding-bottom:10px;">
-          → 自動判定: <span id="calcAutoCode" style="font-weight:900;">${escapeHtml(label)}</span>
-        </div>
       </div>
+      <div id="santeiAutoCode" style="font-size:13px;color:var(--text2);margin-top:8px;font-weight:600;">${autoCodeLabel}</div>
     </div>
     <div class="panel-sec">
       <h3>加算</h3>
       <div>${addonChecks || '<span class="text-gray">（加算マスタがありません）</span>'}</div>
+      <button type="button" onclick="cancelSantei()" style="margin-top:12px;background:var(--white);color:var(--red);border:1px solid var(--red);border-radius:var(--r1);padding:6px 16px;font-size:13px;cursor:pointer;">算定を取り消す</button>
       ${deductBlock}
       ${shoguLine}
     </div>
@@ -3679,24 +3727,42 @@ function toggleCalculated(){
   refreshPanel(curTab);
   renderMain();
 }
+function cancelSantei(){
+  if(!curRes) return;
+  if(!confirm('この日の算定を取り消しますか？')) return;
+  const rec=getRec(curRes, dk());
+  rec.calculated=false;
+  rec.calcStartTime='';
+  rec.calcEndTime='';
+  rec.calcServiceCodeKey='';
+  rec.calcAddons=[];
+  saveDB();
+  refreshPanel('santei');
+  renderMain();
+}
 function saveCalcTime(){
   if(!curRes) return;
   const r=dbResidentByNameLoose(curRes);
   if(!r) return;
   const rec=getRec(curRes, dk());
   if(!rec.calculated) return;
-  const st=_cleanTimeHHMM(document.getElementById('calcStartTimeInp')?.value||'');
-  const et=_cleanTimeHHMM(document.getElementById('calcEndTimeInp')?.value||'');
+  const s=document.getElementById('calcStartInput')||document.getElementById('calcStartTimeInp');
+  const e=document.getElementById('calcEndInput')||document.getElementById('calcEndTimeInp');
+  const st=_cleanTimeHHMM(s?s.value:'');
+  const et=_cleanTimeHHMM(e?e.value:'');
   rec.calcStartTime=st;
   rec.calcEndTime=et;
   const m=resolveServiceCodeByTime(st,et,curRes);
   rec.calcServiceCodeKey=m?String(m.code||''):'';
-  const code=m?String(m.code||''):_calcEffectiveServiceCode(rec,r);
-  const unit=code?getServiceUnitByCode(code):0;
-  const lbl=code?`${code}（${unit||0}単位）`:'—';
-  const el=document.getElementById('calcAutoCode');
-  if(el) el.textContent=lbl;
   saveDB();
+  const codeDisp=document.getElementById('santeiAutoCode');
+  if(codeDisp) codeDisp.textContent=m?`→ ${m.code} ${m.name}（${m.unit}単位）`:'→ （判定できません）';
+  const calcEl=document.getElementById('calcAutoCode');
+  if(calcEl){
+    const code=m?String(m.code||''):_calcEffectiveServiceCode(rec,r);
+    const unit=code?getServiceUnitByCode(code):0;
+    calcEl.textContent=code?`${code}（${unit||0}単位）`:'—';
+  }
   renderMain();
 }
 function toggleCalcAddon(code, on){
