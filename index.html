@@ -42,6 +42,13 @@ input,select,textarea{font-family:inherit;font-size:30px;}
   /* iPad 狭幅で右端の🔄等が画面外に出たり、下の表にタッチが奪われるのを防ぐ */
   overflow-x:auto;-webkit-overflow-scrolling:touch;flex-wrap:nowrap;
 }
+/* メイン画面ヘッダー：横スクロールせず折り返し */
+#mainScreen.screen.active > .hdr.hdr-main{
+  overflow-x:visible;
+  flex-wrap:wrap;
+  row-gap:6px;
+  align-content:center;
+}
 .hdr-logo{height:60px;width:auto;display:block;}
 .hdr-app-ver{font-size:12px;line-height:1.25;color:var(--text3);padding:0 2px;white-space:nowrap;max-width:160px;}
 .hdr-title{font-weight:700;font-size:16px;color:var(--orange2);}
@@ -509,7 +516,7 @@ input,select,textarea{font-family:inherit;font-size:30px;}
 
 <!-- ========== メイン画面 ========== -->
 <div id="mainScreen" class="screen">
-  <div class="hdr no-print">
+  <div class="hdr hdr-main no-print">
     <div style="display:flex;flex-direction:column;align-items:flex-start;justify-content:center;gap:0;flex-shrink:0;min-width:0;">
       <img id="mainLogo" class="hdr-logo" src="" alt="" style="display:none;">
       <div id="hdrAppVer" class="hdr-app-ver" title="アプリバージョン"></div>
@@ -530,7 +537,6 @@ input,select,textarea{font-family:inherit;font-size:30px;}
     <button class="hdr-btn no-print" onclick="openPrint()" style="background:#E1F5EE;color:#0F6E56;border-color:#0F6E56;font-weight:700;">連絡帳</button>
     <button class="hdr-btn no-print" onclick="openSanteiDialog()" style="background:#F3F3F3;color:#3a3a3a;border-color:#9E9C94;font-weight:700;">📋算定確定</button>
     <button class="hdr-btn no-print" onclick="openScheduleScreen()" style="background:#F3F3F3;color:#3a3a3a;border-color:#9E9C94;font-weight:700;">📊実績CSV</button>
-    <button class="hdr-btn no-print" onclick="saveMonthlyBackup()" style="background:var(--blue2);color:var(--blue);border-color:var(--blue);font-weight:700;">月次保存</button>
     <button class="hdr-btn no-print" onclick="syncNow()">🔄</button>
     <button class="hdr-btn no-print" onclick="openSettings()">⚙️</button>
   </div>
@@ -1487,7 +1493,7 @@ const REC = {
 const N_RECORD_COLS = 57;
 
 /** デプロイのたびに上げる（設定→データ管理の「アプリ情報」で表示） */
-const APP_VERSION='1.1.3';
+const APP_VERSION='1.1.4';
 function isStandaloneWebApp(){
   try{
     if(window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches) return true;
@@ -3098,17 +3104,41 @@ function ensureTimeDatalist(){
   document.body.appendChild(dl);
 }
 
+/** 算定確定ダイアログ用：当日の予定実績（提供票の日別開始終了）があればそれを、なければ基本時間 */
+function getResidentScheduleDayTimes(resident, dateKey){
+  _ensureResidentBillingFields(resident);
+  const defSt=_cleanTimeHHMM(resident.startTime)||'0900';
+  const defEt=_cleanTimeHHMM(resident.endTime)||'1630';
+  const parts=String(dateKey||'').split('-');
+  if(parts.length<3) return {st:defSt, et:defEt};
+  const yyyymm=`${parts[0]}-${parts[1]}`;
+  const dd=parts[2];
+  const daily=(resident.dailyServiceCodes||{})[yyyymm]||{};
+  const pick=e=>{
+    if(!e||typeof e!=='object') return null;
+    const st=_cleanTimeHHMM(e.startTime);
+    const et=_cleanTimeHHMM(e.endTime);
+    if(st||et) return {st:st||defSt, et:et||defEt};
+    return null;
+  };
+  let t=pick(daily[dd]);
+  if(!t) t=pick(daily[dd+'_2']);
+  if(t) return t;
+  return {st:defSt, et:defEt};
+}
 function openSanteiDialog(){
   ensureTimeDatalist();
   const dayIdx=curDate.getDate()-1;
+  const dkStr=dk();
   const todayRes=residentsOnDaySorted(dayIdx,{forMainTable:true});
   const title=`本日の算定確認（${_fmtYmdJp(curDate)}）`;
   const rows=todayRes.map(r=>{
     _ensureResidentBillingFields(r);
-    const rec=getRec(r.name, dk());
+    const rec=getRec(r.name, dkStr);
     const checked=((r.sched||[])[dayIdx]===1)?'checked':'';
-    const st=_cleanTimeHHMM(r.startTime)||'0900';
-    const et=_cleanTimeHHMM(r.endTime)||'1630';
+    const {st:st0, et:et0}=getResidentScheduleDayTimes(r, dkStr);
+    const st=st0;
+    const et=et0;
     const hasBath=(rec.bath||[]).some(b=>b.type==='普通浴'||b.type==='シャワー浴');
     const bathLabel=hasBath
       ? '<span style="color:var(--green);font-weight:700;">🛁 入浴あり</span>'
@@ -3568,7 +3598,6 @@ function renderScheduleScreen(){
   const basics=(_svcMaster().basic||[]);
   const addonsM=(_svcMaster().addons||[]);
   const shoguM=(_svcMaster().shogu||[]);
-  const facName=String(S.facilityName||'').trim()||'—';
   const days=new Date(schedYear,schedMonth+1,0).getDate();
   const wdJp=['日','月','火','水','木','金','土'];
   const officeAddons=Array.isArray(S.officeAddonCodes)?S.officeAddonCodes:[];
@@ -3642,17 +3671,18 @@ function renderScheduleScreen(){
     return `<tr>
       <td rowspan="2" style="border:1px solid var(--border1);vertical-align:middle;padding:6px;">${timeRangeHtml}</td>
       <td rowspan="2" style="border:1px solid var(--border1);vertical-align:middle;padding:6px;">${escapeHtml(labelSvc)}</td>
-      <td rowspan="2" style="border:1px solid var(--border1);vertical-align:middle;padding:6px;">${escapeHtml(facName)}</td>
       <td style="font-size:11px;color:var(--text3);border:1px solid var(--border1);">予定</td>
       ${yCells.join('')}
-      <td style="text-align:center;border:1px solid var(--border1);font-weight:700;">${cntY}</td>
-      <td style="border:1px solid var(--border1);"></td>
+      <td rowspan="2" style="text-align:center;border:1px solid var(--border1);vertical-align:middle;padding:4px 8px;line-height:1.35;">
+        <div style="font-size:11px;color:var(--text3);">予定</div>
+        <div style="font-weight:700;font-size:13px;">${cntY}</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:6px;">実績</div>
+        <div style="font-weight:700;font-size:13px;">${cntJ}</div>
+      </td>
     </tr>
     <tr>
       <td style="font-size:11px;color:var(--text3);border:1px solid var(--border1);">実績</td>
       ${jCells.join('')}
-      <td style="border:1px solid var(--border1);"></td>
-      <td style="text-align:center;border:1px solid var(--border1);font-weight:700;">${cntJ}</td>
     </tr>`;
   }
 
@@ -3661,11 +3691,9 @@ function renderScheduleScreen(){
     <tr>
       <th rowspan="2" style="border:1px solid var(--border1);padding:6px;">提供時間</th>
       <th rowspan="2" style="border:1px solid var(--border1);padding:6px;">サービス内容</th>
-      <th rowspan="2" style="border:1px solid var(--border1);padding:6px;">事業所名</th>
       <th rowspan="2" style="border:1px solid var(--border1);"></th>
       ${thNums}
-      <th rowspan="2" style="border:1px solid var(--border1);padding:6px;">予定<br>合計</th>
-      <th rowspan="2" style="border:1px solid var(--border1);padding:6px;">実績<br>合計</th>
+      <th rowspan="2" style="border:1px solid var(--border1);padding:6px;text-align:center;">予実<br>合計</th>
     </tr>
     <tr>${thWds}</tr>
   </thead>
@@ -7864,6 +7892,11 @@ function buildDataSettings(){
       <h3>📤 データエクスポート</h3>
       <p style="font-size:14px;color:var(--text2);margin-bottom:12px;">全データをJSONファイルとして保存します（バックアップ用）。</p>
       <button class="btn btn-primary btn-sm" onclick="exportDB()">JSONダウンロード</button>
+    </div>
+    <div class="panel-sec">
+      <h3>📅 月次バックアップ</h3>
+      <p style="font-size:14px;color:var(--text2);margin-bottom:12px;">当月の全データをファイルとして保存します（JSON・共有シートに保存）。</p>
+      <button type="button" class="btn btn-primary btn-sm" style="background:var(--blue2);color:var(--blue);border-color:var(--blue);" onclick="saveMonthlyBackup()">月次保存</button>
     </div>
     <div class="panel-sec">
       <h3>📥 データインポート</h3>
