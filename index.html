@@ -1493,7 +1493,7 @@ const REC = {
 const N_RECORD_COLS = 57;
 
 /** デプロイのたびに上げる（設定→データ管理の「アプリ情報」で表示） */
-const APP_VERSION='1.1.9';
+const APP_VERSION='1.2.0';
 function isStandaloneWebApp(){
   try{
     if(window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches) return true;
@@ -2678,7 +2678,8 @@ function mergeResidentGroup(versions){
   // 請求フィールドは空でない値を優先して引き継ぐ
   const billingFields=['insuredNumber','careManagerOffice','careManagerName',
     'birthDate','careExpiry','costShare','serviceCodeKey','shoguCode','shoguUnit',
-    'addonCodes','sameBuilding','transportType','startTime','endTime'];
+    'addonCodes','sameBuilding','transportType','startTime','endTime',
+    'dailyServiceCodes','bathSched'];
   billingFields.forEach(f=>{
     if(!best[f]||best[f]===''||best[f]==='0'||
        (Array.isArray(best[f])&&best[f].length===0)){
