@@ -1753,6 +1753,8 @@ function buildResidentHeaderRow(){
   h.push('addonCodes');       // 47
   h.push('shoguCode');        // 48
   h.push('shoguUnit');        // 49
+  h.push('dailyServiceCodes'); // 50
+  h.push('bathSched');         // 51
   return h;
 }
 function buildRecordHeaderRow(){
@@ -1858,6 +1860,8 @@ function dbToSheet(inDb){
     row.push(JSON.stringify(r.addonCodes||[]));
     row.push(String(r.shoguCode||''));
     row.push(String(r.shoguUnit||0));
+    row.push(JSON.stringify(r.dailyServiceCodes||{}));
+    row.push(JSON.stringify(r.bathSched||[]));
     rows.push(PR(row));
   });
   rows.push(PR([]));
@@ -2158,6 +2162,11 @@ function sheetToDb(rows){
       addonCodes:      (function(){try{return JSON.parse(r[47]||'[]');}catch(e){return [];}}()),
       shoguCode:       String(r[48]||''),
       shoguUnit:       Number(r[49]||0),
+      dailyServiceCodes: (function(){try{return JSON.parse(r[50]||'{}');}catch(e){return {};}}()),
+      bathSched:         (function(){try{
+    const v=JSON.parse(r[51]||'[]');
+    return Array.isArray(v)?v:new Array(31).fill(0);
+  }catch(e){return new Array(31).fill(0);}}()),
     });
     i++;
   }
