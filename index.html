@@ -42,13 +42,20 @@ input,select,textarea{font-family:inherit;font-size:30px;}
   /* iPad 狭幅で右端の🔄等が画面外に出たり、下の表にタッチが奪われるのを防ぐ */
   overflow-x:auto;-webkit-overflow-scrolling:touch;flex-wrap:nowrap;
 }
-/* メイン画面ヘッダー：横スクロールせず折り返し */
+/* メイン画面ヘッダー：折り返し・横スクロールなし（1行に収める） */
 #mainScreen.screen.active > .hdr.hdr-main{
-  overflow-x:visible;
-  flex-wrap:wrap;
-  row-gap:6px;
-  align-content:center;
+  overflow-x:hidden;
+  flex-wrap:nowrap;
+  gap:4px;
+  padding:4px 6px;
+  align-items:center;
 }
+#mainScreen.screen.active > .hdr.hdr-main .hdr-logo{height:52px;}
+#mainScreen.screen.active > .hdr.hdr-main .hdr-app-ver{font-size:11px;max-width:110px;}
+#mainScreen.screen.active > .hdr.hdr-main .hdr-btn{padding:6px 8px;font-size:13px;}
+#mainScreen.screen.active > .hdr.hdr-main .hdr-btn.nav{padding:5px 8px;font-size:16px;}
+#mainScreen.screen.active > .hdr.hdr-main .hdr-date{font-size:15px;padding:5px 8px;}
+#mainScreen.screen.active > .hdr.hdr-main .sync-indicator{font-size:11px;gap:3px;max-width:none;}
 .hdr-logo{height:60px;width:auto;display:block;}
 .hdr-app-ver{font-size:12px;line-height:1.25;color:var(--text3);padding:0 2px;white-space:nowrap;max-width:160px;}
 .hdr-title{font-weight:700;font-size:16px;color:var(--orange2);}
@@ -70,8 +77,6 @@ input,select,textarea{font-family:inherit;font-size:30px;}
 }
 .sync-indicator{display:flex;align-items:center;gap:4px;font-size:12px;color:var(--text3);flex-shrink:0;max-width:42vw;}
 .sync-dot{font-size:16px;line-height:1;}
-/* 西/南で別シート・別ローカルDBのため、同期先が一目で分かるようにする */
-.hdr-sheet-tag{font-size:11px;font-weight:700;color:var(--orange2);background:var(--orange-bg);padding:2px 6px;border-radius:4px;white-space:nowrap;border:1px solid var(--orange);}
 
 /* ===== 画面切替 ===== */
 .screen{display:none;}
@@ -521,21 +526,18 @@ input,select,textarea{font-family:inherit;font-size:30px;}
       <img id="mainLogo" class="hdr-logo" src="" alt="" style="display:none;">
       <div id="hdrAppVer" class="hdr-app-ver" title="アプリバージョン"></div>
     </div>
-    <div style="flex:1;"></div>
-    <div class="hdr-center">
+    <div class="hdr-center" style="margin-left:6px;">
       <button class="hdr-btn nav" onclick="moveDay(-1)">◀</button>
       <div class="hdr-date" id="mainDate" onclick="openCal()"></div>
       <button class="hdr-btn nav" onclick="moveDay(1)">▶</button>
     </div>
     <div class="sync-indicator">
-      <span id="hdrSheetTag" class="hdr-sheet-tag" style="display:none;" title=""></span>
       <span class="sync-dot" id="syncDot">●</span>
       <span id="syncLabel">--</span>
     </div>
     <button type="button" class="hdr-btn no-print" onclick="openSupplyRecord()" style="background:var(--green);color:#fff;border-color:var(--green);font-weight:700;">卸記録</button>
     <button class="hdr-btn no-print" onclick="openUpload()" style="background:#F3F0FF;color:#5B3FB5;border-color:#5B3FB5;font-weight:700;">📅予定</button>
     <button class="hdr-btn no-print" onclick="openPrint()" style="background:#E1F5EE;color:#0F6E56;border-color:#0F6E56;font-weight:700;">連絡帳</button>
-    <button class="hdr-btn no-print" onclick="openSanteiDialog()" style="background:#F3F3F3;color:#3a3a3a;border-color:#9E9C94;font-weight:700;">📋算定確定</button>
     <button class="hdr-btn no-print" onclick="openScheduleScreen()" style="background:#F3F3F3;color:#3a3a3a;border-color:#9E9C94;font-weight:700;">📊実績CSV</button>
     <button class="hdr-btn no-print" onclick="syncNow()">🔄</button>
     <button class="hdr-btn no-print" onclick="openSettings()">⚙️</button>
@@ -544,8 +546,8 @@ input,select,textarea{font-family:inherit;font-size:30px;}
     <table class="res-table" id="resTable">
       <thead>
         <tr>
-          <th style="width:36px;min-width:36px;white-space:nowrap;text-align:center;">予定</th>
-          <th style="width:36px;min-width:36px;white-space:nowrap;text-align:center;">実績</th>
+          <th style="width:36px;min-width:36px;white-space:nowrap;text-align:center;cursor:pointer;" onclick="openSanteiDialog()" title="タップで算定確定">予定</th>
+          <th style="width:36px;min-width:36px;white-space:nowrap;text-align:center;cursor:pointer;" onclick="openSanteiDialog()" title="タップで算定確定">実績</th>
           <th style="width:32px;min-width:32px;">申送</th>
           <th class="res-div-r" style="min-width:80px;">氏名</th>
           <th class="res-div-l">体温</th>
@@ -1493,7 +1495,7 @@ const REC = {
 const N_RECORD_COLS = 57;
 
 /** デプロイのたびに上げる（設定→データ管理の「アプリ情報」で表示） */
-const APP_VERSION='1.1.5';
+const APP_VERSION='1.1.6';
 function isStandaloneWebApp(){
   try{
     if(window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches) return true;
@@ -3104,15 +3106,22 @@ function ensureTimeDatalist(){
   document.body.appendChild(dl);
 }
 
-/** 算定確定オーバーレイ内で list が効くよう datalist を本文直下に埋め込む */
-function buildSanteiTimeDatalistHtml(){
-  let inner='';
+/** 算定確定ダイアログ用：datalist は iPad 等で効かないため select で時刻一覧を出す */
+function buildSanteiHHMMSelectOptions(selected){
+  const cleaned=_cleanTimeHHMM(String(selected||'').trim())||'';
+  const standardSlots=new Set();
+  let html='';
   for(let h=6;h<=20;h++){
     ['00','30'].forEach(m=>{
-      inner+=`<option value="${String(h).padStart(2,'0')+m}"></option>`;
+      const v=String(h).padStart(2,'0')+m;
+      standardSlots.add(v);
+      html+=`<option value="${v}"${cleaned===v?' selected':''}>${v}</option>`;
     });
   }
-  return `<datalist id="santeiTimeDl">${inner}</datalist>`;
+  if(cleaned && !standardSlots.has(cleaned)){
+    html=`<option value="${escapeAttr(cleaned)}" selected>${escapeHtml(cleaned)}</option>`+html;
+  }
+  return html;
 }
 /** 算定確定ダイアログ用：当日の予定実績（提供票の日別開始終了）があればそれを、なければ基本時間 */
 function getResidentScheduleDayTimes(resident, dateKey){
@@ -3137,7 +3146,6 @@ function getResidentScheduleDayTimes(resident, dateKey){
   return {st:defSt, et:defEt};
 }
 function openSanteiDialog(){
-  ensureTimeDatalist();
   const dayIdx=curDate.getDate()-1;
   const dkStr=dk();
   const todayRes=residentsOnDaySorted(dayIdx,{forMainTable:true});
@@ -3157,9 +3165,9 @@ function openSanteiDialog(){
         <span style="font-size:18px;font-weight:600;">${escapeHtml(r.name)}</span>
       </label>
       <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
-        <input type="text" class="santei-time" data-kind="start" data-res-name="${escapeAttr(r.name)}" value="${escapeAttr(st)}" list="santeiTimeDl" placeholder="0900" autocomplete="off" style="width:80px;font-size:16px;padding:6px 8px;">
+        <select class="santei-time" data-kind="start" data-res-name="${escapeAttr(r.name)}" style="width:92px;font-size:16px;padding:6px 8px;">${buildSanteiHHMMSelectOptions(st)}</select>
         <span>〜</span>
-        <input type="text" class="santei-time" data-kind="end" data-res-name="${escapeAttr(r.name)}" value="${escapeAttr(et)}" list="santeiTimeDl" placeholder="1630" autocomplete="off" style="width:80px;font-size:16px;padding:6px 8px;">
+        <select class="santei-time" data-kind="end" data-res-name="${escapeAttr(r.name)}" style="width:92px;font-size:16px;padding:6px 8px;">${buildSanteiHHMMSelectOptions(et)}</select>
         <label style="display:inline-flex;align-items:center;gap:6px;margin-left:12px;cursor:pointer;white-space:nowrap;">
           <input type="checkbox" class="santei-bath" data-res-name="${escapeAttr(r.name)}" ${hasBath?'checked':''}>
           <span style="font-size:14px;color:var(--text2);">入浴算定</span>
@@ -3168,7 +3176,6 @@ function openSanteiDialog(){
     </div>`;
   }).join('');
   openMainOv(`
-    ${buildSanteiTimeDatalistHtml()}
     <div style="font-size:18px;font-weight:800;margin-bottom:10px;">${title}</div>
     <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px;">
       <button type="button" class="btn btn-gray btn-sm" onclick="santeiSelectAll(true)">全選択</button>
@@ -3181,16 +3188,9 @@ function openSanteiDialog(){
       <button type="button" class="btn btn-gray btn-sm" onclick="closeMainOv()">キャンセル</button>
     </div>
   `);
-  setTimeout(()=>{
-    [...document.querySelectorAll('.santei-time')].forEach(inp=>{
-      inp.addEventListener('input', ()=>updateSanteiAutoFor(inp.getAttribute('data-res-name')));
-    });
-  },0);
 }
 function santeiSelectAll(on){
   [...document.querySelectorAll('.santei-chk')].forEach(ch=>{ ch.checked=!!on; });
-}
-function updateSanteiAutoFor(resName){
 }
 function execSanteiConfirm(){
   const dayIdx=curDate.getDate()-1;
@@ -3286,16 +3286,19 @@ function _fmtTimeColon(hhmm){
   return `${s.slice(0,2)}:${s.slice(2,4)}`;
 }
 
-function openScheduleScreen(){
+function openScheduleScreen(preferredResName){
   schedYear=curDate.getFullYear();
   schedMonth=curDate.getMonth();
   const sel=document.getElementById('schedResSelect');
   const list=[...(db.residents||[])].sort(compareResidentsStable);
+  const prefer=(preferredResName!=null&&String(preferredResName).trim()!=='')
+    ?preferredResName
+    :curRes;
   if(sel){
     sel.innerHTML=list.map(r=>`<option value="${escapeAttr(r.name)}">${escapeHtml(r.name)}</option>`).join('');
     if(list.length){
-      if(curRes){
-        const hit=list.find(r=>normalizeResidentName(r.name)===normalizeResidentName(curRes));
+      if(prefer){
+        const hit=list.find(r=>normalizeResidentName(r.name)===normalizeResidentName(prefer));
         sel.value=hit?hit.name:list[0].name;
       }else{
         sel.value=list[0].name;
@@ -3969,220 +3972,6 @@ function execCSVExport(){
   showBriefToast(`${fname} を出力しました`, 2500, false);
 }
 
-function buildCalcToggle(){
-  if(!curRes) return '';
-  const r=dbResidentByNameLoose(curRes);
-  if(!r) return '';
-  _ensureResidentBillingFields(r);
-  const rec=getRec(curRes, dk());
-  const on=rec.calculated===true;
-  const {st,et}=_calcEffectiveTime(rec,r);
-  const m=resolveServiceCodeByTime(st,et,curRes);
-  const code=m?String(m.code||''):_calcEffectiveServiceCode(rec,r);
-  const unit=code?getServiceUnitByCode(code):0;
-  const label=code?`${code}（${unit||0}単位）`:'—';
-  const addons=(_svcMaster().addons||[]);
-  if(!Array.isArray(rec.calcAddons)) rec.calcAddons=[];
-  const addonChecks=addons.map(a=>{
-    const c=String(a.code||'');
-    const onA=rec.calcAddons.includes(c);
-    return `<label style="display:inline-flex;align-items:center;gap:6px;margin-right:12px;white-space:nowrap;">
-      <input type="checkbox" ${onA?'checked':''} onchange="toggleCalcAddon('${escapeAttr(c)}', this.checked)">
-      <span>${escapeHtml(a.name||c)}</span>
-    </label>`;
-  }).join('');
-  const body=on?`
-    <div style="margin-top:10px;display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;">
-      <div class="fg" style="min-width:120px;">
-        <label>開始（HHMM）</label>
-        <input type="text" id="calcStartTimeInp" value="${escapeAttr(st)}" placeholder="0900" oninput="saveCalcTime()">
-      </div>
-      <div class="fg" style="min-width:120px;">
-        <label>終了（HHMM）</label>
-        <input type="text" id="calcEndTimeInp" value="${escapeAttr(et)}" placeholder="1630" oninput="saveCalcTime()">
-      </div>
-      <div style="font-size:14px;color:var(--text2);padding-bottom:8px;">
-        → 自動判定: <span id="calcAutoCode" style="font-weight:800;">${escapeHtml(label)}</span>
-      </div>
-    </div>
-    <div style="margin-top:10px;font-size:14px;color:var(--text2);">
-      <div style="font-weight:700;margin-bottom:6px;">加算</div>
-      <div>${addonChecks || '<span class="text-gray">（加算マスタがありません）</span>'}</div>
-    </div>
-  `:'';
-  return `<div class="panel-sec" style="margin:10px 12px 0;background:var(--white);border:1px solid var(--border2);border-radius:var(--r2);padding:12px 14px;">
-    <button type="button" class="btn btn-sm" style="${on?'background:var(--green);color:#fff;border-color:var(--green);':'background:var(--white);color:var(--text2);border:1px solid var(--border2);'}font-weight:800;" onclick="toggleCalculated()">${on?'✅ 算定済':'⬜ 算定'}</button>
-    ${body}
-  </div>`;
-}
-
-function buildSanteiPanel(){
-  ensureTimeDatalist();
-  if(!curRes) return '<div class="panel"><div class="panel-sec"><div class="text-gray">利用者が未選択です</div></div></div>';
-  const r=dbResidentByNameLoose(curRes);
-  if(!r) return '<div class="panel"><div class="panel-sec"><div class="text-gray">利用者が見つかりません</div></div></div>';
-  _ensureResidentBillingFields(r);
-  const rec=getRec(curRes, dk());
-  const on=rec.calculated===true;
-  let {st,et}=_calcEffectiveTime(rec,r);
-  st=_cleanTimeHHMM(st)||'0900';
-  et=_cleanTimeHHMM(et)||'1630';
-  const stEff=_cleanTimeHHMM(rec.calcStartTime)||st;
-  const etEff=_cleanTimeHHMM(rec.calcEndTime)||et;
-  const mAuto=resolveServiceCodeByTime(stEff, etEff, curRes);
-  const autoCodeLabel=mAuto
-    ? `→ ${escapeHtml(String(mAuto.code||''))} ${escapeHtml(String(mAuto.name||''))}（${Number(mAuto.unit||0)||0}単位）`
-    : '→ （判定できません）';
-  const addons=(_svcMaster().addons||[]);
-  if(!Array.isArray(rec.calcAddons)) rec.calcAddons=[];
-  const addonChecks=addons.map(a=>{
-    const c=String(a.code||'');
-    const onA=rec.calcAddons.includes(c);
-    return `<label style="display:inline-flex;align-items:center;gap:8px;margin:0 14px 10px 0;white-space:nowrap;font-size:16px;">
-      <input type="checkbox" ${onA?'checked':''} onchange="toggleCalcAddon('${escapeAttr(c)}', this.checked)">
-      <span>${escapeHtml(a.name||c)}</span>
-    </label>`;
-  }).join('');
-  const dList=_svcMaster().deducts||[];
-  const u611=Number((dList.find(d=>String(d.code)==='785611')||{}).unit)||0;
-  const u612=Number((dList.find(d=>String(d.code)==='785612')||{}).unit)||0;
-  const ttp=r.transportType||'both';
-  const ttpLbl=ttp==='both'?'往復あり':(ttp==='one_way'?'片道のみ':'送迎なし');
-  let deductEx='';
-  if(r.sameBuilding) deductEx=u611?`同一建物減算 ${u611}単位`:'';
-  else if(ttp==='one_way') deductEx=u612?`送迎減算（片道）${u612}単位`:'';
-  else if(ttp==='none') deductEx='送迎減算（送迎なし）-94単位（785612×1行）';
-  const deductBlock=`
-    <div class="panel-sec" style="margin-top:10px;">
-      <h3>減算（参照）</h3>
-      <p style="font-size:12px;color:var(--text3);line-height:1.45;margin:0 0 8px;">利用者基本情報の設定を表示しています。変更は利用者基本情報で保存し、算定確定を再度行ってください。</p>
-      <div style="display:flex;flex-wrap:wrap;gap:14px;align-items:center;font-size:15px;color:var(--text2);">
-        <label style="display:inline-flex;align-items:center;gap:6px;opacity:.85;">
-          <input type="checkbox" disabled ${r.sameBuilding?'checked':''}> 同一建物減算
-        </label>
-        <span>送迎区分：${escapeHtml(ttpLbl)}</span>
-      </div>
-      ${deductEx?`<div style="margin-top:8px;font-size:14px;color:var(--text2);">見込み：${escapeHtml(deductEx)}</div>`:''}
-    </div>`;
-  const shCode=String((db.settings&&db.settings.officeShoguCode)||'').trim();
-  const shUnit=Math.max(0, Number((db.settings&&db.settings.officeShoguUnit)||0)||0);
-  const shoguLine = shCode
-    ? `<div style="margin-top:12px;padding:10px 12px;border:1px dashed var(--border2);border-radius:var(--r2);">
-        <div style="font-weight:800;margin-bottom:6px;">処遇改善加算</div>
-        <div style="color:var(--text2);font-size:16px;">コード: <b>${escapeHtml(shCode)}</b> / 単位: <b>${escapeHtml(String(shUnit))}</b></div>
-      </div>`
-    : `<div style="margin-top:12px;color:var(--text3);font-size:14px;">処遇改善加算は未設定です（請求設定で設定）</div>`;
-
-  const body=on?`
-    <div class="panel-sec" style="margin-top:12px;">
-      <h3>開始〜終了（HHMM）</h3>
-      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;">
-        <div class="fg" style="min-width:140px;">
-          <label>開始</label>
-          <input type="text" id="calcStartTimeInp" value="${escapeAttr(st)}" list="timeOptions30min" placeholder="0900" oninput="saveCalcTime()" style="font-size:18px;padding:10px 12px;">
-        </div>
-        <div class="fg" style="min-width:140px;">
-          <label>終了</label>
-          <input type="text" id="calcEndTimeInp" value="${escapeAttr(et)}" list="timeOptions30min" placeholder="1630" oninput="saveCalcTime()" style="font-size:18px;padding:10px 12px;">
-        </div>
-      </div>
-      <div id="santeiAutoCode" style="font-size:13px;color:var(--text2);margin-top:8px;font-weight:600;">${autoCodeLabel}</div>
-    </div>
-    <div class="panel-sec">
-      <h3>加算</h3>
-      <div>${addonChecks || '<span class="text-gray">（加算マスタがありません）</span>'}</div>
-      <button type="button" onclick="cancelSantei()" style="margin-top:12px;background:var(--white);color:var(--red);border:1px solid var(--red);border-radius:var(--r1);padding:6px 16px;font-size:13px;cursor:pointer;">算定を取り消す</button>
-      ${deductBlock}
-      ${shoguLine}
-    </div>
-  `:`
-    <div class="panel-sec" style="margin-top:12px;">
-      <div style="font-size:16px;color:var(--text3);">この日は算定なし</div>
-    </div>
-  `;
-  return `<div class="panel">
-    <div class="panel-sec">
-      <button type="button" class="btn btn-block" style="${on?'background:var(--green);color:#fff;border-color:var(--green);':'background:var(--white);color:var(--text2);border:2px solid var(--border2);'}font-weight:900;font-size:18px;padding:14px 14px;" onclick="toggleCalculated()">${on?'✅ 算定済（タップでOFF）':'⬜ 算定（タップでON）'}</button>
-    </div>
-    ${body}
-  </div>`;
-}
-function toggleCalculated(){
-  if(!curRes) return;
-  const r=dbResidentByNameLoose(curRes);
-  if(!r) return;
-  const rec=getRec(curRes, dk());
-  rec.calculated=!rec.calculated;
-  if(!rec.calculated){
-    rec.calcStartTime='';
-    rec.calcEndTime='';
-    rec.calcServiceCodeKey='';
-    rec.calcAddons=[];
-  }else{
-    _ensureResidentBillingFields(r);
-    rec.calcStartTime=_cleanTimeHHMM(r.startTime)||'0900';
-    rec.calcEndTime=_cleanTimeHHMM(r.endTime)||'1630';
-    const m=resolveServiceCodeByTime(rec.calcStartTime, rec.calcEndTime, curRes);
-    rec.calcServiceCodeKey=m?String(m.code||''):'';
-    rec.calcAddons=[...((db.settings&&db.settings.officeAddonCodes)||[])];
-    applyDeductAddonsToRecord(rec,r);
-  }
-  saveDB();
-  refreshPanel(curTab);
-  renderMain();
-}
-function cancelSantei(){
-  if(!curRes) return;
-  if(!confirm('この日の算定を取り消しますか？')) return;
-  const rec=getRec(curRes, dk());
-  rec.calculated=false;
-  rec.calcStartTime='';
-  rec.calcEndTime='';
-  rec.calcServiceCodeKey='';
-  rec.calcAddons=[];
-  saveDB();
-  refreshPanel('santei');
-  renderMain();
-}
-function saveCalcTime(){
-  if(!curRes) return;
-  const r=dbResidentByNameLoose(curRes);
-  if(!r) return;
-  const rec=getRec(curRes, dk());
-  if(!rec.calculated) return;
-  const s=document.getElementById('calcStartInput')||document.getElementById('calcStartTimeInp');
-  const e=document.getElementById('calcEndInput')||document.getElementById('calcEndTimeInp');
-  const st=_cleanTimeHHMM(s?s.value:'');
-  const et=_cleanTimeHHMM(e?e.value:'');
-  rec.calcStartTime=st;
-  rec.calcEndTime=et;
-  const m=resolveServiceCodeByTime(st,et,curRes);
-  rec.calcServiceCodeKey=m?String(m.code||''):'';
-  saveDB();
-  const codeDisp=document.getElementById('santeiAutoCode');
-  if(codeDisp) codeDisp.textContent=m?`→ ${m.code} ${m.name}（${m.unit}単位）`:'→ （判定できません）';
-  const calcEl=document.getElementById('calcAutoCode');
-  if(calcEl){
-    const code=m?String(m.code||''):_calcEffectiveServiceCode(rec,r);
-    const unit=code?getServiceUnitByCode(code):0;
-    calcEl.textContent=code?`${code}（${unit||0}単位）`:'—';
-  }
-  renderMain();
-}
-function toggleCalcAddon(code, on){
-  if(!curRes) return;
-  const r=dbResidentByNameLoose(curRes);
-  const rec=getRec(curRes, dk());
-  if(!Array.isArray(rec.calcAddons)) rec.calcAddons=[];
-  const c=String(code||'').trim();
-  if(!c) return;
-  const has=rec.calcAddons.includes(c);
-  if(on && !has) rec.calcAddons.push(c);
-  if(!on && has) rec.calcAddons=rec.calcAddons.filter(x=>x!==c);
-  if(r) applyDeductAddonsToRecord(rec,r);
-  saveDB();
-}
-
 function downloadCSVasShiftJIS(csvContent, filename){
   const text=String(csvContent||'');
   try{
@@ -4672,8 +4461,8 @@ function renderMain(){
     const mdc=_mParts.length?`<span class="cell-val" style="font-size:18px;letter-spacing:1px;">${_mParts.join('')}</span>`:'<span class="cell-empty">—</span>';
 
     return `<tr>
-      <td style="width:36px;min-width:36px;padding:4px;text-align:center;" onclick="openDetail('${r.name}','santei')">${yoteiCell}</td>
-      <td style="width:36px;min-width:36px;padding:4px;text-align:center;" onclick="openDetail('${r.name}','santei')">${jissekiCell}</td>
+      <td style="width:36px;min-width:36px;padding:4px;text-align:center;" onclick=${JSON.stringify('openScheduleScreen('+JSON.stringify(r.name)+')')}>${yoteiCell}</td>
+      <td style="width:36px;min-width:36px;padding:4px;text-align:center;" onclick=${JSON.stringify('openScheduleScreen('+JSON.stringify(r.name)+')')}>${jissekiCell}</td>
       <td style="width:32px;min-width:32px;padding:4px;" onclick="openDetail('${r.name}','notes')">${nc}</td>
       <td class="name-cell res-div-r">
         <div class="name-cell-inner">
@@ -4704,12 +4493,6 @@ function renderMain(){
 
 function renderFacilityHeader(){
   const S = db.settings || {};
-  const tag=document.getElementById('hdrSheetTag');
-  if(tag&&FAC){
-    tag.style.display='inline-block';
-    tag.textContent=FAC.sheetName;
-    tag.title='同期先スプレッドシートのシート「'+FAC.sheetName+'」（'+FAC.name+'）です。西と南は別データです。ブックマークの ?f= は '+FACILITY_ID+' です。';
-  }
   const el=document.getElementById('mainFacilityName');
   if(el) el.textContent = S.facilityName || FAC.name;
   const logo=document.getElementById('mainLogo');
@@ -4733,7 +4516,6 @@ const TAB_LIST = [
   {id:'rec',      label:'レク'},
   {id:'day',      label:'1日の様子'},
   {id:'care',     label:'ケア記録'},
-  {id:'santei',   label:'算定'},
   {id:'summary',  label:'サマリー'},
 ];
 
@@ -4776,7 +4558,9 @@ function switchDetailResident(name){
 }
 function openDetail(name, tab){
   curRes=name;
-  curTab=tab||'vital';
+  let t=tab||'vital';
+  if(t==='santei') t='vital';
+  curTab=t;
   renderDate();
   renderTabs();
   refreshDetailResidentSelect();
@@ -4791,7 +4575,7 @@ function renderTabs(){
 }
 
 function switchTab(tab){
-  curTab=tab;
+  curTab=(tab==='santei')?'vital':tab;
   renderTabs();
   showPanel(tab);
 }
@@ -4811,7 +4595,6 @@ function refreshPanel(tab){
     case 'meal':      el.innerHTML=buildMealPanel(); break;
     case 'rec':       el.innerHTML=buildRecPanel(); break;
     case 'day':       el.innerHTML=buildDayPanel(); break;
-    case 'santei':    el.innerHTML=buildSanteiPanel(); break;
     case 'summary':   el.innerHTML=buildSummaryPanel(); break;
   }
 }
