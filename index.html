@@ -3579,6 +3579,13 @@ function importTeikyo(files){
   });
   function checkDone(){
     if(done<total) return;
+    // 取込成功した利用者の _u を現在時刻に更新してsyncDirtyを確実に立てる
+    results.filter(r=>r.status==='ok').forEach(res=>{
+      const name = res.msg.split('：')[0];
+      const resident = (db.residents||[]).find(r=>
+        normalizeResidentName(r.name)===normalizeResidentName(name));
+      if(resident) resident._u = Date.now();
+    });
     saveDB();
     const ok=results.filter(r=>r.status==='ok').length;
     const skip=results.filter(r=>r.status==='skip').length;
