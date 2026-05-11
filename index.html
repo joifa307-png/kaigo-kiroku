@@ -97,13 +97,17 @@ input,select,textarea{font-family:inherit;font-size:30px;}
 }
 /* collapse は sticky と相性が悪く、ヘッダーが tbody のタップを奪うことがある → separate */
 .res-table{width:100%;border-collapse:separate;border-spacing:0;min-width:700px;}
-#mainScreen .res-table thead{
+/* sticky 見出しで tbody のタップを奪わないよう、非操作列の th のみ通す
+   ※thead 全体に pointer-events:none すると端末によって表全体が反応しなくなる */
+#mainScreen .res-table thead th:not(.main-th-click){
   pointer-events:none;
 }
-/* [onclick] 属性セレクタよりクラスで明示（環境によっては tap が効かないため） */
 #mainScreen .res-table thead th.main-th-click{
   pointer-events:auto;
   cursor:pointer;
+}
+#mainScreen .res-table tbody{
+  pointer-events:auto;
 }
 #mainScreen .res-table thead th{
   position:sticky;top:0;z-index:30;
@@ -1497,7 +1501,7 @@ const REC = {
 const N_RECORD_COLS = 57;
 
 /** デプロイのたびに上げる（設定→データ管理の「アプリ情報」で表示） */
-const APP_VERSION='1.1.7';
+const APP_VERSION='1.1.8';
 function isStandaloneWebApp(){
   try{
     if(window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches) return true;
@@ -3064,6 +3068,13 @@ function openMainOv(html){
 }
 
 function closeMainOv(){
+  const back=document.getElementById('ovMain');
+  if(back){
+    back.style.display='none';
+    back.style.cssText='';
+  }
+  const body=document.getElementById('ovMainBody');
+  if(body) body.style.cssText='';
   closeOv('ovMain');
 }
 
@@ -4333,14 +4344,6 @@ function calcMealIntakeTotalPercent(rec, residentName){
   const avg=vals.reduce((a,b)=>a+b,0)/vals.length;
   const clamped=Math.max(0,Math.min(100,avg));
   return Math.round(clamped);
-}
-function closeMainOv(){
-  const back=document.getElementById('ovMain');
-  back.style.display='none';
-  back.style.cssText='';
-  const body=document.getElementById('ovMainBody');
-  body.style.cssText='';
-  closeOv('ovMain');
 }
 function openBulkMedOv(html){
   const back=document.getElementById('ovMain');
