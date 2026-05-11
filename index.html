@@ -93,21 +93,13 @@ input,select,textarea{font-family:inherit;font-size:30px;}
   flex:1;min-height:0;
   overflow:auto;-webkit-overflow-scrolling:touch;
   overscroll-behavior:contain;
-  touch-action:pan-x pan-y;
+  /* pan-x pan-y だけだと環境によってタップ→click が合成されないことがある */
+  touch-action:manipulation;
 }
 /* collapse は sticky と相性が悪く、ヘッダーが tbody のタップを奪うことがある → separate */
 .res-table{width:100%;border-collapse:separate;border-spacing:0;min-width:700px;}
-/* sticky 見出しで tbody のタップを奪わないよう、非操作列の th のみ通す
-   ※thead 全体に pointer-events:none すると端末によって表全体が反応しなくなる */
-#mainScreen .res-table thead th:not(.main-th-click){
-  pointer-events:none;
-}
 #mainScreen .res-table thead th.main-th-click{
-  pointer-events:auto;
   cursor:pointer;
-}
-#mainScreen .res-table tbody{
-  pointer-events:auto;
 }
 #mainScreen .res-table thead th{
   position:sticky;top:0;z-index:30;
@@ -552,8 +544,8 @@ input,select,textarea{font-family:inherit;font-size:30px;}
     <table class="res-table" id="resTable">
       <thead>
         <tr>
-          <th class="main-th-click" style="width:36px;min-width:36px;white-space:nowrap;text-align:center;" onclick="openSanteiDialog()" title="タップで算定確定">予定</th>
-          <th class="main-th-click" style="width:36px;min-width:36px;white-space:nowrap;text-align:center;" onclick="openSanteiDialog()" title="タップで算定確定">実績</th>
+          <th class="main-th-click" style="width:36px;min-width:36px;white-space:nowrap;text-align:center;" title="タップで算定確定">予定</th>
+          <th class="main-th-click" style="width:36px;min-width:36px;white-space:nowrap;text-align:center;" title="タップで算定確定">実績</th>
           <th style="width:32px;min-width:32px;">申送</th>
           <th class="res-div-r" style="min-width:80px;">氏名</th>
           <th class="res-div-l">体温</th>
@@ -565,7 +557,7 @@ input,select,textarea{font-family:inherit;font-size:30px;}
           <th class="res-div-r">入浴</th>
           <th class="res-div-r">食事</th>
           <th class="res-div-r">レク</th>
-          <th onclick="openBulkMed()" style="cursor:pointer;white-space:nowrap;">服薬 ▼</th>
+          <th class="main-th-med" style="cursor:pointer;white-space:nowrap;">服薬 ▼</th>
         </tr>
       </thead>
       <tbody id="resBody"></tbody>
@@ -1501,7 +1493,7 @@ const REC = {
 const N_RECORD_COLS = 57;
 
 /** デプロイのたびに上げる（設定→データ管理の「アプリ情報」で表示） */
-const APP_VERSION='1.1.8';
+const APP_VERSION='1.1.9';
 function isStandaloneWebApp(){
   try{
     if(window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches) return true;
@@ -4524,6 +4516,45 @@ function residentsOnDaySorted(dayIdx, opts){
   return [...byName.values()].sort(compareResidentsStable);
 }
 
+/** メイン表はスクロール内＋sticky 見出しで、環境によってインライン onclick が効かないことがあるため委譲する */
+function bindMainResTableDelegation(){
+  const tbl=document.getElementById('resTable');
+  if(!tbl||tbl.dataset.clickDeleg==='1') return;
+  tbl.dataset.clickDeleg='1';
+  tbl.addEventListener('click', function(ev){
+    const th=ev.target.closest('thead th');
+    if(th){
+      const i=th.cellIndex;
+      if(i===0||i===1){ openSanteiDialog(); return; }
+      if(i===13){ openBulkMed(); return; }
+      return;
+    }
+    const td=ev.target.closest('tbody td');
+    const tr=ev.target.closest('tbody tr');
+    if(!td||!tr) return;
+    if(tr.classList.contains('res-add-row')){
+      if(ev.target.closest('.res-add-btn')) openAddResOv();
+      return;
+    }
+    const nameRaw=tr.getAttribute('data-res-name');
+    if(nameRaw==null||nameRaw==='') return;
+    const col=td.cellIndex;
+    if(col===0||col===1){ openScheduleScreen(nameRaw); return; }
+    if(col===2){ openDetail(nameRaw,'notes'); return; }
+    if(col===3){
+      if(ev.target.closest('.res-del-btn')){ delResidentByName(nameRaw); return; }
+      openSummary(nameRaw);
+      return;
+    }
+    if(col>=4&&col<=7){ openDetail(nameRaw,'vital'); return; }
+    if(col===8||col===9){ openDetail(nameRaw,'excretion'); return; }
+    if(col===10){ openDetail(nameRaw,'bath'); return; }
+    if(col===11){ openDetail(nameRaw,'meal'); return; }
+    if(col===12){ openDetail(nameRaw,'rec'); return; }
+    if(col===13){ openDetail(nameRaw,'med'); return; }
+  });
+}
+
 function renderMain(){
   if(!FAC) return;
   renderDate();
@@ -4534,7 +4565,7 @@ function renderMain(){
   if(!tbody) return;
   if(todayRes.length===0){
     tbody.innerHTML=`<tr><td colspan="14" style="padding:20px;color:var(--text3);text-align:center;">本日の利用者はいません</td></tr>
-    <tr class="res-add-row no-print"><td></td><td></td><td><button class="res-add-btn" onclick="openAddResOv()">＋ 利用者を追加</button></td><td colspan="11"></td></tr>`;
+    <tr class="res-add-row no-print"><td></td><td></td><td><button type="button" class="res-add-btn">＋ 利用者を追加</button></td><td colspan="11"></td></tr>`;
     return;
   }
   tbody.innerHTML=todayRes.map(r=>{
@@ -4627,34 +4658,34 @@ function renderMain(){
     });
     const mdc=_mParts.length?`<span class="cell-val" style="font-size:18px;letter-spacing:1px;">${_mParts.join('')}</span>`:'<span class="cell-empty">—</span>';
 
-    return `<tr>
-      <td style="width:36px;min-width:36px;padding:4px;text-align:center;" onclick=${JSON.stringify('openScheduleScreen('+JSON.stringify(r.name)+')')}>${yoteiCell}</td>
-      <td style="width:36px;min-width:36px;padding:4px;text-align:center;" onclick=${JSON.stringify('openScheduleScreen('+JSON.stringify(r.name)+')')}>${jissekiCell}</td>
-      <td style="width:32px;min-width:32px;padding:4px;" onclick=${JSON.stringify('openDetail('+JSON.stringify(r.name)+', "notes")')}>${nc}</td>
+    return `<tr data-res-name="${escapeAttr(r.name)}">
+      <td style="width:36px;min-width:36px;padding:4px;text-align:center;">${yoteiCell}</td>
+      <td style="width:36px;min-width:36px;padding:4px;text-align:center;">${jissekiCell}</td>
+      <td style="width:32px;min-width:32px;padding:4px;">${nc}</td>
       <td class="name-cell res-div-r">
         <div class="name-cell-inner">
           <div class="name-cell-text">
-            <div class="name-txt" onclick=${JSON.stringify('openSummary('+JSON.stringify(r.name)+')')}>${r.name}</div>
+            <div class="name-txt">${r.name}</div>
             <div class="name-sub">${r.care||''}</div>
           </div>
-          ${r._mainGhost?'':`<button type="button" class="res-del-btn no-print" onclick=${JSON.stringify('delResidentByName('+JSON.stringify(r.name)+')')}>×</button>`}
+          ${r._mainGhost?'':`<button type="button" class="res-del-btn no-print">×</button>`}
         </div>
       </td>
-      <td class="res-div-l" onclick=${JSON.stringify('openDetail('+JSON.stringify(r.name)+', "vital")')}>${tc}</td>
-      <td onclick=${JSON.stringify('openDetail('+JSON.stringify(r.name)+', "vital")')}>${bc}</td>
-      <td onclick=${JSON.stringify('openDetail('+JSON.stringify(r.name)+', "vital")')}>${pc}</td>
-      <td class="res-div-r" onclick=${JSON.stringify('openDetail('+JSON.stringify(r.name)+', "vital")')}>${sc}</td>
-      <td onclick=${JSON.stringify('openDetail('+JSON.stringify(r.name)+', "excretion")')}>${ec}</td>
-      <td class="res-div-r" onclick=${JSON.stringify('openDetail('+JSON.stringify(r.name)+', "excretion")')}>${lsc}</td>
-      <td class="res-div-r" onclick=${JSON.stringify('openDetail('+JSON.stringify(r.name)+', "bath")')}>${bac}</td>
-      <td class="res-div-r" onclick=${JSON.stringify('openDetail('+JSON.stringify(r.name)+', "meal")')}>${mc}</td>
-      <td class="res-div-r" onclick=${JSON.stringify('openDetail('+JSON.stringify(r.name)+', "rec")')}>${rc}</td>
-      <td onclick=${JSON.stringify('openDetail('+JSON.stringify(r.name)+', "med")')}>${mdc}</td>
+      <td class="res-div-l">${tc}</td>
+      <td>${bc}</td>
+      <td>${pc}</td>
+      <td class="res-div-r">${sc}</td>
+      <td>${ec}</td>
+      <td class="res-div-r">${lsc}</td>
+      <td class="res-div-r">${bac}</td>
+      <td class="res-div-r">${mc}</td>
+      <td class="res-div-r">${rc}</td>
+      <td>${mdc}</td>
     </tr>`;
   }).join('');
   // ＋ 利用者追加行（最下部・氏名列に配置）
   tbody.innerHTML += `<tr class="res-add-row no-print">
-    <td></td><td></td><td></td><td><button class="res-add-btn" onclick="openAddResOv()">＋ 利用者を追加</button></td><td colspan="10"></td>
+    <td></td><td></td><td></td><td><button type="button" class="res-add-btn">＋ 利用者を追加</button></td><td colspan="10"></td>
   </tr>`;
 }
 
@@ -8728,6 +8759,7 @@ function showSavedToast(){
 // ========== 初期化 ==========
 function init(){
   closeAllOverlays();
+  bindMainResTableDelegation();
   gasCredentialsInit();
   const params=new URLSearchParams(location.search);
   const savedFac=normalizeFacilityId(params.get('f'))||normalizeFacilityId(localStorage.getItem('kaigo_last_facility'));
