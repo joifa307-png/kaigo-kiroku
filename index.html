@@ -100,8 +100,10 @@ input,select,textarea{font-family:inherit;font-size:30px;}
 #mainScreen .res-table thead{
   pointer-events:none;
 }
-#mainScreen .res-table thead th[onclick]{
+/* [onclick] 属性セレクタよりクラスで明示（環境によっては tap が効かないため） */
+#mainScreen .res-table thead th.main-th-click{
   pointer-events:auto;
+  cursor:pointer;
 }
 #mainScreen .res-table thead th{
   position:sticky;top:0;z-index:30;
@@ -546,8 +548,8 @@ input,select,textarea{font-family:inherit;font-size:30px;}
     <table class="res-table" id="resTable">
       <thead>
         <tr>
-          <th style="width:36px;min-width:36px;white-space:nowrap;text-align:center;cursor:pointer;" onclick="openSanteiDialog()" title="タップで算定確定">予定</th>
-          <th style="width:36px;min-width:36px;white-space:nowrap;text-align:center;cursor:pointer;" onclick="openSanteiDialog()" title="タップで算定確定">実績</th>
+          <th class="main-th-click" style="width:36px;min-width:36px;white-space:nowrap;text-align:center;" onclick="openSanteiDialog()" title="タップで算定確定">予定</th>
+          <th class="main-th-click" style="width:36px;min-width:36px;white-space:nowrap;text-align:center;" onclick="openSanteiDialog()" title="タップで算定確定">実績</th>
           <th style="width:32px;min-width:32px;">申送</th>
           <th class="res-div-r" style="min-width:80px;">氏名</th>
           <th class="res-div-l">体温</th>
@@ -1495,7 +1497,7 @@ const REC = {
 const N_RECORD_COLS = 57;
 
 /** デプロイのたびに上げる（設定→データ管理の「アプリ情報」で表示） */
-const APP_VERSION='1.1.6';
+const APP_VERSION='1.1.7';
 function isStandaloneWebApp(){
   try{
     if(window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches) return true;
@@ -3972,6 +3974,168 @@ function execCSVExport(){
   showBriefToast(`${fname} を出力しました`, 2500, false);
 }
 
+function buildSanteiPanel(){
+  ensureTimeDatalist();
+  if(!curRes) return '<div class="panel"><div class="panel-sec"><div class="text-gray">利用者が未選択です</div></div></div>';
+  const r=dbResidentByNameLoose(curRes);
+  if(!r) return '<div class="panel"><div class="panel-sec"><div class="text-gray">利用者が見つかりません</div></div></div>';
+  _ensureResidentBillingFields(r);
+  const rec=getRec(curRes, dk());
+  const on=rec.calculated===true;
+  let {st,et}=_calcEffectiveTime(rec,r);
+  st=_cleanTimeHHMM(st)||'0900';
+  et=_cleanTimeHHMM(et)||'1630';
+  const stEff=_cleanTimeHHMM(rec.calcStartTime)||st;
+  const etEff=_cleanTimeHHMM(rec.calcEndTime)||et;
+  const mAuto=resolveServiceCodeByTime(stEff, etEff, curRes);
+  const autoCodeLabel=mAuto
+    ? `→ ${escapeHtml(String(mAuto.code||''))} ${escapeHtml(String(mAuto.name||''))}（${Number(mAuto.unit||0)||0}単位）`
+    : '→ （判定できません）';
+  const addons=(_svcMaster().addons||[]);
+  if(!Array.isArray(rec.calcAddons)) rec.calcAddons=[];
+  const addonChecks=addons.map(a=>{
+    const c=String(a.code||'');
+    const onA=rec.calcAddons.includes(c);
+    return `<label style="display:inline-flex;align-items:center;gap:8px;margin:0 14px 10px 0;white-space:nowrap;font-size:16px;">
+      <input type="checkbox" ${onA?'checked':''} onchange="toggleCalcAddon('${escapeAttr(c)}', this.checked)">
+      <span>${escapeHtml(a.name||c)}</span>
+    </label>`;
+  }).join('');
+  const dList=_svcMaster().deducts||[];
+  const u611=Number((dList.find(d=>String(d.code)==='785611')||{}).unit)||0;
+  const u612=Number((dList.find(d=>String(d.code)==='785612')||{}).unit)||0;
+  const ttp=r.transportType||'both';
+  const ttpLbl=ttp==='both'?'往復あり':(ttp==='one_way'?'片道のみ':'送迎なし');
+  let deductEx='';
+  if(r.sameBuilding) deductEx=u611?`同一建物減算 ${u611}単位`:'';
+  else if(ttp==='one_way') deductEx=u612?`送迎減算（片道）${u612}単位`:'';
+  else if(ttp==='none') deductEx='送迎減算（送迎なし）-94単位（785612×1行）';
+  const deductBlock=`
+    <div class="panel-sec" style="margin-top:10px;">
+      <h3>減算（参照）</h3>
+      <p style="font-size:12px;color:var(--text3);line-height:1.45;margin:0 0 8px;">利用者基本情報の設定を表示しています。変更は利用者基本情報で保存し、算定確定を再度行ってください。</p>
+      <div style="display:flex;flex-wrap:wrap;gap:14px;align-items:center;font-size:15px;color:var(--text2);">
+        <label style="display:inline-flex;align-items:center;gap:6px;opacity:.85;">
+          <input type="checkbox" disabled ${r.sameBuilding?'checked':''}> 同一建物減算
+        </label>
+        <span>送迎区分：${escapeHtml(ttpLbl)}</span>
+      </div>
+      ${deductEx?`<div style="margin-top:8px;font-size:14px;color:var(--text2);">見込み：${escapeHtml(deductEx)}</div>`:''}
+    </div>`;
+  const shCode=String((db.settings&&db.settings.officeShoguCode)||'').trim();
+  const shUnit=Math.max(0, Number((db.settings&&db.settings.officeShoguUnit)||0)||0);
+  const shoguLine = shCode
+    ? `<div style="margin-top:12px;padding:10px 12px;border:1px dashed var(--border2);border-radius:var(--r2);">
+        <div style="font-weight:800;margin-bottom:6px;">処遇改善加算</div>
+        <div style="color:var(--text2);font-size:16px;">コード: <b>${escapeHtml(shCode)}</b> / 単位: <b>${escapeHtml(String(shUnit))}</b></div>
+      </div>`
+    : `<div style="margin-top:12px;color:var(--text3);font-size:14px;">処遇改善加算は未設定です（請求設定で設定）</div>`;
+
+  const body=on?`
+    <div class="panel-sec" style="margin-top:12px;">
+      <h3>開始〜終了（HHMM）</h3>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;">
+        <div class="fg" style="min-width:140px;">
+          <label>開始</label>
+          <input type="text" id="calcStartTimeInp" value="${escapeAttr(st)}" list="timeOptions30min" placeholder="0900" oninput="saveCalcTime()" style="font-size:18px;padding:10px 12px;">
+        </div>
+        <div class="fg" style="min-width:140px;">
+          <label>終了</label>
+          <input type="text" id="calcEndTimeInp" value="${escapeAttr(et)}" list="timeOptions30min" placeholder="1630" oninput="saveCalcTime()" style="font-size:18px;padding:10px 12px;">
+        </div>
+      </div>
+      <div id="santeiAutoCode" style="font-size:13px;color:var(--text2);margin-top:8px;font-weight:600;">${autoCodeLabel}</div>
+    </div>
+    <div class="panel-sec">
+      <h3>加算</h3>
+      <div>${addonChecks || '<span class="text-gray">（加算マスタがありません）</span>'}</div>
+      <button type="button" onclick="cancelSantei()" style="margin-top:12px;background:var(--white);color:var(--red);border:1px solid var(--red);border-radius:var(--r1);padding:6px 16px;font-size:13px;cursor:pointer;">算定を取り消す</button>
+      ${deductBlock}
+      ${shoguLine}
+    </div>
+  `:`
+    <div class="panel-sec" style="margin-top:12px;">
+      <div style="font-size:16px;color:var(--text3);">この日は算定なし</div>
+    </div>
+  `;
+  return `<div class="panel">
+    <div class="panel-sec">
+      <button type="button" class="btn btn-block" style="${on?'background:var(--green);color:#fff;border-color:var(--green);':'background:var(--white);color:var(--text2);border:2px solid var(--border2);'}font-weight:900;font-size:18px;padding:14px 14px;" onclick="toggleCalculated()">${on?'✅ 算定済（タップでOFF）':'⬜ 算定（タップでON）'}</button>
+      <p style="font-size:13px;color:var(--text3);margin-top:10px;line-height:1.45;">一括の確認・確定はメイン表の「予定」「実績」見出しタップ。CSV編集は「実績CSV」から。</p>
+    </div>
+    ${body}
+  </div>`;
+}
+function toggleCalculated(){
+  if(!curRes) return;
+  const r=dbResidentByNameLoose(curRes);
+  if(!r) return;
+  const rec=getRec(curRes, dk());
+  rec.calculated=!rec.calculated;
+  if(!rec.calculated){
+    rec.calcStartTime='';
+    rec.calcEndTime='';
+    rec.calcServiceCodeKey='';
+    rec.calcAddons=[];
+  }else{
+    _ensureResidentBillingFields(r);
+    rec.calcStartTime=_cleanTimeHHMM(r.startTime)||'0900';
+    rec.calcEndTime=_cleanTimeHHMM(r.endTime)||'1630';
+    const m=resolveServiceCodeByTime(rec.calcStartTime, rec.calcEndTime, curRes);
+    rec.calcServiceCodeKey=m?String(m.code||''):'';
+    rec.calcAddons=[...((db.settings&&db.settings.officeAddonCodes)||[])];
+    applyDeductAddonsToRecord(rec,r);
+  }
+  saveDB();
+  refreshPanel(curTab);
+  renderMain();
+}
+function cancelSantei(){
+  if(!curRes) return;
+  if(!confirm('この日の算定を取り消しますか？')) return;
+  const rec=getRec(curRes, dk());
+  rec.calculated=false;
+  rec.calcStartTime='';
+  rec.calcEndTime='';
+  rec.calcServiceCodeKey='';
+  rec.calcAddons=[];
+  saveDB();
+  refreshPanel('santei');
+  renderMain();
+}
+function saveCalcTime(){
+  if(!curRes) return;
+  const r=dbResidentByNameLoose(curRes);
+  if(!r) return;
+  const rec=getRec(curRes, dk());
+  if(!rec.calculated) return;
+  const s=document.getElementById('calcStartInput')||document.getElementById('calcStartTimeInp');
+  const e=document.getElementById('calcEndInput')||document.getElementById('calcEndTimeInp');
+  const st=_cleanTimeHHMM(s?s.value:'');
+  const et=_cleanTimeHHMM(e?e.value:'');
+  rec.calcStartTime=st;
+  rec.calcEndTime=et;
+  const m=resolveServiceCodeByTime(st,et,curRes);
+  rec.calcServiceCodeKey=m?String(m.code||''):'';
+  saveDB();
+  const codeDisp=document.getElementById('santeiAutoCode');
+  if(codeDisp) codeDisp.textContent=m?`→ ${m.code} ${m.name}（${m.unit}単位）`:'→ （判定できません）';
+  renderMain();
+}
+function toggleCalcAddon(code, on){
+  if(!curRes) return;
+  const r=dbResidentByNameLoose(curRes);
+  const rec=getRec(curRes, dk());
+  if(!Array.isArray(rec.calcAddons)) rec.calcAddons=[];
+  const c=String(code||'').trim();
+  if(!c) return;
+  const has=rec.calcAddons.includes(c);
+  if(on && !has) rec.calcAddons.push(c);
+  if(!on && has) rec.calcAddons=rec.calcAddons.filter(x=>x!==c);
+  if(r) applyDeductAddonsToRecord(rec,r);
+  saveDB();
+}
+
 function downloadCSVasShiftJIS(csvContent, filename){
   const text=String(csvContent||'');
   try{
@@ -4463,26 +4627,26 @@ function renderMain(){
     return `<tr>
       <td style="width:36px;min-width:36px;padding:4px;text-align:center;" onclick=${JSON.stringify('openScheduleScreen('+JSON.stringify(r.name)+')')}>${yoteiCell}</td>
       <td style="width:36px;min-width:36px;padding:4px;text-align:center;" onclick=${JSON.stringify('openScheduleScreen('+JSON.stringify(r.name)+')')}>${jissekiCell}</td>
-      <td style="width:32px;min-width:32px;padding:4px;" onclick="openDetail('${r.name}','notes')">${nc}</td>
+      <td style="width:32px;min-width:32px;padding:4px;" onclick=${JSON.stringify('openDetail('+JSON.stringify(r.name)+', "notes")')}>${nc}</td>
       <td class="name-cell res-div-r">
         <div class="name-cell-inner">
           <div class="name-cell-text">
-            <div class="name-txt" onclick="openSummary('${r.name}')">${r.name}</div>
+            <div class="name-txt" onclick=${JSON.stringify('openSummary('+JSON.stringify(r.name)+')')}>${r.name}</div>
             <div class="name-sub">${r.care||''}</div>
           </div>
-          ${r._mainGhost?'':`<button class="res-del-btn no-print" onclick="delResidentByName('${r.name}')">×</button>`}
+          ${r._mainGhost?'':`<button type="button" class="res-del-btn no-print" onclick=${JSON.stringify('delResidentByName('+JSON.stringify(r.name)+')')}>×</button>`}
         </div>
       </td>
-      <td class="res-div-l" onclick="openDetail('${r.name}','vital')">${tc}</td>
-      <td onclick="openDetail('${r.name}','vital')">${bc}</td>
-      <td onclick="openDetail('${r.name}','vital')">${pc}</td>
-      <td class="res-div-r" onclick="openDetail('${r.name}','vital')">${sc}</td>
-      <td onclick="openDetail('${r.name}','excretion')">${ec}</td>
-      <td class="res-div-r" onclick="openDetail('${r.name}','excretion')">${lsc}</td>
-      <td class="res-div-r" onclick="openDetail('${r.name}','bath')">${bac}</td>
-      <td class="res-div-r" onclick="openDetail('${r.name}','meal')">${mc}</td>
-      <td class="res-div-r" onclick="openDetail('${r.name}','rec')">${rc}</td>
-      <td onclick="openDetail('${r.name}','med')">${mdc}</td>
+      <td class="res-div-l" onclick=${JSON.stringify('openDetail('+JSON.stringify(r.name)+', "vital")')}>${tc}</td>
+      <td onclick=${JSON.stringify('openDetail('+JSON.stringify(r.name)+', "vital")')}>${bc}</td>
+      <td onclick=${JSON.stringify('openDetail('+JSON.stringify(r.name)+', "vital")')}>${pc}</td>
+      <td class="res-div-r" onclick=${JSON.stringify('openDetail('+JSON.stringify(r.name)+', "vital")')}>${sc}</td>
+      <td onclick=${JSON.stringify('openDetail('+JSON.stringify(r.name)+', "excretion")')}>${ec}</td>
+      <td class="res-div-r" onclick=${JSON.stringify('openDetail('+JSON.stringify(r.name)+', "excretion")')}>${lsc}</td>
+      <td class="res-div-r" onclick=${JSON.stringify('openDetail('+JSON.stringify(r.name)+', "bath")')}>${bac}</td>
+      <td class="res-div-r" onclick=${JSON.stringify('openDetail('+JSON.stringify(r.name)+', "meal")')}>${mc}</td>
+      <td class="res-div-r" onclick=${JSON.stringify('openDetail('+JSON.stringify(r.name)+', "rec")')}>${rc}</td>
+      <td onclick=${JSON.stringify('openDetail('+JSON.stringify(r.name)+', "med")')}>${mdc}</td>
     </tr>`;
   }).join('');
   // ＋ 利用者追加行（最下部・氏名列に配置）
@@ -4516,6 +4680,7 @@ const TAB_LIST = [
   {id:'rec',      label:'レク'},
   {id:'day',      label:'1日の様子'},
   {id:'care',     label:'ケア記録'},
+  {id:'santei',   label:'算定'},
   {id:'summary',  label:'サマリー'},
 ];
 
@@ -4558,9 +4723,7 @@ function switchDetailResident(name){
 }
 function openDetail(name, tab){
   curRes=name;
-  let t=tab||'vital';
-  if(t==='santei') t='vital';
-  curTab=t;
+  curTab=tab||'vital';
   renderDate();
   renderTabs();
   refreshDetailResidentSelect();
@@ -4575,9 +4738,9 @@ function renderTabs(){
 }
 
 function switchTab(tab){
-  curTab=(tab==='santei')?'vital':tab;
+  curTab=tab;
   renderTabs();
-  showPanel(tab);
+  showPanel(curTab);
 }
 
 function showPanel(tab){ refreshPanel(tab); }
@@ -4595,6 +4758,7 @@ function refreshPanel(tab){
     case 'meal':      el.innerHTML=buildMealPanel(); break;
     case 'rec':       el.innerHTML=buildRecPanel(); break;
     case 'day':       el.innerHTML=buildDayPanel(); break;
+    case 'santei':    el.innerHTML=buildSanteiPanel(); break;
     case 'summary':   el.innerHTML=buildSummaryPanel(); break;
   }
 }
