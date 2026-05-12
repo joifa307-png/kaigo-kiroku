@@ -1487,7 +1487,7 @@ const REC = {
 const N_RECORD_COLS = 57;
 
 /** デプロイのたびに上げる（設定→データ管理の「アプリ情報」で表示） */
-const APP_VERSION='1.2.6';
+const APP_VERSION='1.2.7';
 function isStandaloneWebApp(){
   try{
     if(window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches) return true;
@@ -3972,8 +3972,9 @@ function execCSVExport(){
         const am=(_svcMaster().addons||[]).find(d=>String(d.code)===c);
         let addonUnit;
         if(c==='785612'){
-          const transport=resident.transportType||'both';
-          addonUnit=(transport==='none')?-94:-47;
+          // 送迎減算は常に-47で1行出力
+          // 両道なしの場合は785612を2行出力（applyDeductAddonsToRecordで2件入っている想定）
+          addonUnit=-47;
         }else if(dm){
           addonUnit=dm.unit;
         }else if(am){
@@ -6641,8 +6642,10 @@ function applyDeductAddonsToRecord(rec, resident){
       const dc=deducts.find(d=>String(d.code)==='785612');
       if(dc && !arr.includes('785612')) arr.push('785612');
     }else if(resident.transportType==='none'){
-      const dc=deducts.find(d=>String(d.code)==='785612');
-      if(dc && !arr.includes('785612')) arr.push('785612');
+      // 両道送迎なし = 785612を2件（各-47で2行出力）
+      arr=arr.filter(c=>String(c)!=='785612');
+      arr.push('785612');
+      arr.push('785612');
     }
   }
   rec.calcAddons=arr;
