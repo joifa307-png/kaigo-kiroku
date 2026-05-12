@@ -1487,7 +1487,7 @@ const REC = {
 const N_RECORD_COLS = 57;
 
 /** デプロイのたびに上げる（設定→データ管理の「アプリ情報」で表示） */
-const APP_VERSION='1.2.1';
+const APP_VERSION='1.2.2';
 function isStandaloneWebApp(){
   try{
     if(window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches) return true;
@@ -3482,12 +3482,18 @@ function importTeikyo(files){
         }
         const yyyymm=`${year}-${pad(month)}`;
         let dateHeaderRow=-1, dateColStart=-1;
-        for(let ri=13; ri<=17; ri++){
+        for(let ri=13; ri<=18; ri++){
           const row=data[ri]||[];
           for(let ci=0; ci<row.length; ci++){
-            if(String(row[ci]||'').trim()==='1'){
-              const prev=String(row[ci-2]||'').trim();
-              if(prev==='日付'||prev===''){
+            const v=String(row[ci]||'').trim();
+            if(v==='1'){
+              // 前後に '2' や '3' があれば日付行と判定（列間隔を問わない）
+              let has2=false, has3=false;
+              for(let cj=ci+1; cj<Math.min(ci+8, row.length); cj++){
+                if(String(row[cj]||'').trim()==='2') has2=true;
+                if(String(row[cj]||'').trim()==='3') has3=true;
+              }
+              if(has2&&has3){
                 dateHeaderRow=ri;
                 dateColStart=ci;
                 break;
