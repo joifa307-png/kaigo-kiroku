@@ -1487,7 +1487,7 @@ const REC = {
 const N_RECORD_COLS = 57;
 
 /** デプロイのたびに上げる（設定→データ管理の「アプリ情報」で表示） */
-const APP_VERSION='1.2.4';
+const APP_VERSION='1.2.5';
 function isStandaloneWebApp(){
   try{
     if(window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches) return true;
@@ -3949,8 +3949,15 @@ function execCSVExport(){
         officeNumber, S.facilityName||'', '', '0', officeNumber, ''
       ].join(','));
 
-      const addons=(rec.calcAddons&&rec.calcAddons.length>0)
-        ? rec.calcAddons:([...(S.officeAddonCodes||[])]);
+      // calcAddonsを基本とし、入浴は bathCalculated で判定して付加・除外する
+      let addons = Array.isArray(rec.calcAddons) ? [...rec.calcAddons] : [];
+      // 入浴加算（785301・785303）をいったん除去してbathCalculatedで再判定
+      addons = addons.filter(c => String(c)!=='785301' && String(c)!=='785303');
+      if(rec.bathCalculated){
+        addons.push('785301');
+      }
+      // calcAddonsが空でofficeAddonCodesフォールバックは使わない（入浴は個別判定）
+      // 減算コードはcalcAddonsから取得（フォールバックなし）
       addons.forEach(addonCode=>{
         const c=String(addonCode||'').trim();
         if(!c) return;
