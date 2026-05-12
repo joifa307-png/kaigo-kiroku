@@ -1487,7 +1487,7 @@ const REC = {
 const N_RECORD_COLS = 57;
 
 /** デプロイのたびに上げる（設定→データ管理の「アプリ情報」で表示） */
-const APP_VERSION='1.2.3';
+const APP_VERSION='1.2.4';
 function isStandaloneWebApp(){
   try{
     if(window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches) return true;
@@ -3225,12 +3225,16 @@ function execSanteiConfirm(){
     rec.calcStartTime=st;
     rec.calcEndTime=et;
     rec.calcServiceCodeKey=m?String(m.code||''):'';
-    rec.calcAddons=[...((db.settings&&db.settings.officeAddonCodes)||[])];
+    // 入浴以外のofficeAddonCodesのみ初期値として設定
+    const baseAddons=((db.settings&&db.settings.officeAddonCodes)||[])
+      .filter(c=>String(c)!=='785301'&&String(c)!=='785303');
+    rec.calcAddons=[...baseAddons];
     applyDeductAddonsToRecord(rec,r);
+    // 入浴チェックがONの場合のみ785301を付加
     const bathEl=document.querySelector(`.santei-bath[data-res-name="${CSS.escape(name)}"]`);
     rec.bathCalculated=!!(bathEl&&bathEl.checked);
-    if(!rec.bathCalculated){
-      rec.calcAddons=(rec.calcAddons||[]).filter(c=>String(c)!=='785301'&&String(c)!=='785303');
+    if(rec.bathCalculated){
+      if(!rec.calcAddons.includes('785301')) rec.calcAddons.push('785301');
     }
   });
   saveDB();
