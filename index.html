@@ -1487,7 +1487,7 @@ const REC = {
 const N_RECORD_COLS = 57;
 
 /** デプロイのたびに上げる（設定→データ管理の「アプリ情報」で表示） */
-const APP_VERSION='1.2.7';
+const APP_VERSION='1.2.8';
 function isStandaloneWebApp(){
   try{
     if(window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches) return true;
@@ -3970,11 +3970,13 @@ function execCSVExport(){
         const deducts=(_svcMaster().deducts)||[];
         const dm=deducts.find(d=>String(d.code)===c);
         const am=(_svcMaster().addons||[]).find(d=>String(d.code)===c);
+        let addonCount='1';
         let addonUnit;
         if(c==='785612'){
-          // 送迎減算は常に-47で1行出力
-          // 両道なしの場合は785612を2行出力（applyDeductAddonsToRecordで2件入っている想定）
+          // 送迎減算は常に1行・単位数-47
+          // 送迎なし（両道）の場合は回数2、片道は回数1
           addonUnit=-47;
+          addonCount=(resident.transportType==='none')?'2':'1';
         }else if(dm){
           addonUnit=dm.unit;
         }else if(am){
@@ -3986,7 +3988,7 @@ function execCSVExport(){
           '202407', S.prefCode||'412023', insured,
           todayStr, targetYm, cmOffice, cmName,
           addonUnit, '', dateStr, '',
-          recSt, recEt, '1', c,
+          recSt, recEt, addonCount, c,
           '', '', '', '',
           officeNumber, S.facilityName||'', '', '0', officeNumber, ''
         ].join(','));
@@ -6642,9 +6644,8 @@ function applyDeductAddonsToRecord(rec, resident){
       const dc=deducts.find(d=>String(d.code)==='785612');
       if(dc && !arr.includes('785612')) arr.push('785612');
     }else if(resident.transportType==='none'){
-      // 両道送迎なし = 785612を2件（各-47で2行出力）
+      // 両道送迎なし = 785612を1件（CSV出力時に回数2で出力）
       arr=arr.filter(c=>String(c)!=='785612');
-      arr.push('785612');
       arr.push('785612');
     }
   }
