@@ -1487,7 +1487,7 @@ const REC = {
 const N_RECORD_COLS = 57;
 
 /** デプロイのたびに上げる（設定→データ管理の「アプリ情報」で表示） */
-const APP_VERSION='1.2.5';
+const APP_VERSION='1.2.6';
 function isStandaloneWebApp(){
   try{
     if(window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches) return true;
@@ -3381,6 +3381,14 @@ function toggleScheduleBath(resName, dateKey, kind){
   }else if(kind==='jisseki'){
     const rec=getRec(resName, dateKey);
     rec.bathCalculated=!rec.bathCalculated;
+    // calcAddonsも同期して更新
+    if(!Array.isArray(rec.calcAddons)) rec.calcAddons=[];
+    if(rec.bathCalculated){
+      if(!rec.calcAddons.includes('785301')) rec.calcAddons.push('785301');
+    } else {
+      rec.calcAddons=rec.calcAddons.filter(c=>
+        String(c)!=='785301'&&String(c)!=='785303');
+    }
     saveDB();
     renderScheduleScreen();
   }
@@ -3949,15 +3957,13 @@ function execCSVExport(){
         officeNumber, S.facilityName||'', '', '0', officeNumber, ''
       ].join(','));
 
-      // calcAddonsを基本とし、入浴は bathCalculated で判定して付加・除外する
-      let addons = Array.isArray(rec.calcAddons) ? [...rec.calcAddons] : [];
-      // 入浴加算（785301・785303）をいったん除去してbathCalculatedで再判定
-      addons = addons.filter(c => String(c)!=='785301' && String(c)!=='785303');
+      // 入浴以外のcalcAddonsを取得
+      let addons=Array.isArray(rec.calcAddons)?[...rec.calcAddons]:[];
+      addons=addons.filter(c=>String(c)!=='785301'&&String(c)!=='785303');
+      // 入浴はbathCalculatedで判定
       if(rec.bathCalculated){
         addons.push('785301');
       }
-      // calcAddonsが空でofficeAddonCodesフォールバックは使わない（入浴は個別判定）
-      // 減算コードはcalcAddonsから取得（フォールバックなし）
       addons.forEach(addonCode=>{
         const c=String(addonCode||'').trim();
         if(!c) return;
