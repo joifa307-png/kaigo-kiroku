@@ -1487,7 +1487,7 @@ const REC = {
 const N_RECORD_COLS = 57;
 
 /** デプロイのたびに上げる（設定→データ管理の「アプリ情報」で表示） */
-const APP_VERSION='1.2.2';
+const APP_VERSION='1.2.3';
 function isStandaloneWebApp(){
   try{
     if(window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches) return true;
@@ -3514,7 +3514,7 @@ function importTeikyo(files){
         const bathDays=new Array(31).fill(0);
         const basicMaster=(_svcMaster().basic||[]);
         let currentStartTime='', currentEndTime='', currentServiceName='', currentOffice='';
-        for(let ri=17; ri<data.length; ri++){
+        for(let ri=dateHeaderRow+2; ri<data.length; ri++){
           const row=data[ri]||[];
           const cell0=String(row[0]||'').trim();
           const cell5=String(row[5]||'').trim();
