@@ -2675,14 +2675,20 @@ function mergeResidentGroup(versions){
     'addonCodes','sameBuilding','transportType','startTime','endTime',
     'dailyServiceCodes','bathSched'];
   billingFields.forEach(f=>{
-    if(!best[f]||best[f]===''||best[f]==='0'||
-       (Array.isArray(best[f])&&best[f].length===0)){
+    const isEmpty = v =>
+      !v || v==='' || v==='0' ||
+      (Array.isArray(v) && v.length===0) ||
+      (typeof v==='object' && !Array.isArray(v) && Object.keys(v).length===0);
+    if(isEmpty(best[f])){
+      // 空でない値を持つバージョンのうち最も_uが新しいものを採用
+      let bestVal=null, bestValU=0;
       v0.forEach(v=>{
-        if(v[f]&&v[f]!==''&&v[f]!=='0'&&
-           !(Array.isArray(v[f])&&v[f].length===0)){
-          best[f]=v[f];
+        if(!isEmpty(v[f])){
+          const u=_numU(v._u);
+          if(u>=bestValU){ bestVal=v[f]; bestValU=u; }
         }
       });
+      if(bestVal!==null) best[f]=bestVal;
     }
   });
   best.serviceType=residentServiceTypeOrDefault(best);
