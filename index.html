@@ -1213,13 +1213,7 @@ function saveDB(){
   saveSettingsSnapshot();
   syncDirty = true;
   localStorage.setItem(FAC.storageKey+'_dirty','1'); // ページ再読込後も未送信フラグを保持
-  /** 在庫管理への週次消費数同期は失敗しても本保存を阻害しない */
-  try{
-    const isMinami=(FAC && String(FAC.storageKey||'')==='kaigo_minami');
-    console.log('[zaiko-sync] saveDB: calling postZaikoConsumptionWeekly() fac=', isMinami?'minami':'nishi');
-    if(isMinami) postZaikoConsumptionWeeklyMinami();
-    else postZaikoConsumptionWeekly();
-  }catch(_){}
+  /** 在庫管理への週次消費数同期は集計送信ボタン押下時のみ行う（saveDB内では呼ばない） */
   if(!window._kaigoGasSaving) scheduleGasSync();
 }
 function zaikoGasUrl(){ return (localStorage.getItem('kaigo_zaiko_gas_url')||'').trim(); }
@@ -1493,7 +1487,7 @@ const REC = {
 const N_RECORD_COLS = 57;
 
 /** デプロイのたびに上げる（設定→データ管理の「アプリ情報」で表示） */
-const APP_VERSION='1.2.0';
+const APP_VERSION='1.2.1';
 function isStandaloneWebApp(){
   try{
     if(window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches) return true;
