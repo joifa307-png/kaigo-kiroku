@@ -3579,12 +3579,13 @@ function importTeikyo(files){
   });
   function checkDone(){
     if(done<total) return;
-    // 取込成功した利用者の _u を現在時刻に更新してsyncDirtyを確実に立てる
+    // 取込成功した利用者の _u を現在時刻に更新してpushを確実に走らせる
+    const now=Date.now();
     results.filter(r=>r.status==='ok').forEach(res=>{
-      const name = res.msg.split('：')[0];
-      const resident = (db.residents||[]).find(r=>
-        normalizeResidentName(r.name)===normalizeResidentName(name));
-      if(resident) resident._u = Date.now();
+      const resName=res.msg.split('：')[0];
+      const resident=(db.residents||[]).find(r=>
+        normalizeResidentName(r.name)===normalizeResidentName(resName));
+      if(resident) resident._u=now;
     });
     saveDB();
     const ok=results.filter(r=>r.status==='ok').length;
