@@ -5434,8 +5434,9 @@ function buildCarePanel(){
         <label>内容（手入力）</label>
         <textarea id="caContent" rows="2" placeholder="自由記入"></textarea>
       </div>
-      <div style="margin:6px 0 10px;">
+      <div style="margin:6px 0 10px;display:flex;flex-wrap:wrap;gap:6px;align-items:center;">
         <div id="caForwardChip" class="chip" onclick="toggleForwardCareChip(this)" style="border-color:var(--red);color:var(--red);font-weight:700;">申送りへ転送</div>
+        <div id="caLwChip" class="chip" onclick="toggleLwCareChip(this)" style="border-color:#06C755;color:#06C755;font-weight:700;">📢 LINEWORKSで共有</div>
       </div>
       <button class="btn btn-primary btn-block" onclick="saveCare()">記録</button>
     </div>
@@ -5456,6 +5457,38 @@ function toggleChip(el,item){
 }
 function toggleForwardCareChip(el){
   el.classList.toggle('selected');
+}
+function toggleLwCareChip(el){
+  el.classList.toggle('selected');
+}
+
+// ========== LINE WORKS Bot送信（GAS経由） ==========
+const LW_BOT_ID      = '12222649';
+// テスト：山口さん個人。本番はGAS側の KAIGO_LW_SEND_TO を 'channel' に変更
+// const LW_CHANNEL_ID  = '6309ae4b-7564-d103-c98e-f5394142157b';
+// テスト：山口さん個人に送信
+// const LW_TEST_USER_ID = 'yamaguchi.hoyichicorporation@works-8846';
+
+/** LINE WORKS Bot でケア内容をGAS経由で送信 */
+async function sendLwCareMessage(content, residentName, time){
+  const url = zaikoGasUrl();
+  if(!url){ alert('在庫管理GAS URLが設定されていません。\n設定画面で在庫管理GAS URLを入力してください。'); return; }
+  try{
+    await fetch(url, {
+      method: 'POST',
+      mode:   'no-cors',
+      body: JSON.stringify({
+        token:    'KAIGO_ZAIKO_2025',
+        action:   'kaigo_lw',
+        resident: residentName || '',
+        time:     time || '',
+        content:  content
+      })
+    });
+  }catch(e){
+    console.error('[LW送信エラー]', e);
+    alert('LINEWORKSへの送信に失敗しました。\n'+e.message);
+  }
 }
 let _editCare=null;
 function editCare(dkStr,idx){
@@ -5481,6 +5514,7 @@ function saveCare(){
   const staff='';
   const content=document.getElementById('caContent').value.trim();
   const forwardToNotes=!!document.getElementById('caForwardChip')?.classList.contains('selected');
+  const shareToLw=!!document.getElementById('caLwChip')?.classList.contains('selected');
   if(!content){ alert('内容を入力してください'); return; }
   if(_editCare){
     const r=getRec(curRes,_editCare.dkStr);
@@ -5509,6 +5543,7 @@ function saveCare(){
     r.care.push(item);
   }
   saveDB(); showSavedToast(); goBack();
+  if(shareToLw){ sendLwCareMessage(content, curRes, time); }
 }
 function delCare(dkStr,idx){
   if(!confirm('削除しますか？')) return;
