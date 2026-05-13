@@ -1487,7 +1487,7 @@ const REC = {
 const N_RECORD_COLS = 57;
 
 /** デプロイのたびに上げる（設定→データ管理の「アプリ情報」で表示） */
-const APP_VERSION='1.2.9';
+const APP_VERSION='1.2.10';
 function isStandaloneWebApp(){
   try{
     if(window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches) return true;
@@ -3354,10 +3354,21 @@ function toggleScheduleJisseki(name, dateKey){
   }else{
     const resident=(db.residents||[]).find(r=>normalizeResidentName(r.name)===normalizeResidentName(name));
     rec.calculated=true;
-    rec.calcStartTime=_cleanTimeHHMM(resident&&resident.startTime)||'0900';
-    rec.calcEndTime=_cleanTimeHHMM(resident&&resident.endTime)||'1630';
-    const m=resolveServiceCodeByTime(rec.calcStartTime, rec.calcEndTime, name);
-    rec.calcServiceCodeKey=m?String(m.code||''):'';
+    // dailyServiceCodesに登録がある日はそちらを優先
+    const ym=dateKey.slice(0,7);
+    const dd=dateKey.slice(8,10);
+    const daily=(resident&&resident.dailyServiceCodes||{})[ym]||{};
+    const dayEntry=daily[dd]||null;
+    if(dayEntry&&dayEntry.code){
+      rec.calcStartTime=dayEntry.startTime||_cleanTimeHHMM(resident.startTime)||'0900';
+      rec.calcEndTime=dayEntry.endTime||_cleanTimeHHMM(resident.endTime)||'1630';
+      rec.calcServiceCodeKey=dayEntry.code;
+    }else{
+      rec.calcStartTime=_cleanTimeHHMM(resident&&resident.startTime)||'0900';
+      rec.calcEndTime=_cleanTimeHHMM(resident&&resident.endTime)||'1630';
+      const m=resolveServiceCodeByTime(rec.calcStartTime, rec.calcEndTime, name);
+      rec.calcServiceCodeKey=m?String(m.code||''):'';
+    }
     if(resident){
       rec.calcAddons=[...((db.settings&&db.settings.officeAddonCodes)||[])];
       applyDeductAddonsToRecord(rec, resident);
