@@ -1487,7 +1487,7 @@ const REC = {
 const N_RECORD_COLS = 57;
 
 /** デプロイのたびに上げる（設定→データ管理の「アプリ情報」で表示） */
-const APP_VERSION='1.2.8';
+const APP_VERSION='1.2.9';
 function isStandaloneWebApp(){
   try{
     if(window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches) return true;
@@ -3230,6 +3230,9 @@ function execSanteiConfirm(){
       .filter(c=>String(c)!=='785301'&&String(c)!=='785303');
     rec.calcAddons=[...baseAddons];
     applyDeductAddonsToRecord(rec,r);
+    if(r.transportType==='none'){
+      if(!rec.calcAddons.includes('785612')) rec.calcAddons.push('785612');
+    }
     // 入浴チェックがONの場合のみ785301を付加
     const bathEl=document.querySelector(`.santei-bath[data-res-name="${CSS.escape(name)}"]`);
     rec.bathCalculated=!!(bathEl&&bathEl.checked);
