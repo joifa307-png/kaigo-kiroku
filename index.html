@@ -871,6 +871,7 @@ function startApp(){
         renderMain();
         syncPullOnly();
         startAutoSync();
+        startSanteiReminderClock();
       }catch(err){
         console.error('startApp',err);
         FAC=null; FACILITY_ID=null;
@@ -961,6 +962,8 @@ const DEFAULT_SETTINGS = {
   officeAddonCodes: [],
   officeShoguCode: '',
   officeShoguUnit: 0,
+  /** 算定確定ダイアログで確定した暦日（YYYY-MM-DD）。16時リマインダー判定用 */
+  lastSanteiConfirmYmd: '',
   serviceCodes: {
     basic: [
       { code:'781241', name:'地域通所介護１１', unit:416,  timeFrom:180, timeTo:240, careLevel:1 },
@@ -1487,7 +1490,7 @@ const REC = {
 const N_RECORD_COLS = 57;
 
 /** デプロイのたびに上げる（設定→データ管理の「アプリ情報」で表示） */
-const APP_VERSION='1.2.10';
+const APP_VERSION='1.2.11';
 function isStandaloneWebApp(){
   try{
     if(window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches) return true;
@@ -3240,10 +3243,59 @@ function execSanteiConfirm(){
       if(!rec.calcAddons.includes('785301')) rec.calcAddons.push('785301');
     }
   });
+  const calToday=dk(new Date());
+  if(dk()===calToday){
+    db.settings=db.settings||{};
+    db.settings.lastSanteiConfirmYmd=calToday;
+  }
   saveDB();
   closeMainOv();
   renderMain();
   showBriefToast('算定を確定しました',2000,false);
+}
+
+let _santeiReminderInterval=null;
+function startSanteiReminderClock(){
+  if(_santeiReminderInterval) clearInterval(_santeiReminderInterval);
+  _santeiReminderInterval=setInterval(tickSanteiReminder,60000);
+  tickSanteiReminder();
+}
+function tickSanteiReminder(){
+  try{
+    if(!FAC||!FACILITY_ID) return;
+    if(document.getElementById('selectScreen')?.classList.contains('active')) return;
+    if(document.getElementById('ovMain')?.classList.contains('show')) return;
+    const now=new Date();
+    if(now.getHours()<16) return;
+    const todayKey=dk(now);
+    db.settings=db.settings||{};
+    if(String(db.settings.lastSanteiConfirmYmd||'')===todayKey) return;
+    try{
+      if(localStorage.getItem('kaigo_santei_reminder_dismiss_'+FACILITY_ID+'_'+todayKey)==='1') return;
+    }catch(_){}
+    const sessShown='kaigo_santei_reminder_shown_'+FACILITY_ID+'_'+todayKey;
+    if(sessionStorage.getItem(sessShown)==='1') return;
+    sessionStorage.setItem(sessShown,'1');
+    openMainOv(`
+    <div style="font-size:18px;font-weight:700;margin-bottom:14px;line-height:1.5;color:var(--text1);">本日の実績を確認し、算定確定させてください</div>
+    <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:8px;">
+      <button type="button" class="btn btn-primary btn-sm" onclick="gotoSanteiFromReminder()">算定一覧へ移動</button>
+      <button type="button" class="btn btn-gray btn-sm" onclick="dismissSanteiReminderToMain()">後で</button>
+    </div>
+  `);
+  }catch(_){}
+}
+function gotoSanteiFromReminder(){
+  closeMainOv();
+  openSanteiDialog();
+}
+function dismissSanteiReminderToMain(){
+  try{
+    localStorage.setItem('kaigo_santei_reminder_dismiss_'+FACILITY_ID+'_'+dk(new Date()),'1');
+  }catch(_){}
+  closeMainOv();
+  showScreen('mainScreen');
+  renderMain();
 }
 
 function openJissekiCSVDialog(){
