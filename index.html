@@ -1468,6 +1468,7 @@ function getRec(name, dateKey){
   if(r.calcServiceCodeKey === undefined) r.calcServiceCodeKey = '';
   if(!r.calcAddons) r.calcAddons = [];
   if(r.bathCalculated === undefined) r.bathCalculated = false;
+  // calcTransportTypeはnullを「未設定」として扱う（undefinedのみ初期化しない）
   return r;
 }
 
@@ -2519,6 +2520,23 @@ function mergeRecordDay(L, R, dk, nm){
   if(duR>duL){ out.day=R.day||''; out.dayWriter=R.dayWriter||''; out._dayU=duR; }
   else { out.day=L.day||''; out.dayWriter=L.dayWriter||''; out._dayU=duL; }
 
+  // calc系フィールド：より新しい方（_calcU）を優先、なければLを維持
+  const cuL=_numU(L._calcU), cuR=_numU(R._calcU);
+  if(cuR>cuL){
+    out.calculated       = R.calculated;
+    out.calcStartTime    = R.calcStartTime||'';
+    out.calcEndTime      = R.calcEndTime||'';
+    out.calcServiceCodeKey = R.calcServiceCodeKey||'';
+    out.calcAddons       = Array.isArray(R.calcAddons)?[...R.calcAddons]:[];
+    out.bathCalculated   = R.bathCalculated||false;
+    out.calcTransportType= R.calcTransportType!=null?R.calcTransportType:L.calcTransportType;
+    out._calcU           = cuR;
+  } else {
+    // Lのcalc系はcloneDeepで既にoutに含まれているが明示的に保持
+    if(L.calcTransportType!=null) out.calcTransportType=L.calcTransportType;
+    out._calcU=cuL;
+  }
+
   return out;
 }
 
@@ -3173,10 +3191,24 @@ function openSanteiDialog(){
     const rec=getRec(r.name, dkStr);
     const checked=((r.sched||[])[dayIdx]===1)?'checked':'';
     const {st:st0, et:et0}=getResidentScheduleDayTimes(r, dkStr);
-    const st=st0;
-    const et=et0;
-    const hasBath=(rec.bath||[]).some(b=>b.type==='普通浴'||b.type==='シャワー浴');
+    // 確定済みの時刻を優先、なければ予定時間
+    const st=_cleanTimeHHMM(rec.calcStartTime)||st0;
+    const et=_cleanTimeHHMM(rec.calcEndTime)||et0;
+    const dayIdx0=curDate.getDate()-1;
+    // 入浴チェック：確定済みならbathCalculated、未確定なら当日の入浴記録（普通浴・シャワー浴）の有無
+    const hasBath=rec.calculated
+      ? rec.bathCalculated
+      : (rec.bath||[]).some(b=>b.type==='普通浴'||b.type==='シャワー浴');
     const dis=((r.sched||[])[dayIdx]===1)?'':'style="opacity:.55"';
+    // 送迎区分初期値：保存済み値→入所者はnone→利用者基本情報の順
+    const isInpatient=getResidentClassification(r.name)==='inpatient';
+    const defaultTransport=isInpatient?'none':(r.transportType||'both');
+    const savedTransport=(rec.calcTransportType!==undefined&&rec.calcTransportType!==null&&rec.calcTransportType!=='')?String(rec.calcTransportType):defaultTransport;
+    const transportOpts=[
+      {v:'both', label:'往復あり'},
+      {v:'one',  label:'片道あり'},
+      {v:'none', label:'送迎なし'},
+    ].map(o=>`<option value="${o.v}"${savedTransport===o.v?' selected':''}>${o.label}</option>`).join('');
     return `<div class="settings-list-item" ${dis} style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
       <label style="display:flex;align-items:center;gap:8px;min-width:180px;">
         <input type="checkbox" class="santei-chk" data-res-name="${escapeAttr(r.name)}" ${checked}>
@@ -3190,6 +3222,7 @@ function openSanteiDialog(){
           <input type="checkbox" class="santei-bath" data-res-name="${escapeAttr(r.name)}" ${hasBath?'checked':''}>
           <span style="font-size:14px;color:var(--text2);">入浴算定</span>
         </label>
+        <select class="santei-transport" data-res-name="${escapeAttr(r.name)}" style="font-size:14px;padding:6px 8px;margin-left:8px;">${transportOpts}</select>
       </div>
     </div>`;
   }).join('');
@@ -3224,17 +3257,27 @@ function execSanteiConfirm(){
     const st=_cleanTimeHHMM(stInp);
     const et=_cleanTimeHHMM(etInp);
     const m=resolveServiceCodeByTime(st,et,name);
+    rec._calcU=Date.now();
     rec.calculated=true;
     rec.calcStartTime=st;
     rec.calcEndTime=et;
     rec.calcServiceCodeKey=m?String(m.code||''):'';
+    // 送迎区分を保存（ドロップダウンの値を優先、なければ利用者基本情報）
+    const transportEl=document.querySelector(`.santei-transport[data-res-name="${CSS.escape(name)}"]`);
+    const transportVal=transportEl?transportEl.value:(r.transportType||'both');
+    rec.calcTransportType=transportVal;
+    rec._calcU=Date.now();
     // 入浴以外のofficeAddonCodesのみ初期値として設定
     const baseAddons=((db.settings&&db.settings.officeAddonCodes)||[])
       .filter(c=>String(c)!=='785301'&&String(c)!=='785303');
     rec.calcAddons=[...baseAddons];
     applyDeductAddonsToRecord(rec,r);
-    if(r.transportType==='none'){
-      if(!rec.calcAddons.includes('785612')) rec.calcAddons.push('785612');
+    // 送迎区分に応じて785612を制御
+    rec.calcAddons=rec.calcAddons.filter(c=>String(c)!=='785612');
+    if(transportVal==='none'){
+      rec.calcAddons.push('785612'); // 送迎なし：両道減算（回数2）
+    } else if(transportVal==='one'){
+      rec.calcAddons.push('785612'); // 片道：減算（回数1）
     }
     // 入浴チェックがONの場合のみ785301を付加
     const bathEl=document.querySelector(`.santei-bath[data-res-name="${CSS.escape(name)}"]`);
@@ -3734,9 +3777,63 @@ function renderScheduleScreen(){
     return `<th style="border:1px solid var(--border1);padding:4px 6px;">${wdJp[wd]}</th>`;
   }).join('');
   const basicCodes=[...codeSet].sort();
+  const resNm=resident.name;
   const schedArr=resident.sched||[];
   const bathArr=resident.bathSched||[];
-  const resNm=resident.name;
+
+  // コードの提供時間（分）をdailyServiceCodesまたはデフォルト時間から取得
+  function getCodeMinutesFromDaily(code){
+    const yyyymmCsv=`${schedYear}-${String(schedMonth+1).padStart(2,'0')}`;
+    const dailyM=(resident.dailyServiceCodes||{})[yyyymmCsv]||{};
+    const entry=Object.entries(dailyM).find(([k,v])=>!k.endsWith('_2')&&_dailyEntryCode(v)===String(code));
+    if(entry&&entry[1]&&typeof entry[1]==='object'){
+      const s=_cleanTimeHHMM(entry[1].startTime);
+      const e=_cleanTimeHHMM(entry[1].endTime);
+      if(s&&e) return parseInt(e.slice(0,2))*60+parseInt(e.slice(2,4)) - (parseInt(s.slice(0,2))*60+parseInt(s.slice(2,4)));
+    }
+    // calcStartTime/calcEndTimeから取得
+    for(let i=0;i<days;i++){
+      const dkKey=`${schedYear}-${pad(schedMonth+1)}-${pad(i+1)}`;
+      const rec=getRec(resNm,dkKey);
+      if(rec.calculated!==true) continue;
+      if(String(rec.calcServiceCodeKey||'').trim()!==String(code)) continue;
+      const s=_cleanTimeHHMM(rec.calcStartTime);
+      const e=_cleanTimeHHMM(rec.calcEndTime);
+      if(s&&e) return parseInt(e.slice(0,2))*60+parseInt(e.slice(2,4)) - (parseInt(s.slice(0,2))*60+parseInt(s.slice(2,4)));
+    }
+    // デフォルト時間
+    const s=_cleanTimeHHMM(stDef); const e=_cleanTimeHHMM(etDef);
+    return parseInt(e.slice(0,2))*60+parseInt(e.slice(2,4)) - (parseInt(s.slice(0,2))*60+parseInt(s.slice(2,4)));
+  }
+
+  // 月内の実績コードをスキャンして予定にないコードを抽出
+  const extraCodesSet=new Set();
+  for(let i=0;i<days;i++){
+    const dkKey=`${schedYear}-${pad(schedMonth+1)}-${pad(i+1)}`;
+    const rec=getRec(resNm, dkKey);
+    if(rec.calculated!==true) continue;
+    const ck=String(rec.calcServiceCodeKey||'').trim();
+    if(ck && !basicCodes.includes(ck)) extraCodesSet.add(ck);
+    const addons=Array.isArray(rec.calcAddons)?rec.calcAddons:[];
+    addons.forEach(ac=>{
+      const acStr=String(ac||'').trim();
+      if(!acStr) return;
+      if(acStr==='785301'||acStr==='785303') return; // 入浴は別途
+      if(acStr==='785611'||acStr==='785612') return; // 送迎・同一建物減算は別途行があるので除外
+      if(!officeAddons.includes(acStr)) extraCodesSet.add('__addon__'+acStr);
+    });
+    // 入浴は既存の入浴介助加算行で対応するため__bath__は追加しない
+  }
+
+  // 基本コードを提供時間の短い順に並べ替え
+  const basicCodesSorted=[...basicCodes].sort((a,b)=>getCodeMinutesFromDaily(a)-getCodeMinutesFromDaily(b));
+  // 実績追加コードも提供時間の短い順（加算・入浴は末尾）
+  const extraCodesSorted=[...extraCodesSet].sort((a,b)=>{
+    if(a.startsWith('__')&&!b.startsWith('__')) return 1;
+    if(!a.startsWith('__')&&b.startsWith('__')) return -1;
+    if(a.startsWith('__')&&b.startsWith('__')) return 0;
+    return getCodeMinutesFromDaily(a)-getCodeMinutesFromDaily(b);
+  });
 
   function dayMatchesBasicRow(dd, rowCode){
     const e1=daily[dd], e2=daily[dd+'_2'];
@@ -3825,7 +3922,7 @@ function renderScheduleScreen(){
   </thead>
   <tbody>`;
 
-  basicCodes.forEach(basicCode=>{
+  basicCodesSorted.forEach(basicCode=>{
     const masterEntry=basics.find(m=>String(m.code)===String(basicCode));
     const labelSvc=masterEntry?String(masterEntry.name||''):String(basicCode);
     let rowStart=stDef, rowEnd=etDef;
@@ -3867,6 +3964,43 @@ function renderScheduleScreen(){
     return getRec(resident.name,dkKey).bathCalculated?'1':'';
   },{yoteiMode:'bath',jissekiMode:'bath'});
 
+  // 実績のみ発生したコードの行を追加
+  extraCodesSorted.forEach(ec=>{
+    if(ec==='__bath__'){
+      html+=rowPair('','入浴介助加算Ⅰ',
+        ()=>'',
+        (dayIdx)=>{
+          const dkKey=`${schedYear}-${pad(schedMonth+1)}-${pad(dayIdx+1)}`;
+          const rec=getRec(resNm,dkKey);
+          return (rec.calculated===true&&rec.bathCalculated&&bathArr[dayIdx]!==1)?'1':'';
+        },{yoteiMode:'none',jissekiMode:'bath'});
+    } else if(ec.startsWith('__addon__')){
+      const acCode=ec.replace('__addon__','');
+      const ad=addonsM.find(x=>String(x.code||'')===acCode);
+      const nm=ad?String(ad.name||acCode):acCode;
+      html+=rowPair('',nm,
+        ()=>'',
+        (dayIdx)=>{
+          const dkKey=`${schedYear}-${pad(schedMonth+1)}-${pad(dayIdx+1)}`;
+          const rec=getRec(resNm,dkKey);
+          if(rec.calculated!==true) return '';
+          return (Array.isArray(rec.calcAddons)&&rec.calcAddons.includes(acCode))?'1':'';
+        },{yoteiMode:'none',jissekiMode:'addon',jissekiAddonCode:acCode});
+    } else {
+      const masterEntry=basics.find(m=>String(m.code)===ec);
+      const nm=masterEntry?String(masterEntry.name||ec):ec;
+      html+=rowPair('',nm,
+        ()=>'',
+        (dayIdx)=>{
+          const dkKey=`${schedYear}-${pad(schedMonth+1)}-${pad(dayIdx+1)}`;
+          const rec=getRec(resNm,dkKey);
+          if(rec.calculated!==true) return '';
+          return String(rec.calcServiceCodeKey||'').trim()===ec?'1':'';
+        },{yoteiMode:'none',jissekiMode:'basic'});
+    }
+  });
+
+
   const transportValue=(resident.transportType==='none')?'2':'1';
   const showTransportRow=!resident.sameBuilding && resident.transportType!=='both';
   if(showTransportRow){
@@ -3877,7 +4011,10 @@ function renderScheduleScreen(){
         const rec=getRec(resident.name,dkKey);
         if(rec.calculated!==true) return '';
         const list=Array.isArray(rec.calcAddons)?rec.calcAddons:[];
-        return list.includes('785612')?transportValue:'';
+        if(!list.includes('785612')) return '';
+        // calcTransportTypeを優先して回数を表示
+        const tp=String(rec.calcTransportType||resident.transportType||'both');
+        return tp==='none'?'2':'1';
       },{yoteiMode:'schedPlain',jissekiMode:'addon',jissekiAddonCode:'785612'});
   }
   if(resident.sameBuilding){
@@ -4039,10 +4176,10 @@ function execCSVExport(){
         let addonCount='1';
         let addonUnit;
         if(c==='785612'){
-          // 送迎減算は常に1行・単位数-47
-          // 送迎なし（両道）の場合は回数2、片道は回数1
+          // 送迎減算：calcTransportTypeを優先、なければresidentのtransportType
           addonUnit=-47;
-          addonCount=(resident.transportType==='none')?'2':'1';
+          const tp=String(rec.calcTransportType||resident.transportType||'both');
+          addonCount=(tp==='none')?'2':'1'; // 送迎なし=両道=2、片道=1
         }else if(dm){
           addonUnit=dm.unit;
         }else if(am){
@@ -5480,6 +5617,7 @@ async function sendLwCareMessage(content, residentName, time){
       body: JSON.stringify({
         token:    'KAIGO_ZAIKO_2025',
         action:   'kaigo_lw',
+        unit:     FAC ? FAC.storageKey : 'kaigo_nishi',
         resident: residentName || '',
         time:     time || '',
         content:  content
