@@ -6176,6 +6176,9 @@ function buildNotesPanel(){
         <div class="fg"><label>記入者</label><select id="ntWriter">${buildStaffOpts('')}</select></div>
       </div>
       <div class="fg"><label>内容</label><textarea id="ntContent" rows="3" placeholder="申送り内容を入力"></textarea></div>
+      <div style="margin:6px 0 10px;display:flex;flex-wrap:wrap;gap:6px;align-items:center;">
+        <div id="ntLwChip" class="chip" onclick="this.classList.toggle('selected')" style="border-color:#06C755;color:#06C755;font-weight:700;">📢 LINEWORKSで共有</div>
+      </div>
       <button class="btn btn-primary btn-block" onclick="saveNote()">記録</button>
     </div>
   </div>`;
@@ -6185,8 +6188,10 @@ function saveNote(){
   const writer=document.getElementById('ntWriter').value;
   const content=document.getElementById('ntContent').value.trim();
   if(!content){ alert('内容を入力してください'); return; }
+  const shareToLw=!!document.getElementById('ntLwChip')?.classList.contains('selected');
   getRec(curRes).notes.push({id:genId('n'),time,writer,content,ts:new Date().toISOString(),_deleted:false,sheetU:Date.now()});
   saveDB(); showSavedToast(); refreshPanel('notes');
+  if(shareToLw){ sendLwCareMessage(content, curRes, time); }
 }
 function delNote(dkStr,idx){
   if(!confirm('削除しますか？')) return;
