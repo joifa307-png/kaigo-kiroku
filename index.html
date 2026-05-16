@@ -1491,7 +1491,7 @@ const REC = {
 const N_RECORD_COLS = 57;
 
 /** デプロイのたびに上げる（設定→データ管理の「アプリ情報」で表示） */
-const APP_VERSION='1.2.14';
+const APP_VERSION='1.2.16';
 function isStandaloneWebApp(){
   try{
     if(window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches) return true;
@@ -2969,7 +2969,15 @@ function extractPushDeltaSlices(fullRows, sinceTs){
     if(!r||!r.length){ i++; continue; }
     const c0=String(r[0]||'');
     if(c0===SEC_SET||c0===SEC_SUP) break;
-    if(_numU(r[REC.uu])>sinceTs) recRows.push(r.slice());
+    const kind=String(r[REC.k]||'');
+    let includeRec=_numU(r[REC.uu])>sinceTs;
+    if(kind==='calc'){
+      try{
+        const ej=JSON.parse(r[REC.exj]||'{}');
+        if(!!ej.calculated) includeRec=true;
+      }catch(_){}
+    }
+    if(includeRec) recRows.push(r.slice());
     i++;
   }
   while(i<fullRows.length && String(fullRows[i][0])!==SEC_SET) i++;
