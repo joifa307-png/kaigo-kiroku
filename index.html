@@ -101,6 +101,11 @@ input,select,textarea{font-family:inherit;font-size:30px;}
 #mainScreen .res-table thead th.main-th-click{
   cursor:pointer;
 }
+/* 見出しのみ：予定・実績2列を1枠（縦横とも黒線） */
+#mainScreen .res-table thead th.main-yotei-jisseki-head{
+  border:1px solid #000 !important;
+  letter-spacing:.02em;
+}
 #mainScreen .res-table thead th{
   position:sticky;top:0;z-index:30;
   background:var(--orange);color:#fff;padding:8px 6px;
@@ -544,8 +549,7 @@ input,select,textarea{font-family:inherit;font-size:30px;}
     <table class="res-table" id="resTable">
       <thead>
         <tr>
-          <th class="main-th-click" style="width:36px;min-width:36px;white-space:nowrap;text-align:center;" title="タップで算定確定">予定</th>
-          <th class="main-th-click" style="width:36px;min-width:36px;white-space:nowrap;text-align:center;" title="タップで算定確定">実績</th>
+          <th colspan="2" class="main-th-click main-yotei-jisseki-head" style="min-width:72px;white-space:nowrap;text-align:center;" title="タップで算定確定">予定実績</th>
           <th style="width:32px;min-width:32px;">申送</th>
           <th class="res-div-r" style="min-width:80px;">氏名</th>
           <th class="res-div-l">体温</th>
@@ -809,6 +813,20 @@ const FACILITIES = {
     sheetName: '南',
   }
 };
+
+/** 利用者マスタ未入力時の基本提供時間（西 9:00–16:30／南 9:00–16:05）。各利用者の startTime/endTime は設定画面・同期で上書き可能 */
+const FACILITY_DEFAULT_TIMES = {
+  nishi:  { startTime: '0900', endTime: '1630' },
+  minami: { startTime: '0900', endTime: '1605' },
+};
+function facilityDefaultStartTime(facId){
+  const id=normalizeFacilityId(facId||(FACILITY_ID||''))||'nishi';
+  return (FACILITY_DEFAULT_TIMES[id]||FACILITY_DEFAULT_TIMES.nishi).startTime;
+}
+function facilityDefaultEndTime(facId){
+  const id=normalizeFacilityId(facId||(FACILITY_ID||''))||'nishi';
+  return (FACILITY_DEFAULT_TIMES[id]||FACILITY_DEFAULT_TIMES.nishi).endTime;
+}
 
 /** URL・localStorage・Cookie の施設ID（大文字小文字・前後空白のゆれ対策） */
 function normalizeFacilityId(raw){
@@ -1491,7 +1509,7 @@ const REC = {
 const N_RECORD_COLS = 57;
 
 /** デプロイのたびに上げる（設定→データ管理の「アプリ情報」で表示） */
-const APP_VERSION='1.2.18';
+const APP_VERSION='1.2.21';
 function isStandaloneWebApp(){
   try{
     if(window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches) return true;
@@ -3359,8 +3377,8 @@ function buildSanteiHHMMSelectOptions(selected){
 /** 算定確定ダイアログ用：当日の予定実績（提供票の日別開始終了）があればそれを、なければ基本時間 */
 function getResidentScheduleDayTimes(resident, dateKey){
   _ensureResidentBillingFields(resident);
-  const defSt=_cleanTimeHHMM(resident.startTime)||'0900';
-  const defEt=_cleanTimeHHMM(resident.endTime)||'1630';
+  const defSt=_cleanTimeHHMM(resident.startTime)||facilityDefaultStartTime();
+  const defEt=_cleanTimeHHMM(resident.endTime)||facilityDefaultEndTime();
   const parts=String(dateKey||'').split('-');
   if(parts.length<3) return {st:defSt, et:defEt};
   const yyyymm=`${parts[0]}-${parts[1]}`;
@@ -3652,12 +3670,12 @@ function toggleScheduleJisseki(name, dateKey){
     const daily=(resident&&resident.dailyServiceCodes||{})[ym]||{};
     const dayEntry=daily[dd]||null;
     if(dayEntry&&dayEntry.code){
-      rec.calcStartTime=dayEntry.startTime||_cleanTimeHHMM(resident.startTime)||'0900';
-      rec.calcEndTime=dayEntry.endTime||_cleanTimeHHMM(resident.endTime)||'1630';
+      rec.calcStartTime=dayEntry.startTime||_cleanTimeHHMM(resident.startTime)||facilityDefaultStartTime();
+      rec.calcEndTime=dayEntry.endTime||_cleanTimeHHMM(resident.endTime)||facilityDefaultEndTime();
       rec.calcServiceCodeKey=dayEntry.code;
     }else{
-      rec.calcStartTime=_cleanTimeHHMM(resident&&resident.startTime)||'0900';
-      rec.calcEndTime=_cleanTimeHHMM(resident&&resident.endTime)||'1630';
+      rec.calcStartTime=_cleanTimeHHMM(resident&&resident.startTime)||facilityDefaultStartTime();
+      rec.calcEndTime=_cleanTimeHHMM(resident&&resident.endTime)||facilityDefaultEndTime();
       const m=resolveServiceCodeByTime(rec.calcStartTime, rec.calcEndTime, name);
       rec.calcServiceCodeKey=m?String(m.code||''):'';
     }
@@ -3725,8 +3743,8 @@ function _dailyEntryCode(entry){
 function getDailyServiceCode(resident, yyyymm, dd){
   const daily=(resident.dailyServiceCodes||{})[yyyymm];
   if(daily && daily[dd]) return _dailyEntryCode(daily[dd]);
-  const st=_cleanTimeHHMM(resident.startTime)||'0900';
-  const et=_cleanTimeHHMM(resident.endTime)||'1630';
+  const st=_cleanTimeHHMM(resident.startTime)||facilityDefaultStartTime();
+  const et=_cleanTimeHHMM(resident.endTime)||facilityDefaultEndTime();
   const m=resolveServiceCodeByTime(st, et, resident.name);
   return m ? String(m.code||'') : String(resident.serviceCodeKey||'');
 }
@@ -3845,7 +3863,7 @@ function importTeikyo(files){
           }
           if(cell0.match(/^[～〜~]\s*\d{1,2}:\d{2}/)){
             const etStr=cell0.replace(/^[～〜~]\s*/, '').trim();
-            currentEndTime=_cleanTimeHHMM(etStr)||'1630';
+            currentEndTime=_cleanTimeHHMM(etStr)||facilityDefaultEndTime();
           }
           if(cell5) currentServiceName=cell5;
           if(cell12) currentOffice=cell12;
@@ -3856,7 +3874,7 @@ function importTeikyo(files){
             (svcName.includes('地域通所介護')&&!svcName.includes('加算')&&!svcName.includes('減算')&&!svcName.includes('処遇'));
           const isBath=svcName.includes('入浴介助加算');
           if(!isBasic&&!isBath) continue;
-          const endTime=currentEndTime||'1630';
+          const endTime=currentEndTime||facilityDefaultEndTime();
           for(let d=1; d<=31; d++){
             const ci=dateColMap[d];
             if(ci===undefined) continue;
@@ -3869,11 +3887,11 @@ function importTeikyo(files){
               if(matched){
                 code=String(matched.code||'');
               }else{
-                const m=resolveServiceCodeByTime(currentStartTime||'0900', endTime, residentName);
+                const m=resolveServiceCodeByTime(currentStartTime||facilityDefaultStartTime(), endTime, residentName);
                 if(m) code=String(m.code||'');
               }
               if(code){
-                const payload={code, startTime:currentStartTime||'0900', endTime};
+                const payload={code, startTime:currentStartTime||facilityDefaultStartTime(), endTime};
                 if(!dailyCodes[dd]){
                   dailyCodes[dd]=payload;
                 }else if(_dailyEntryCode(dailyCodes[dd])!==code){
@@ -3936,12 +3954,12 @@ function renderScheduleScreen(){
   }
   _ensureResidentBillingFields(resident);
   const yyyymm=`${schedYear}-${pad(schedMonth+1)}`;
-  const stDef=_cleanTimeHHMM(resident.startTime)||'0900';
-  const etDef=_cleanTimeHHMM(resident.endTime)||'1630';
+  const stDef=_cleanTimeHHMM(resident.startTime)||facilityDefaultStartTime();
+  const etDef=_cleanTimeHHMM(resident.endTime)||facilityDefaultEndTime();
   let svcKey=String(resident.serviceCodeKey||'').trim();
   if(!svcKey){
-    const stEst=_cleanTimeHHMM(resident.startTime)||'0900';
-    const etEst=_cleanTimeHHMM(resident.endTime)||'1630';
+    const stEst=_cleanTimeHHMM(resident.startTime)||facilityDefaultStartTime();
+    const etEst=_cleanTimeHHMM(resident.endTime)||facilityDefaultEndTime();
     const est=resolveServiceCodeByTime(stEst, etEst, resident.name);
     if(est) svcKey=String(est.code||'');
   }
@@ -4306,8 +4324,8 @@ function execCSVExport(){
     const cmOffice=_cleanDigits(resident.careManagerOffice||'');
     const cmName=String(resident.careManagerName||'').trim();
     const insured=_cleanDigits(resident.insuredNumber||'');
-    const st=_cleanTimeHHMM(resident.startTime)||'0900';
-    const et=_cleanTimeHHMM(resident.endTime)||'1630';
+    const st=_cleanTimeHHMM(resident.startTime)||facilityDefaultStartTime();
+    const et=_cleanTimeHHMM(resident.endTime)||facilityDefaultEndTime();
     const yyyymmCsv=`${schedYear}-${String(schedMonth+1).padStart(2,'0')}`;
 
     for(let d=1;d<=daysInMonth;d++){
@@ -4431,8 +4449,8 @@ function buildSanteiPanel(){
   const rec=getRec(curRes, dk());
   const on=rec.calculated===true;
   let {st,et}=_calcEffectiveTime(rec,r);
-  st=_cleanTimeHHMM(st)||'0900';
-  et=_cleanTimeHHMM(et)||'1630';
+  st=_cleanTimeHHMM(st)||facilityDefaultStartTime();
+  et=_cleanTimeHHMM(et)||facilityDefaultEndTime();
   const stEff=_cleanTimeHHMM(rec.calcStartTime)||st;
   const etEff=_cleanTimeHHMM(rec.calcEndTime)||et;
   const mAuto=resolveServiceCodeByTime(stEff, etEff, curRes);
@@ -4524,8 +4542,8 @@ function toggleCalculated(){
     clearCalcForSync(rec);
   }else{
     _ensureResidentBillingFields(r);
-    rec.calcStartTime=_cleanTimeHHMM(r.startTime)||'0900';
-    rec.calcEndTime=_cleanTimeHHMM(r.endTime)||'1630';
+    rec.calcStartTime=_cleanTimeHHMM(r.startTime)||facilityDefaultStartTime();
+    rec.calcEndTime=_cleanTimeHHMM(r.endTime)||facilityDefaultEndTime();
     const m=resolveServiceCodeByTime(rec.calcStartTime, rec.calcEndTime, curRes);
     rec.calcServiceCodeKey=m?String(m.code||''):'';
     rec.calcAddons=[...((db.settings&&db.settings.officeAddonCodes)||[])];
@@ -4964,8 +4982,8 @@ function bindMainResTableDelegation(){
     const th=ev.target.closest('thead th');
     if(th){
       const i=th.cellIndex;
-      if(i===0||i===1){ openSanteiDialog(); return; }
-      if(i===13){ openBulkMed(); return; }
+      if(i===0){ openSanteiDialog(); return; }
+      if(i===12){ openBulkMed(); return; }
       return;
     }
     const td=ev.target.closest('tbody td');
@@ -7239,8 +7257,8 @@ function _ensureResidentBillingFields(r){
   if(r.serviceCodeKey===undefined) r.serviceCodeKey='';
   if(r.startTime===undefined) r.startTime='';
   if(r.endTime===undefined) r.endTime='';
-  if(!r.startTime) r.startTime='0900';
-  if(!r.endTime) r.endTime='1630';
+  if(!r.startTime) r.startTime=facilityDefaultStartTime();
+  if(!r.endTime) r.endTime=facilityDefaultEndTime();
   if(!Array.isArray(r.addonCodes)) r.addonCodes=[];
   if(r.shoguCode===undefined) r.shoguCode='';
   if(r.shoguUnit===undefined) r.shoguUnit=0;
@@ -7259,7 +7277,7 @@ function _ensureResidentBillingFields(r){
     Object.keys(mo).forEach(k=>{
       const v=mo[k];
       if(typeof v==='string'){
-        mo[k]={code:v,startTime:_cleanTimeHHMM(r.startTime)||'0900',endTime:_cleanTimeHHMM(r.endTime)||'1630'};
+        mo[k]={code:v,startTime:_cleanTimeHHMM(r.startTime)||facilityDefaultStartTime(),endTime:_cleanTimeHHMM(r.endTime)||facilityDefaultEndTime()};
       }
     });
   });
@@ -7491,8 +7509,8 @@ function buildResidentInfoSettings(){
     return `<tr>
       <td style="white-space:nowrap;">${escapeHtml(r.name||'')}</td>
       <td style="text-align:center;"><input type="checkbox" data-resident-id="${rid}"${checked} onchange="onResidentInpatientCheckbox(this)"></td>
-      <td><input type="text" class="res-info-inp" list="timeOptions30min" data-res-id="${rid}" data-field="startTime" value="${escapeAttr(String(r.startTime||'0900'))}" style="width:80px;font-size:13px;"></td>
-      <td><input type="text" class="res-info-inp" list="timeOptions30min" data-res-id="${rid}" data-field="endTime" value="${escapeAttr(String(r.endTime||'1630'))}" style="width:80px;font-size:13px;"></td>
+      <td><input type="text" class="res-info-inp" list="timeOptions30min" data-res-id="${rid}" data-field="startTime" value="${escapeAttr(String(r.startTime||facilityDefaultStartTime()))}" style="width:80px;font-size:13px;"></td>
+      <td><input type="text" class="res-info-inp" list="timeOptions30min" data-res-id="${rid}" data-field="endTime" value="${escapeAttr(String(r.endTime||facilityDefaultEndTime()))}" style="width:80px;font-size:13px;"></td>
       <td style="text-align:center;">
         <input type="checkbox" class="res-info-inp" data-res-id="${rid}" data-field="sameBuilding" ${r.sameBuilding ? 'checked' : ''} onchange="onSameBuildingChange(this)">
       </td>
@@ -7575,8 +7593,8 @@ function saveResidentInfoAll(){
     else if(f === 'careExpiry') r.careExpiry = String(el.value||'').trim();
     else if(f === 'costShare') r.costShare = String(el.value||'').trim();
     else if(f === 'phone') r.phone = String(el.value||'').trim();
-    else if(f === 'startTime') r.startTime = _cleanTimeHHMM(el.value) || '0900';
-    else if(f === 'endTime') r.endTime = _cleanTimeHHMM(el.value) || '1630';
+    else if(f === 'startTime') r.startTime = _cleanTimeHHMM(el.value) || facilityDefaultStartTime();
+    else if(f === 'endTime') r.endTime = _cleanTimeHHMM(el.value) || facilityDefaultEndTime();
     else if(f === 'sameBuilding') r.sameBuilding = !!el.checked;
     else if(f === 'transportType') r.transportType = String(el.value||'both').trim();
     else if(f === 'careManagerOfficeKey'){
