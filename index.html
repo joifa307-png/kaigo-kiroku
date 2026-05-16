@@ -1969,6 +1969,23 @@ function dbToSheet(inDb){
         a[REC.dt]=String(rec.day||'').replace(/\r/g,' '); a[REC.dw]=rec.dayWriter||'';
         pushR(a);
       }
+
+      // calc系フィールド（算定確定データ）をシートに出力
+      if(rec.calculated || (rec._calcU||0)>0){
+        const a=blankRecRow();
+        a[REC.rid]='calc|'+dk+'|'+name; a[REC.k]='calc'; a[REC.dk]=dk; a[REC.nm]=name; a[REC.uu]=String(_numU(rec._calcU||0));
+        a[REC.seq]='0'; a[REC.tm]='';
+        a[REC.exj]=JSON.stringify({
+          calculated:     !!rec.calculated,
+          calcStartTime:  rec.calcStartTime||'',
+          calcEndTime:    rec.calcEndTime||'',
+          calcServiceCodeKey: rec.calcServiceCodeKey||'',
+          calcAddons:     Array.isArray(rec.calcAddons)?rec.calcAddons:[],
+          bathCalculated: !!rec.bathCalculated,
+          calcTransportType: rec.calcTransportType!=null?rec.calcTransportType:null
+        });
+        pushR(a);
+      }
     });
   });
 
@@ -2101,6 +2118,18 @@ function applyRecordRow(dbOut, row){
   }
   if(kind==='day'){
     rec.day=row[REC.dt]||''; rec.dayWriter=row[REC.dw]||''; rec._dayU=u;
+  }
+  if(kind==='calc'){
+    let calcData={};
+    try{ calcData=JSON.parse(row[REC.exj]||'{}'); }catch(_){ calcData={}; }
+    rec._calcU=u;
+    rec.calculated=!!calcData.calculated;
+    rec.calcStartTime=calcData.calcStartTime||'';
+    rec.calcEndTime=calcData.calcEndTime||'';
+    rec.calcServiceCodeKey=calcData.calcServiceCodeKey||'';
+    rec.calcAddons=Array.isArray(calcData.calcAddons)?calcData.calcAddons:[];
+    rec.bathCalculated=!!calcData.bathCalculated;
+    if(calcData.calcTransportType!=null) rec.calcTransportType=calcData.calcTransportType;
   }
 }
 
