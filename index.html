@@ -827,6 +827,9 @@ function facilityDefaultEndTime(facId){
   const id=normalizeFacilityId(facId||(FACILITY_ID||''))||'nishi';
   return (FACILITY_DEFAULT_TIMES[id]||FACILITY_DEFAULT_TIMES.nishi).endTime;
 }
+function isMinamiFacility(){
+  return FACILITY_ID==='minami'||(FAC&&FAC.storageKey==='kaigo_minami');
+}
 
 /** URL・localStorage・Cookie の施設ID（大文字小文字・前後空白のゆれ対策） */
 function normalizeFacilityId(raw){
@@ -1509,7 +1512,7 @@ const REC = {
 const N_RECORD_COLS = 57;
 
 /** デプロイのたびに上げる（設定→データ管理の「アプリ情報」で表示） */
-const APP_VERSION='1.2.21';
+const APP_VERSION='1.2.23';
 function isStandaloneWebApp(){
   try{
     if(window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches) return true;
@@ -3415,15 +3418,17 @@ function openSanteiDialog(){
       ? rec.bathCalculated
       : (rec.bath||[]).some(b=>b.type==='普通浴'||b.type==='シャワー浴');
     const dis=((r.sched||[])[dayIdx]===1)?'':'style="opacity:.55"';
-    // 送迎区分初期値：保存済み値→入所者はnone→利用者基本情報の順
-    const isInpatient=getResidentClassification(r.name)==='inpatient';
-    const defaultTransport=isInpatient?'none':(r.transportType||'both');
-    const savedTransport=(rec.calcTransportType!==undefined&&rec.calcTransportType!==null&&rec.calcTransportType!=='')?String(rec.calcTransportType):defaultTransport;
+    const transportLocked=santeiTransportLockedBoth(r);
+    const savedTransport=defaultTransportForSanteiDialog(r,rec);
     const transportOpts=[
       {v:'both', label:'往復あり'},
       {v:'one',  label:'片道あり'},
       {v:'none', label:'送迎なし'},
     ].map(o=>`<option value="${o.v}"${savedTransport===o.v?' selected':''}>${o.label}</option>`).join('');
+    const transportUi=transportLocked
+      ? `<span style="font-size:14px;color:var(--text2);margin-left:8px;white-space:nowrap;">送迎：往復あり（入所・固定）</span>`
+        +`<input type="hidden" class="santei-transport" data-res-name="${escapeAttr(r.name)}" value="both">`
+      : `<select class="santei-transport" data-res-name="${escapeAttr(r.name)}" style="font-size:14px;padding:6px 8px;margin-left:8px;">${transportOpts}</select>`;
     return `<div class="settings-list-item" ${dis} style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
       <label style="display:flex;align-items:center;gap:8px;min-width:180px;">
         <input type="checkbox" class="santei-chk" data-res-name="${escapeAttr(r.name)}" ${checked}>
@@ -3437,7 +3442,7 @@ function openSanteiDialog(){
           <input type="checkbox" class="santei-bath" data-res-name="${escapeAttr(r.name)}" ${hasBath?'checked':''}>
           <span style="font-size:14px;color:var(--text2);">入浴算定</span>
         </label>
-        <select class="santei-transport" data-res-name="${escapeAttr(r.name)}" style="font-size:14px;padding:6px 8px;margin-left:8px;">${transportOpts}</select>
+        ${transportUi}
       </div>
     </div>`;
   }).join('');
@@ -3484,7 +3489,8 @@ function execSanteiConfirm(){
     rec.calcServiceCodeKey=m?String(m.code||''):'';
     // 送迎区分を保存（ドロップダウンの値を優先、なければ利用者基本情報）
     const transportEl=document.querySelector(`.santei-transport[data-res-name="${CSS.escape(name)}"]`);
-    const transportVal=transportEl?transportEl.value:(r.transportType||'both');
+    let transportVal=transportEl?transportEl.value:defaultTransportForSanteiDialog(r,rec);
+    if(santeiTransportLockedBoth(r)) transportVal='both';
     rec.calcTransportType=transportVal;
     rec._calcU=Date.now();
     // 入浴以外のofficeAddonCodesのみ初期値として設定
@@ -7086,6 +7092,7 @@ function resolveServiceCodeByTime(startTime, endTime, residentNameOrCareLevel){
 function applyDeductAddonsToRecord(rec, resident){
   if(!rec||!resident) return;
   _ensureResidentBillingFields(resident);
+  if(isMinamiFacility()) resident.sameBuilding=false;
   const deducts=_svcMaster().deducts||[];
   const isDed=c=>deducts.some(d=>String(d.code)===String(c));
   let arr=Array.isArray(rec.calcAddons)?[...rec.calcAddons]:[];
@@ -7094,7 +7101,7 @@ function applyDeductAddonsToRecord(rec, resident){
     const dc=deducts.find(d=>String(d.code)==='785611');
     if(dc && !arr.includes('785611')) arr.push('785611');
   }else{
-    if(resident.transportType==='one_way'){
+    if(resident.transportType==='one_way'||resident.transportType==='one'){
       const dc=deducts.find(d=>String(d.code)==='785612');
       if(dc && !arr.includes('785612')) arr.push('785612');
     }else if(resident.transportType==='none'){
@@ -7264,6 +7271,11 @@ function _ensureResidentBillingFields(r){
   if(r.shoguUnit===undefined) r.shoguUnit=0;
   if(r.transportType===undefined) r.transportType='both';
   if(r.sameBuilding===undefined) r.sameBuilding=false;
+  if(isMinamiFacility()&&getResidentClassification(r.name)==='inpatient'){
+    r.sameBuilding=false;
+    const tt=String(r.transportType||'').trim();
+    if(!tt||tt==='none') r.transportType='both';
+  }
   if(r.birthDate === undefined) r.birthDate = '';
   if(r.gender === undefined) r.gender = '';
   if(r.phone === undefined) r.phone = '';
@@ -7281,6 +7293,32 @@ function _ensureResidentBillingFields(r){
       }
     });
   });
+}
+/** 利用者マスタの送迎区分 → 算定確定ドロップダウン用（one_way と one を揃える） */
+function transportTypeForSanteiSelect(t){
+  const s=String(t==null?'':t).trim();
+  if(s==='one_way'||s==='one') return 'one';
+  if(s==='both'||s==='none') return s;
+  return 'both';
+}
+/**
+ * 算定確定ダイアログの送迎初期値。
+ * 南・入所者：往復あり固定（同一建物減算なし運用）。
+ * 西：入所者は送迎なし初期、それ以外は利用者マスタ。
+ */
+function defaultTransportForSanteiDialog(resident, rec){
+  _ensureResidentBillingFields(resident);
+  const saved=rec&&(rec.calcTransportType!==undefined&&rec.calcTransportType!==null&&String(rec.calcTransportType)!=='');
+  if(saved) return transportTypeForSanteiSelect(rec.calcTransportType);
+  if(isMinamiFacility()){
+    if(getResidentClassification(resident.name)==='inpatient') return 'both';
+    return transportTypeForSanteiSelect(resident.transportType);
+  }
+  if(getResidentClassification(resident.name)==='inpatient') return 'none';
+  return transportTypeForSanteiSelect(resident.transportType);
+}
+function santeiTransportLockedBoth(resident){
+  return isMinamiFacility()&&getResidentClassification(resident.name)==='inpatient';
 }
 function saveBillingResidents(){
   const inputs=[...document.querySelectorAll('.bill-inp, .bill-sel')];
