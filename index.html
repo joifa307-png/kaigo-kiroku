@@ -1491,7 +1491,7 @@ const REC = {
 const N_RECORD_COLS = 57;
 
 /** デプロイのたびに上げる（設定→データ管理の「アプリ情報」で表示） */
-const APP_VERSION='1.2.16';
+const APP_VERSION='1.2.17';
 function isStandaloneWebApp(){
   try{
     if(window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches) return true;
@@ -2550,11 +2550,11 @@ function mergeRecordDay(L, R, dk, nm){
   if(duR>duL){ out.day=R.day||''; out.dayWriter=R.dayWriter||''; out._dayU=duR; }
   else { out.day=L.day||''; out.dayWriter=L.dayWriter||''; out._dayU=duL; }
 
-  // calc：_calcU 新しい方を採用。同タイは「ローカル未確定でリモートだけ確定」のときだけリモート採用（両方とも確定済みでは従来どおりローカル優先／シート側のフラグのみのゴミでローカルを消さない）
+  // calc：_calcU 新しい方を採用。同タイかつ両方0のときだけ「リモートだけ確定」を採用（ローカル解除後に _calcU を進めていればここは来ない）
   const cuL=_numU(L._calcU), cuR=_numU(R._calcU);
   const rOn=!!R.calculated;
   const lOn=!!L.calculated;
-  const adoptR=(cuR>cuL)||((cuR===cuL)&&rOn&&!lOn);
+  const adoptR=(cuR>cuL)||((cuR===cuL)&&(cuR===0)&&(cuL===0)&&rOn&&!lOn);
   if(adoptR){
     out.calculated       = R.calculated;
     out.calcStartTime    = R.calcStartTime||'';
@@ -2872,6 +2872,20 @@ function touchSetU(key){
   db._setU=db._setU||{};
   db._setU[key]=Date.now();
 }
+
+/** 実績算定を解除するとき同期が先でも古い確定が復活しないよう _calcU を進める（pull→merge 対策） */
+function clearCalcForSync(rec){
+  if(!rec) return;
+  rec.calculated=false;
+  rec.calcStartTime='';
+  rec.calcEndTime='';
+  rec.calcServiceCodeKey='';
+  rec.calcAddons=[];
+  rec.bathCalculated=false;
+  rec.calcTransportType=null;
+  rec._calcU=Date.now();
+}
+function bumpCalcU(rec){ if(rec) rec._calcU=Date.now(); }
 
 function gasPost(extra){
   const url=gasUrl(), tok=gasToken();
@@ -3431,9 +3445,14 @@ function execSanteiConfirm(){
   chks.forEach(ch=>{
     const name=ch.getAttribute('data-res-name');
     if(!name) return;
-    if(!ch.checked) return;
-    const r=(db.residents||[]).find(x=>normalizeResidentName(x.name)===normalizeResidentName(name)) || dbResidentByNameLoose(name);
     const rec=getRec(name, dk());
+    if(!ch.checked){
+      if(rec.calculated||_numU(rec._calcU)>0){
+        clearCalcForSync(rec);
+      }
+      return;
+    }
+    const r=(db.residents||[]).find(x=>normalizeResidentName(x.name)===normalizeResidentName(name)) || dbResidentByNameLoose(name);
     const stInp=document.querySelector(`.santei-time[data-kind="start"][data-res-name="${CSS.escape(name)}"]`)?.value||'';
     const etInp=document.querySelector(`.santei-time[data-kind="end"][data-res-name="${CSS.escape(name)}"]`)?.value||'';
     const st=_cleanTimeHHMM(stInp);
@@ -3570,10 +3589,9 @@ function toggleJissekiDay(name, dkKey){
   const rec=getRec(name, dkKey);
   rec.calculated=!rec.calculated;
   if(!rec.calculated){
-    rec.calcStartTime='';
-    rec.calcEndTime='';
-    rec.calcServiceCodeKey='';
-    rec.calcAddons=[];
+    clearCalcForSync(rec);
+  }else{
+    bumpCalcU(rec);
   }
   saveDB();
   renderJissekiCalendar();
@@ -3623,11 +3641,7 @@ function moveScheduleMonth(dir){
 function toggleScheduleJisseki(name, dateKey){
   const rec=getRec(name, dateKey);
   if(rec.calculated){
-    rec.calculated=false;
-    rec.calcStartTime='';
-    rec.calcEndTime='';
-    rec.calcServiceCodeKey='';
-    rec.calcAddons=[];
+    clearCalcForSync(rec);
   }else{
     const resident=(db.residents||[]).find(r=>normalizeResidentName(r.name)===normalizeResidentName(name));
     rec.calculated=true;
@@ -3652,6 +3666,7 @@ function toggleScheduleJisseki(name, dateKey){
     }else{
       rec.calcAddons=[];
     }
+    bumpCalcU(rec);
   }
   saveDB();
   renderScheduleScreen();
@@ -4505,10 +4520,7 @@ function toggleCalculated(){
   const rec=getRec(curRes, dk());
   rec.calculated=!rec.calculated;
   if(!rec.calculated){
-    rec.calcStartTime='';
-    rec.calcEndTime='';
-    rec.calcServiceCodeKey='';
-    rec.calcAddons=[];
+    clearCalcForSync(rec);
   }else{
     _ensureResidentBillingFields(r);
     rec.calcStartTime=_cleanTimeHHMM(r.startTime)||'0900';
@@ -4517,6 +4529,7 @@ function toggleCalculated(){
     rec.calcServiceCodeKey=m?String(m.code||''):'';
     rec.calcAddons=[...((db.settings&&db.settings.officeAddonCodes)||[])];
     applyDeductAddonsToRecord(rec,r);
+    bumpCalcU(rec);
   }
   saveDB();
   refreshPanel(curTab);
@@ -4526,11 +4539,7 @@ function cancelSantei(){
   if(!curRes) return;
   if(!confirm('この日の算定を取り消しますか？')) return;
   const rec=getRec(curRes, dk());
-  rec.calculated=false;
-  rec.calcStartTime='';
-  rec.calcEndTime='';
-  rec.calcServiceCodeKey='';
-  rec.calcAddons=[];
+  clearCalcForSync(rec);
   saveDB();
   refreshPanel('santei');
   renderMain();
