@@ -1491,7 +1491,7 @@ const REC = {
 const N_RECORD_COLS = 57;
 
 /** デプロイのたびに上げる（設定→データ管理の「アプリ情報」で表示） */
-const APP_VERSION='1.2.17';
+const APP_VERSION='1.2.18';
 function isStandaloneWebApp(){
   try{
     if(window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches) return true;
@@ -3140,14 +3140,15 @@ function syncNow(force){
   return runGasPushCycle();
 }
 
+/** バックグラウンド自動 pull は行わない（保存時の双方向同期・起動時1回・手動🔄のみ） */
 function startAutoSync(){
-  if(syncTimer) clearInterval(syncTimer);
-  syncTimer=setInterval(()=>{ if(FAC&&gasConfigured()) syncPullOnly(); }, 180*1000);
-  if(!window._kaigoSyncListener){
-    window._kaigoSyncListener=()=>{
-      if(document.visibilityState==='visible'&&FAC&&gasConfigured()) syncPullOnly();
-    };
-    document.addEventListener('visibilitychange', window._kaigoSyncListener);
+  if(syncTimer){
+    clearInterval(syncTimer);
+    syncTimer=null;
+  }
+  if(window._kaigoSyncListener){
+    document.removeEventListener('visibilitychange', window._kaigoSyncListener);
+    window._kaigoSyncListener=null;
   }
 }
 
@@ -9263,13 +9264,12 @@ document.addEventListener('visibilitychange', ()=>{
   gasRepairFromCookieMirror();
   gasSnapshotRepairFromPrimary();
 });
-/** iOS：戻る／スワイプでキャッシュ復帰したとき Cookie ミラー復元・必要なら再取得 */
+/** iOS：戻る／スワイプでキャッシュ復帰したとき Cookie ミラー復元（自動 pull は行わない） */
 window.addEventListener('pageshow', (ev)=>{
   try{
     if(ev.persisted) closeAllOverlays();
     gasRepairFromCookieMirror();
     gasSnapshotRepairFromPrimary();
-    if(ev.persisted&&FAC&&gasConfigured()) syncPullOnly();
   }catch(_){}
 });
 </script>
