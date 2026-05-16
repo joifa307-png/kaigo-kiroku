@@ -1491,7 +1491,7 @@ const REC = {
 const N_RECORD_COLS = 57;
 
 /** デプロイのたびに上げる（設定→データ管理の「アプリ情報」で表示） */
-const APP_VERSION='1.2.11';
+const APP_VERSION='1.2.12';
 function isStandaloneWebApp(){
   try{
     if(window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches) return true;
@@ -2895,6 +2895,112 @@ function persistLocalQuiet(){
   }
 }
 
+/** シート「利用者」行の更新時刻列（sheetToDb と同じく 34 = スケジュール31列の直後） */
+const KAIGO_RESIDENT_U_COL = 34;
+const KAIGO_PUSH_TS_SUFFIX = ':last_push_ts_v1';
+const KAIGO_PUSH_RIDS_SUFFIX = ':rid_snapshot_v1';
+const KAIGO_DELTA_MAX_PATCH_ROWS = 3500;
+const KAIGO_DELTA_MAX_REMOVE_RIDS = 3500;
+
+function loadRidSnapshotForPush_(storageKey){
+  try{
+    const raw=localStorage.getItem(storageKey+KAIGO_PUSH_RIDS_SUFFIX);
+    if(raw==null) return null;
+    const j=JSON.parse(raw);
+    return Array.isArray(j)?j:null;
+  }catch(_){ return null; }
+}
+
+function sheetSupplyRowUpdatedAt_(row){
+  if(!row||!row.length) return 0;
+  return _numU(row.length>=7 ? row[6] : row[5]);
+}
+
+function extractRecRidsFromSheetRows(fullRows){
+  const ids=[];
+  let i=0;
+  while(i<fullRows.length && String(fullRows[i][0])!==SEC_REC) i++;
+  if(i>=fullRows.length) return ids;
+  i+=2;
+  while(i<fullRows.length){
+    const r=fullRows[i];
+    if(!r||!r.length){ i++; continue; }
+    const c0=String(r[0]||'');
+    if(c0===SEC_SET||c0===SEC_SUP) break;
+    ids.push(String(r[0]||''));
+    i++;
+  }
+  return ids;
+}
+
+/**
+ * 直近のプッシュ時刻より新しいシート行だけを抽出（GAS で既存シートへマージする差分）。
+ * fullRows は dbToSheet(db) と同じ並びであること。
+ */
+function extractPushDeltaSlices(fullRows, sinceTs){
+  const recRows=[], resRows=[], setRows=[], supRows=[];
+  let i;
+  i=0;
+  while(i<fullRows.length && String(fullRows[i][0])!==SEC_RES) i++;
+  if(i<fullRows.length){
+    i++;
+    if(i<fullRows.length) i++;
+    while(i<fullRows.length){
+      const r=fullRows[i];
+      if(!r||!r.length){ i++; continue; }
+      if(String(r[0])===SEC_REC) break;
+      const nm=String(r[1]||'').trim();
+      const id=String(r[0]||'').trim();
+      if(!nm&&!id){ i++; continue; }
+      if(_numU(r[KAIGO_RESIDENT_U_COL])>sinceTs) resRows.push(r.slice());
+      i++;
+    }
+  }
+  i=0;
+  while(i<fullRows.length && String(fullRows[i][0])!==SEC_REC) i++;
+  if(i>=fullRows.length) return {recRows,resRows,setRows,supRows};
+  i+=2;
+  while(i<fullRows.length){
+    const r=fullRows[i];
+    if(!r||!r.length){ i++; continue; }
+    const c0=String(r[0]||'');
+    if(c0===SEC_SET||c0===SEC_SUP) break;
+    if(_numU(r[REC.uu])>sinceTs) recRows.push(r.slice());
+    i++;
+  }
+  while(i<fullRows.length && String(fullRows[i][0])!==SEC_SET) i++;
+  if(i<fullRows.length && String(fullRows[i][0])===SEC_SET){
+    i+=2;
+    while(i<fullRows.length){
+      const r=fullRows[i];
+      if(!r||!r.length){ i++; continue; }
+      if(String(r[0])===SEC_SUP) break;
+      const k=String(r[0]||'').trim();
+      if(!k){ i++; continue; }
+      if(_numU(r[2])>sinceTs) setRows.push(r.slice());
+      i++;
+    }
+  }
+  while(i<fullRows.length && String(fullRows[i][0])!==SEC_SUP) i++;
+  if(i<fullRows.length && String(fullRows[i][0])===SEC_SUP){
+    i+=2;
+    while(i<fullRows.length){
+      const r=fullRows[i];
+      if(!r||!r.length){ i++; continue; }
+      const id=String(r[0]||'').trim();
+      if(!id){ i++; continue; }
+      if(sheetSupplyRowUpdatedAt_(r)>sinceTs) supRows.push(r.slice());
+      i++;
+    }
+  }
+  return {recRows,resRows,setRows,supRows};
+}
+
+function finalizePushSuccessState_(storageKey, wantedRids){
+  localStorage.setItem(storageKey+KAIGO_PUSH_TS_SUFFIX,String(Date.now()));
+  localStorage.setItem(storageKey+KAIGO_PUSH_RIDS_SUFFIX,JSON.stringify(wantedRids));
+}
+
 function syncPullOnly(){
   if(!gasConfigured()){ setSyncStatusIfGasMissing(); return Promise.resolve(); }
   setSyncStatus('取得中...','#185FA5');
@@ -2923,6 +3029,7 @@ function syncPullOnly(){
 function runGasPushCycle(){
   if(!gasConfigured()){ setSyncStatusIfGasMissing(); return Promise.resolve(); }
   if(!syncDirty) return Promise.resolve();
+  const sk=FAC.storageKey;
   setSyncStatus('同期中...','#185FA5');
   return gasPost({action:'pull', sheetName:FAC.sheetName})
     .then(j=>{
@@ -2933,14 +3040,48 @@ function runGasPushCycle(){
       }
       const remote=sheetToDb(raw);
       db=mergePulledDb(db, remote);
-      const rows=dbToSheet(db);
-      return gasPost({action:'push', sheetName:FAC.sheetName, rows});
+      const fullRows=dbToSheet(db);
+      const wantedRids=extractRecRidsFromSheetRows(fullRows);
+      const prevSnap=loadRidSnapshotForPush_(sk);
+      const lastTs=_numU(localStorage.getItem(sk+KAIGO_PUSH_TS_SUFFIX));
+      const wantSet=new Set(wantedRids);
+      const removed=Array.isArray(prevSnap)?prevSnap.filter(id=>!wantSet.has(String(id))):[];
+      const useDelta=Array.isArray(prevSnap)&&lastTs>0;
+
+      let pushBody=null;
+      if(useDelta){
+        const d=extractPushDeltaSlices(fullRows,lastTs);
+        const patchTotal=d.recRows.length+d.resRows.length+d.setRows.length+d.supRows.length;
+        if(patchTotal>KAIGO_DELTA_MAX_PATCH_ROWS||removed.length>KAIGO_DELTA_MAX_REMOVE_RIDS){
+          pushBody=null;
+        }else if(patchTotal===0&&removed.length===0){
+          pushBody=null;
+        }else{
+          pushBody={
+            action:'push',
+            sheetName:FAC.sheetName,
+            merge:true,
+            recordRows:d.recRows,
+            residentRows:d.resRows,
+            settingRows:d.setRows,
+            supplyRows:d.supRows,
+            removeRecRids:removed
+          };
+        }
+      }
+      if(!pushBody){
+        pushBody={action:'push',sheetName:FAC.sheetName,rows:fullRows};
+      }
+      return gasPost(pushBody);
     })
     .then(()=>{
+      const sk=FAC.storageKey;
+      const wantedRids=extractRecRidsFromSheetRows(dbToSheet(db));
+      finalizePushSuccessState_(sk,wantedRids);
       persistLocalQuiet();
       mirrorResidentTypesToLocalStorage();
       syncDirty=false;
-      localStorage.removeItem(FAC.storageKey+'_dirty');
+      localStorage.removeItem(sk+'_dirty');
       renderMain();
       const n=new Date();
       setSyncStatus(`反映済 ${n.getHours()}:${pad(n.getMinutes())}`,'green');
