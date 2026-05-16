@@ -1491,7 +1491,7 @@ const REC = {
 const N_RECORD_COLS = 57;
 
 /** デプロイのたびに上げる（設定→データ管理の「アプリ情報」で表示） */
-const APP_VERSION='1.2.13';
+const APP_VERSION='1.2.14';
 function isStandaloneWebApp(){
   try{
     if(window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches) return true;
@@ -2550,10 +2550,11 @@ function mergeRecordDay(L, R, dk, nm){
   if(duR>duL){ out.day=R.day||''; out.dayWriter=R.dayWriter||''; out._dayU=duR; }
   else { out.day=L.day||''; out.dayWriter=L.dayWriter||''; out._dayU=duL; }
 
-  // calc：_calcU が大きい方を採用。同値／0同士でも R が calculated のときだけ採用（シート側 uu が 0 で片側のみ確定だった従来の取りこぼし対策）
+  // calc：_calcU 新しい方を採用。同タイは「ローカル未確定でリモートだけ確定」のときだけリモート採用（両方とも確定済みでは従来どおりローカル優先／シート側のフラグのみのゴミでローカルを消さない）
   const cuL=_numU(L._calcU), cuR=_numU(R._calcU);
   const rOn=!!R.calculated;
-  const adoptR=(cuR>cuL)||((cuR===cuL)&&rOn);
+  const lOn=!!L.calculated;
+  const adoptR=(cuR>cuL)||((cuR===cuL)&&rOn&&!lOn);
   if(adoptR){
     out.calculated       = R.calculated;
     out.calcStartTime    = R.calcStartTime||'';
