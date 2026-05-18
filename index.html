@@ -249,7 +249,7 @@ input,select,textarea{font-family:inherit;font-size:30px;}
 .resident-tab{
   flex:none;
   padding:7px 14px;
-  font-size:13px;
+  font-size:18px;
   background:#fff;
   border:0.5px solid #cecbf6;
   border-radius:14px;
@@ -829,7 +829,7 @@ input,select,textarea{font-family:inherit;font-size:30px;}
       <button class="back-btn" onclick="closeOv('ovPrint')">◀ メイン</button>
       <span style="font-size:20px;font-weight:700;">連絡帳を印刷</span>
     </div>
-    <div class="fg"><label>日付</label><input type="date" id="pDate" style="font-size:18px;padding:8px 10px;"></div>
+    <div class="fg"><label>日付</label><input type="date" id="pDate" style="font-size:18px;padding:8px 10px;" onchange="refreshPrintResidentChips()"></div>
     <div class="fg" style="margin-top:12px;"><label>利用者を選択</label><div id="pResidents" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:6px;"></div></div>
     <div style="display:flex;gap:10px;margin-top:18px;justify-content:flex-end;">
       <button class="btn btn-primary" onclick="doPrint()" style="font-size:20px;padding:10px 28px;">🖨 印刷・PDF</button>
@@ -1559,7 +1559,7 @@ const REC = {
 const N_RECORD_COLS = 57;
 
 /** デプロイのたびに上げる（設定→データ管理の「アプリ情報」で表示） */
-const APP_VERSION='1.2.25';
+const APP_VERSION='1.2.26';
 function isStandaloneWebApp(){
   try{
     if(window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches) return true;
@@ -5275,7 +5275,7 @@ function switchToResident(name,animDir){
   const hit=residents.find(r=>normalizeResidentName(r.name)===normalizeResidentName(nm));
   if(!hit) return;
   curRes=hit.name;
-  _editVital=_editEx=_editBath=_editCare=null;
+  _editVital=_editEx=_editBath=_editCare=_editNote=null;
   renderResidentTabs();
   refreshDetailResidentSelect();
   const panel=document.getElementById('detPanel');
@@ -5331,7 +5331,7 @@ function onDetailDateChanged(){
       const newShort=String(newName||'').split(/\s+/)[0]||newName;
       showBriefToast(oldShort+'さんは不在 → '+newShort+'さんに切替',2500,false);
       curRes=newName;
-      _editVital=_editEx=_editBath=_editCare=null;
+      _editVital=_editEx=_editBath=_editCare=_editNote=null;
     }else{
       showBriefToast('この日は在籍者がいません',2500,false);
       goBack();
@@ -6541,37 +6541,21 @@ function saveRecAll(){
 }
 
 // ========== 申送りパネル ==========
+let _editNote=null;
+
 function buildNotesPanel(){
   const hist=get48h(curRes,'notes');
   const histHtml=hist.length?hist.map(n=>`<div class="hist-item">
     <div class="hist-time">${recDayLabel(n._dk)} ${normalizeTimeText(n.time)}</div>
     <div class="hist-content">${n.content}${n.writer?`<br><span class="text-gray">${n.writer}</span>`:''}</div>
+    <button class="hist-edit" onclick="editNote('${n._dk}',${n._i})">編集</button>
     <button class="hist-del" onclick="delNote('${n._dk}',${n._i})">削除</button>
   </div>`).join(''):'<div class="text-gray" style="font-size:13px;padding:8px 0;">記録なし</div>';
 
   return `<div class="panel">
-    <details class="panel-sec" style="background:#F8F7F4;border:1px solid var(--border2);border-radius:var(--r2);padding:12px 14px;">
-      <summary style="cursor:pointer;font-size:16px;font-weight:600;color:var(--text1);user-select:none;">申送り・画面連携の運用メモ（仕様の整理）</summary>
-      <div style="font-size:14px;color:var(--text2);line-height:1.6;margin-top:10px;">
-        <p style="margin:0 0 10px;"><strong>メイン表「申送」列（●）</strong><br>
-        カレンダーで選んだ日の「終わり時刻」を基準に、<strong>過去72時間以内</strong>に内容のある申送りが1件でもあると赤の●。申送り履歴（本タブの48時間）と同じ時間の考え方です。●または氏名から本画面へ来られます。</p>
-        <p style="margin:0 0 10px;"><strong>メイン表「最終排便」列</strong><br>
-        設定の<strong>利用者管理</strong>で<strong>入所者</strong>にチェックした方のみ、過去<strong>14日</strong>の排泄で排便が「なし」以外の<strong>最新</strong>を表示します（経過で「－3日」等）。<strong>デイ（通所）</strong>扱いは「—」です。区分をまだ登録していない利用者は、利用者マスタに保存された<strong>サービス種別（入所・通所の別）</strong>と予定から推定します（Excel の列構造には依存しません）。</p>
-        <p style="margin:0 0 10px;"><strong>同期（GAS）</strong><br>
-        約<strong>3分</strong>ごとにスプレッドシートを取得。タブを前面に戻したときも取得します。記録保存のあと、約<strong>2.5秒</strong>後に反映送信が走る仕組みです。</p>
-        <p style="margin:0 0 10px;"><strong>詳細画面ヘッダー</strong><br>
-        「◀メイン」右のプルダウンで、<strong>同じ日の来所者</strong>の中から別の利用者へ切り替えられます（タブは維持）。</p>
-        <p style="margin:0 0 10px;"><strong>パット等卸記録</strong><br>
-        記録は<strong>担当者必須</strong>。同じ利用者の排泄タブ・記録履歴にも期間内の卸が出ます。メイン画面上部にも「卸記録」から直接開けます。</p>
-        <p style="margin:0 0 10px;"><strong>バイタル</strong><br>
-        メイン表と詳細の48時間履歴で、体温・血圧・脈拍のしきい値に応じた<strong>赤字</strong>表示を共通化しています。</p>
-        <p style="margin:0;"><strong>印刷（設定の印刷）</strong><br>
-        バイタル期間印刷は施設名表記・日付・氏名列幅の調整、SpO2・体重等の欠落防止（短いシート行の補完）を行っています。</p>
-      </div>
-    </details>
     <div class="panel-sec"><h3>48時間の申送り</h3><div class="hist-list">${histHtml}</div></div>
     <div class="panel-sec">
-      <h3>申送り入力</h3>
+      <h3 id="noteFormTitle" style="display:flex;align-items:center;gap:8px;">申送り入力<span id="noteEditModeLabel" style="display:none;color:var(--red);font-size:inherit;font-weight:700;">編集中</span></h3>
       <div class="fg-row fg-cols-2">
         <div class="fg"><label>時刻</label><input type="time" id="ntTime" value="${nowTime()}"></div>
         <div class="fg"><label>記入者</label><select id="ntWriter">${buildStaffOpts('')}</select></div>
@@ -6584,13 +6568,36 @@ function buildNotesPanel(){
     </div>
   </div>`;
 }
+function editNote(dkStr,idx){
+  const n=getRec(curRes,dkStr).notes[idx];
+  if(!n||!isActiveNote(n)) return;
+  document.getElementById('ntTime').value=normalizeTimeText(n.time)||'';
+  buildStaffSelect('ntWriter',n.writer||'');
+  document.getElementById('ntContent').value=n.content||'';
+  _editNote={dkStr,idx};
+  const modeLabel=document.getElementById('noteEditModeLabel');
+  if(modeLabel){
+    modeLabel.style.display='block';
+    modeLabel.textContent=recordEditLabelByDateTime(dkStr,n.time);
+  }
+  document.getElementById('noteFormTitle')?.scrollIntoView({behavior:'smooth'});
+}
 function saveNote(){
   const time=document.getElementById('ntTime').value||nowTime();
   const writer=document.getElementById('ntWriter').value;
   const content=document.getElementById('ntContent').value.trim();
   if(!content){ alert('内容を入力してください'); return; }
-  const shareToLw=!!document.getElementById('ntLwChip')?.classList.contains('selected');
-  getRec(curRes).notes.push({id:genId('n'),time,writer,content,ts:new Date().toISOString(),_deleted:false,sheetU:Date.now()});
+  const shareToLw=!_editNote&&!!document.getElementById('ntLwChip')?.classList.contains('selected');
+  if(_editNote){
+    const r=getRec(curRes,_editNote.dkStr);
+    const n=r.notes[_editNote.idx];
+    if(n){
+      r.notes[_editNote.idx]={...n,time,writer,content,sheetU:Date.now()};
+    }
+    _editNote=null;
+  }else{
+    getRec(curRes).notes.push({id:genId('n'),time,writer,content,ts:new Date().toISOString(),_deleted:false,sheetU:Date.now()});
+  }
   saveDB(); showSavedToast(); refreshPanel('notes');
   if(shareToLw){ sendLwCareMessage(content, curRes, time); }
 }
@@ -9312,59 +9319,57 @@ function printCareRange(){
 }
 
 // ========== 連絡帳印刷 ==========
+function getPrintDialogDateKey(){
+  const el=document.getElementById('pDate');
+  const v=el&&el.value?String(el.value).trim():'';
+  if(/^\d{4}-\d{2}-\d{2}$/.test(v)) return v;
+  return dk();
+}
+function parsePrintDate(dateKey){
+  const m=String(dateKey||'').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if(m) return new Date(+m[1],+m[2]-1,+m[3]);
+  return new Date(curDate.getFullYear(),curDate.getMonth(),curDate.getDate());
+}
+function refreshPrintResidentChips(){
+  const cont=document.getElementById('pResidents');
+  if(!cont) return;
+  const d=parsePrintDate(getPrintDialogDateKey());
+  const dayIdx=d.getDate()-1;
+  const resList=residentsOnDaySorted(dayIdx,{forMainTable:true});
+  cont.innerHTML=resList.map(r=>{
+    const nm=escapeAttr(r.name);
+    const label=escapeHtml(r.name||'');
+    return `<button type="button" class="chip" style="border:2px solid var(--bdr);" data-res-name="${nm}" onclick="this.classList.toggle('selected')">${label}</button>`;
+  }).join('');
+}
 function openPrint(){
   document.getElementById('pDate').value=dk();
-  const day=curDate.getDate()-1;
-  const resList=residentsOnDaySorted(day);
-  const cont=document.getElementById('pResidents');
-  cont.innerHTML=resList.map(r=>`<button class="chip" style="border:2px solid var(--bdr);" onclick="this.classList.toggle('selected')">${r.name}</button>`).join('');
+  refreshPrintResidentChips();
   openOv('ovPrint');
 }
 
-function buildPrintPages(sel, date){
-  const d=new Date(date+'T00:00:00');
+function buildPrintPages(sel, dateKey){
+  const dkUse=/^\d{4}-\d{2}-\d{2}$/.test(String(dateKey||''))?String(dateKey):getPrintDialogDateKey();
+  const d=parsePrintDate(dkUse);
   const days=['日','月','火','水','木','金','土'];
   const dateLabel=d.getFullYear()+'年'+(d.getMonth()+1)+'月'+d.getDate()+'日（'+days[d.getDay()]+'）';
   let pages='';
   sel.forEach((name,pidx)=>{
-    const rec=getRec(name,date);
-    const rows=[];
-    // バイタル
-    rec.vital.forEach(v=>rows.push({t:normalizeTimeText(v.time),cat:'バイタル',body:'体温：'+normalizeTempValue(v.temp)+'℃、血圧：'+v.sbp+'/'+v.dbp+'、脈拍：'+v.pulse+'/分'+(v.spo2&&v.spo2!=='—'?'、SpO2：'+v.spo2+'%':'')}));
-    // 排泄
-    rec.excretion.forEach(e=>rows.push({t:e.time,cat:'排泄',body:'排尿:'+e.urine+(e.pad&&e.pad!=='なし'?'、パット:'+e.pad:'')+'、排便:'+e.stool}));
-    // 入浴
-    rec.bath.forEach(b=>rows.push({t:b.time,cat:'入浴',body:b.type}));
-    // 食事（削除フラグ付き区分は除外。デイ利用者は朝夕のみ明示入力時）
-    const ml=rec.meal||{};
-    const isDayPrint=isDayServiceByName(name);
-    if(!Number(ml.bDel||0) && (!isDayPrint||mealSectionExplicitlyRecorded(ml,'breakfast'))){
-      rows.push({t:ml.bTime||'07:30',cat:'朝食',body:'主食：'+(ml.bMain||0)+'%、副食：'+(ml.bSide||0)+'%'+(ml.bWater?'、水分：'+ml.bWater+'ml':'')});
-    }
-    if(!Number(ml.lDel||0)){
-      const lunchBody='主食：'+(ml.main||0)+'%、副食：'+(ml.side||0)+'%'+(ml.water?'、水分：'+ml.water+'ml':'')+(ml.menu?'　メニュー：'+ml.menu:'');
-      rows.push({t:ml.time||'11:50',cat:'昼食',body:lunchBody});
-      const snackTxt=String(normalizeMealFreeText(ml.snack)||'').trim();
-      if(snackTxt) rows.push({t:normalizeTimeText('15:00'),cat:'おやつ',body:snackTxt});
-    }
-    if(!Number(ml.dDel||0) && (!isDayPrint||mealSectionExplicitlyRecorded(ml,'dinner'))){
-      rows.push({t:ml.dTime||'17:30',cat:'夕食',body:'主食：'+(ml.dMain||0)+'%、副食：'+(ml.dSide||0)+'%'+(ml.dWater?'、水分：'+ml.dWater+'ml':'')});
-    }
-    // レク
-    if(rec.rec&&rec.rec.content) rows.push({t:'',cat:'レク',body:rec.rec.content});
+    const rows=buildResidentDailySummaryRows(name,dkUse);
     rows.sort((a,b)=>a.t&&b.t?a.t.localeCompare(b.t):a.t?-1:1);
-    const trs=rows.map(rr=>'<tr><td>'+rr.t+'</td><td>'+rr.cat+'</td><td>'+rr.body+'</td></tr>').join('')
+    const trs=rows.map(rr=>'<tr><td>'+escapeHtml(rr.t)+'</td><td>'+escapeHtml(rr.cat)+'</td><td>'+escapeHtml(rr.body)+'</td></tr>').join('')
       ||'<tr><td colspan="3" style="text-align:center;color:#999;">記録なし</td></tr>';
+    const rec=getRec(name,dkUse);
     const dayText=rec.day||'';
     let nxt='—';
-    const rr=db.residents.find(x=>x.name===name);
+    const rr=(db.residents||[]).find(x=>normalizeResidentName(x.name)===normalizeResidentName(name));
     if(rr){const dNum=d.getDate();for(let dd=dNum;dd<(rr.sched||[]).length;dd++){if(rr.sched[dd]===1){const nd=new Date(d.getFullYear(),d.getMonth(),dd+1);nxt=(nd.getMonth()+1)+'月'+nd.getDate()+'日（'+days[nd.getDay()]+'）';break;}}}
     const isLast=pidx===sel.length-1;
     pages+='<div class="page'+(isLast?' last':'')+'">'
       +'<h1>介護記録（連絡帳）</h1>'
-      +'<div class="meta"><span class="meta-name">利用者名　<strong>'+name+'</strong>　様</span><span class="meta-date">'+dateLabel+'</span></div>'
+      +'<div class="meta"><span class="meta-name">利用者名　<strong>'+escapeHtml(name)+'</strong>　様</span><span class="meta-date">'+dateLabel+'</span></div>'
       +'<table><thead><tr><th class="col-time">時間</th><th class="col-cat">項目</th><th class="col-body">内容</th></tr></thead><tbody>'+trs+'</tbody></table>'
-      +'<div class="biko"><div class="biko-label">1日の様子</div><div class="biko-body">'+dayText+'</div></div>'
+      +'<div class="biko"><div class="biko-label">1日の様子</div><div class="biko-body">'+escapeHtml(dayText)+'</div></div>'
       +'<div class="next">次回利用予定日　'+nxt+'</div>'
       +'</div>';
   });
@@ -9411,8 +9416,8 @@ function buildPrintHtml(pages){
 }
 
 function doPrint(){
-  const date=document.getElementById('pDate').value;
-  const sel=[...document.querySelectorAll('#pResidents .chip.selected')].map(b=>b.textContent);
+  const date=getPrintDialogDateKey();
+  const sel=[...document.querySelectorAll('#pResidents .chip.selected')].map(b=>b.getAttribute('data-res-name')||b.textContent);
   if(!sel.length){alert('利用者を選択してください');return;}
   closeOv('ovPrint');
   const pages=buildPrintPages(sel,date);
