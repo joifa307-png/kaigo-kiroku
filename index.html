@@ -232,6 +232,50 @@ input,select,textarea{font-family:inherit;font-size:30px;}
 }
 .tab.active{color:var(--orange);border-bottom-color:var(--orange);font-weight:700;background:var(--orange-bg);}
 
+/* 詳細画面：利用者タブ（記録タブの下） */
+.resident-tabs-wrap{
+  background:#eeedfe;
+  border-bottom:0.5px solid #cecbf6;
+}
+.resident-tabs{
+  display:flex;
+  gap:6px;
+  overflow-x:auto;
+  padding:8px 12px;
+  -webkit-overflow-scrolling:touch;
+  scrollbar-width:none;
+}
+.resident-tabs::-webkit-scrollbar{display:none;}
+.resident-tab{
+  flex:none;
+  padding:7px 14px;
+  font-size:13px;
+  background:#fff;
+  border:0.5px solid #cecbf6;
+  border-radius:14px;
+  color:#3c3489;
+  cursor:pointer;
+  white-space:nowrap;
+}
+.resident-tab.active{
+  background:#534ab7;
+  color:#fff;
+  border-color:#534ab7;
+  font-weight:500;
+}
+#detailScreen #detPanel{
+  touch-action:pan-y;
+  transition:transform 0.2s ease-out,opacity 0.18s ease-out;
+}
+#detailScreen #detPanel.swiping-left{
+  transform:translateX(-30px);
+  opacity:0;
+}
+#detailScreen #detPanel.swiping-right{
+  transform:translateX(30px);
+  opacity:0;
+}
+
 /* ===== 詳細画面の背後（メインより一段コントラストを上げる） ===== */
 #detailScreen{
   background:linear-gradient(180deg,var(--detail-screen-bg) 0%,var(--detail-screen-bg2) 100%);
@@ -589,6 +633,9 @@ input,select,textarea{font-family:inherit;font-size:30px;}
     </div>
   </div>
   <div class="tabs no-print" id="detTabs"></div>
+  <div class="resident-tabs-wrap no-print">
+    <div id="residentTabs" class="resident-tabs"></div>
+  </div>
   <div id="detPanel"></div>
 </div>
 
@@ -1512,7 +1559,7 @@ const REC = {
 const N_RECORD_COLS = 57;
 
 /** デプロイのたびに上げる（設定→データ管理の「アプリ情報」で表示） */
-const APP_VERSION='1.2.23';
+const APP_VERSION='1.2.25';
 function isStandaloneWebApp(){
   try{
     if(window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches) return true;
@@ -3208,8 +3255,7 @@ function moveDay(d){
 function moveDayDet(d){
   curDate.setDate(curDate.getDate()+d);
   renderDate();
-  refreshDetailResidentSelect();
-  refreshPanel(curTab);
+  onDetailDateChanged();
 }
 
 // ========== 画面切替 ==========
@@ -3269,9 +3315,8 @@ function renderCal(){
 function pickDay(y,m,d){
   curDate=new Date(y,m,d); curDate.setHours(0,0,0,0);
   renderDate();
-  if(document.getElementById('detailScreen').classList.contains('active')){
-    refreshDetailResidentSelect();
-    refreshPanel(curTab);
+  if(isDetailScreenOpen()){
+    onDetailDateChanged();
   } else {
     renderMain();
   }
@@ -3280,9 +3325,8 @@ function pickDay(y,m,d){
 function goToday(){
   curDate=new Date(); curDate.setHours(0,0,0,0);
   renderDate();
-  if(document.getElementById('detailScreen').classList.contains('active')){
-    refreshDetailResidentSelect();
-    refreshPanel(curTab);
+  if(isDetailScreenOpen()){
+    onDetailDateChanged();
   } else {
     renderMain();
   }
@@ -5181,9 +5225,8 @@ const TAB_LIST = [
   {id:'summary',  label:'サマリー'},
 ];
 
-function refreshDetailResidentSelect(){
-  const sel=document.getElementById('detResSelect');
-  if(!sel) return;
+/** 詳細画面：選択日の在籍利用者（五十音順）。メイン表と同じ在籍判定＋表示中利用者の補完 */
+function getResidentsForCurrentDate(){
   const dayIdx=curDate.getDate()-1;
   let list=residentsOnDaySorted(dayIdx,{forMainTable:true}).slice();
   if(curRes){
@@ -5195,6 +5238,66 @@ function refreshDetailResidentSelect(){
     }
   }
   list.sort(compareResidentsStable);
+  return list;
+}
+
+function renderResidentTabs(){
+  const el=document.getElementById('residentTabs');
+  if(!el) return;
+  const residents=getResidentsForCurrentDate();
+  let html='';
+  for(const r of residents){
+    const active=normalizeResidentName(r.name)===normalizeResidentName(curRes)?' active':'';
+    const safeName=escapeAttr(r.name);
+    html+=`<div class="resident-tab${active}" data-name="${safeName}">${escapeHtml(r.name||'')}</div>`;
+  }
+  el.innerHTML=html;
+  el.querySelectorAll('.resident-tab').forEach(tab=>{
+    tab.addEventListener('click',function(){
+      const name=this.getAttribute('data-name');
+      if(name) switchToResident(name,null);
+    });
+  });
+  setTimeout(()=>{
+    const activeEl=el.querySelector('.resident-tab.active');
+    if(activeEl&&activeEl.scrollIntoView){
+      try{
+        activeEl.scrollIntoView({behavior:'smooth',inline:'center',block:'nearest'});
+      }catch(_){}
+    }
+  },50);
+}
+
+function switchToResident(name,animDir){
+  const nm=String(name||'').trim();
+  if(!nm||normalizeResidentName(nm)===normalizeResidentName(curRes)) return;
+  const residents=getResidentsForCurrentDate();
+  const hit=residents.find(r=>normalizeResidentName(r.name)===normalizeResidentName(nm));
+  if(!hit) return;
+  curRes=hit.name;
+  _editVital=_editEx=_editBath=_editCare=null;
+  renderResidentTabs();
+  refreshDetailResidentSelect();
+  const panel=document.getElementById('detPanel');
+  if(animDir==='left'||animDir==='right'){
+    if(panel){
+      panel.classList.add(animDir==='left'?'swiping-left':'swiping-right');
+      setTimeout(()=>{
+        refreshPanel(curTab);
+        panel.classList.remove('swiping-left','swiping-right');
+      },160);
+    }else{
+      refreshPanel(curTab);
+    }
+  }else{
+    refreshPanel(curTab);
+  }
+}
+
+function refreshDetailResidentSelect(){
+  const sel=document.getElementById('detResSelect');
+  if(!sel) return;
+  const list=getResidentsForCurrentDate();
   sel.innerHTML=list.map(r=>
     `<option value="${escapeAttr(r.name)}">${escapeHtml(r.name||'')}</option>`
   ).join('');
@@ -5205,25 +5308,107 @@ function refreshDetailResidentSelect(){
 }
 function onDetResSelectChange(el){
   const v=el&&el.value;
-  if(v) switchDetailResident(v);
+  if(v) switchToResident(v,null);
 }
 function switchDetailResident(name){
-  const nm=String(name||'').trim();
-  if(!nm||normalizeResidentName(nm)===normalizeResidentName(curRes)) return;
-  const dayIdx=curDate.getDate()-1;
-  const list=residentsOnDaySorted(dayIdx,{forMainTable:true});
-  const hit=list.find(r=>normalizeResidentName(r.name)===normalizeResidentName(nm));
-  curRes=hit?hit.name:nm;
-  _editVital=_editEx=_editBath=_editCare=null;
+  switchToResident(name,null);
+}
+
+function isDetailScreenOpen(){
+  const el=document.getElementById('detailScreen');
+  return !!(el&&el.classList.contains('active'));
+}
+
+/** 詳細表示中に日付が変わったとき：在籍フォールバック・タブ再描画 */
+function onDetailDateChanged(){
+  if(!isDetailScreenOpen()) return;
+  const residents=getResidentsForCurrentDate();
+  const stillThere=residents.find(r=>normalizeResidentName(r.name)===normalizeResidentName(curRes));
+  if(!stillThere){
+    const oldShort=String(curRes||'').split(/\s+/)[0]||curRes||'';
+    if(residents.length>0){
+      const newName=residents[0].name;
+      const newShort=String(newName||'').split(/\s+/)[0]||newName;
+      showBriefToast(oldShort+'さんは不在 → '+newShort+'さんに切替',2500,false);
+      curRes=newName;
+      _editVital=_editEx=_editBath=_editCare=null;
+    }else{
+      showBriefToast('この日は在籍者がいません',2500,false);
+      goBack();
+      return;
+    }
+  }
+  renderResidentTabs();
   refreshDetailResidentSelect();
   refreshPanel(curTab);
 }
+
+function setupSwipeOnPanel(){
+  const panel=document.getElementById('detPanel');
+  if(!panel||panel._swipeSetup) return;
+  panel._swipeSetup=true;
+  let touchStart=null;
+  let isHorizontalSwipe=false;
+  let startX=0;
+  panel.addEventListener('touchstart',function(e){
+    if(!e.touches||e.touches.length!==1) return;
+    const t=e.touches[0];
+    startX=t.clientX;
+    touchStart={x:t.clientX,y:t.clientY,time:Date.now()};
+    isHorizontalSwipe=false;
+  },{passive:true});
+  panel.addEventListener('touchmove',function(e){
+    if(!touchStart||!e.touches||e.touches.length!==1) return;
+    const t=e.touches[0];
+    const dx=t.clientX-touchStart.x;
+    const dy=t.clientY-touchStart.y;
+    if(!isHorizontalSwipe&&Math.abs(dx)>10&&Math.abs(dx)>Math.abs(dy)*1.5){
+      isHorizontalSwipe=true;
+    }
+    if(isHorizontalSwipe){
+      try{e.preventDefault();}catch(_){}
+    }
+  },{passive:false});
+  panel.addEventListener('touchend',function(e){
+    if(!touchStart) return;
+    const t=e.changedTouches[0];
+    const dx=t.clientX-touchStart.x;
+    const dy=t.clientY-touchStart.y;
+    const dt=Date.now()-touchStart.time;
+    const sX=startX;
+    touchStart=null;
+    isHorizontalSwipe=false;
+    if(Math.abs(dx)<50) return;
+    if(Math.abs(dx)<Math.abs(dy)*1.2) return;
+    if(dt>1000) return;
+    if(sX<20) return;
+    const residents=getResidentsForCurrentDate();
+    const idx=residents.findIndex(r=>normalizeResidentName(r.name)===normalizeResidentName(curRes));
+    if(idx===-1) return;
+    if(dx<0){
+      if(idx>=residents.length-1){
+        showBriefToast('最後の利用者です',2000,false);
+      }else{
+        switchToResident(residents[idx+1].name,'left');
+      }
+    }else{
+      if(idx<=0){
+        showBriefToast('最初の利用者です',2000,false);
+      }else{
+        switchToResident(residents[idx-1].name,'right');
+      }
+    }
+  },{passive:true});
+}
+
 function openDetail(name, tab){
   curRes=name;
   curTab=tab||'vital';
   renderDate();
   renderTabs();
   refreshDetailResidentSelect();
+  renderResidentTabs();
+  setupSwipeOnPanel();
   showPanel(curTab);
   showScreen('detailScreen');
 }
