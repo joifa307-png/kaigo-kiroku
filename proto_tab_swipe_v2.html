@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>利用者タブ・スワイプ プロト v2</title>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; padding: 0; background: #f5f5f0; font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Yu Gothic", sans-serif; color: #2c2c2a; overscroll-behavior-x: none; }
+
+  .header { background: #ffffff; border-bottom: 0.5px solid #d3d1c7; padding: 12px 16px; position: sticky; top: 0; z-index: 100; }
+  .header-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+  .header-left { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; }
+  .back-btn { background: transparent; border: none; font-size: 22px; color: #534ab7; cursor: pointer; padding: 4px 8px; }
+  .header-title { font-size: 15px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .resident-dropdown { font-size: 13px; padding: 6px 8px; border: 0.5px solid #b4b2a9; border-radius: 6px; background: #fff; max-width: 130px; }
+  .date-bar { display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
+  .date-btn { font-size: 12px; padding: 6px 10px; border: 0.5px solid #b4b2a9; border-radius: 6px; background: #fff; cursor: pointer; }
+  .date-btn.active { background: #534ab7; color: #fff; border-color: #534ab7; }
+
+  .record-tabs { display: flex; gap: 0; overflow-x: auto; background: #fff; border-bottom: 0.5px solid #d3d1c7; padding: 0; -webkit-overflow-scrolling: touch; }
+  .record-tabs::-webkit-scrollbar { display: none; }
+  .record-tab { flex: none; padding: 12px 14px; font-size: 13px; color: #5f5e5a; cursor: pointer; border-bottom: 2px solid transparent; white-space: nowrap; }
+  .record-tab.active { color: #534ab7; border-bottom-color: #534ab7; font-weight: 500; }
+
+  .resident-tabs-wrap { background: #eeedfe; border-bottom: 0.5px solid #cecbf6; }
+  .resident-tabs { display: flex; gap: 6px; overflow-x: auto; padding: 8px 12px; -webkit-overflow-scrolling: touch; }
+  .resident-tabs::-webkit-scrollbar { display: none; }
+  .resident-tab { flex: none; padding: 7px 14px; font-size: 13px; background: #fff; border: 0.5px solid #cecbf6; border-radius: 14px; color: #3c3489; cursor: pointer; white-space: nowrap; }
+  .resident-tab.active { background: #534ab7; color: #fff; border-color: #534ab7; font-weight: 500; }
+
+  .content-area { padding: 0; touch-action: pan-y; position: relative; min-height: 60vh; background: #fff; }
+  .content-inner { padding: 20px 16px; transition: transform 0.2s ease-out, opacity 0.18s ease-out; }
+  .content-inner.swiping-left { transform: translateX(-30px); opacity: 0; }
+  .content-inner.swiping-right { transform: translateX(30px); opacity: 0; }
+
+  .panel-title { font-size: 18px; font-weight: 500; margin: 0 0 14px; color: #2c2c2a; }
+  .panel-body { background: #f1efe8; border-radius: 8px; padding: 16px; font-size: 14px; line-height: 1.7; color: #444441; min-height: 240px; }
+  .panel-body p { margin: 0 0 10px; }
+
+  .toast { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(44,44,42,0.92); color: #fff; font-size: 13px; padding: 10px 20px; border-radius: 8px; opacity: 0; transition: opacity 0.25s; pointer-events: none; z-index: 300; }
+  .toast.show { opacity: 1; }
+
+  .errbox { background:#fee; color:#900; padding:14px; margin:10px; border:1px solid #f99; border-radius:6px; font-size:12px; white-space:pre-wrap; word-break:break-all; }
+</style>
+</head>
+<body>
+
+<div id="errArea"></div>
+
+<div class="header">
+  <div class="header-row">
+    <div class="header-left">
+      <button class="back-btn" id="backBtn">&lsaquo;</button>
+      <span class="header-title" id="headerTitle">利用者詳細</span>
+    </div>
+    <select class="resident-dropdown" id="residentDropdown"></select>
+  </div>
+  <div class="date-bar" id="dateBar"></div>
+</div>
+
+<div class="record-tabs" id="recordTabs"></div>
+
+<div class="resident-tabs-wrap">
+  <div class="resident-tabs" id="residentTabs"></div>
+</div>
+
+<div class="content-area" id="contentArea">
+  <div class="content-inner" id="contentInner">
+    <h2 class="panel-title" id="panelTitle">読み込み中…</h2>
+    <div class="panel-body" id="panelBody">―</div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// グローバルエラーを画面に出す（iPad で何が起きてるか見えるように）
+window.addEventListener('error', function(ev) {
+  var box = document.createElement('div');
+  box.className = 'errbox';
+  box.textContent = '[ERROR] ' + (ev.message || '不明') + '\n  at ' + (ev.filename || '') + ':' + (ev.lineno || '') + ':' + (ev.colno || '');
+  document.getElementById('errArea').appendChild(box);
+});
+
+/* ===== 仮データ ===== */
+var RECORD_TABS = [
+  {id:'notes',     label:'申送り'},
+  {id:'vital',     label:'バイタル'},
+  {id:'excretion', label:'排泄'},
+  {id:'bath',      label:'入浴'},
+  {id:'med',       label:'服薬'},
+  {id:'meal',      label:'食事'},
+  {id:'rec',       label:'レク'},
+  {id:'day',       label:'1日の様子'},
+  {id:'care',      label:'ケア記録'},
+  {id:'santei',    label:'算定'},
+  {id:'summary',   label:'サマリー'}
+];
+
+var ALL_RESIDENTS = [
+  {name:'相田 一郎', kana:'あいだ'},
+  {name:'井上 二美', kana:'いのうえ'},
+  {name:'上野 三郎', kana:'うえの'},
+  {name:'江口 四子', kana:'えぐち'},
+  {name:'大野 五郎', kana:'おおの'},
+  {name:'柏木 六美', kana:'かしわぎ'},
+  {name:'木村 七郎', kana:'きむら'}
+];
+
+var DATE_PRESETS = [
+  {date:'12/1', label:'12/1（全員）',           members: ['相田 一郎','井上 二美','上野 三郎','江口 四子','大野 五郎']},
+  {date:'12/2', label:'12/2（井上さん退所）',     members: ['相田 一郎','上野 三郎','江口 四子','大野 五郎']},
+  {date:'12/3', label:'12/3（柏木さん入所）',     members: ['相田 一郎','上野 三郎','江口 四子','大野 五郎','柏木 六美']},
+  {date:'12/4', label:'12/4（木村さんも追加）',   members: ['相田 一郎','上野 三郎','江口 四子','大野 五郎','柏木 六美','木村 七郎']}
+];
+
+/* ===== 状態 ===== */
+var state = {
+  date: '12/1',
+  tab: 'summary',
+  resident: '相田 一郎'
+};
+
+/* ===== ユーティリティ ===== */
+function getCurrentMembers() {
+  var preset = null;
+  for (var i = 0; i < DATE_PRESETS.length; i++) {
+    if (DATE_PRESETS[i].date === state.date) { preset = DATE_PRESETS[i]; break; }
+  }
+  if (!preset) return [];
+  var arr = preset.members.slice();
+  arr.sort(function(a, b) {
+    var ka = '', kb = '';
+    for (var i = 0; i < ALL_RESIDENTS.length; i++) {
+      if (ALL_RESIDENTS[i].name === a) ka = ALL_RESIDENTS[i].kana;
+      if (ALL_RESIDENTS[i].name === b) kb = ALL_RESIDENTS[i].kana;
+    }
+    return ka < kb ? -1 : (ka > kb ? 1 : 0);
+  });
+  return arr;
+}
+
+function findRecordTab(id) {
+  for (var i = 0; i < RECORD_TABS.length; i++) {
+    if (RECORD_TABS[i].id === id) return RECORD_TABS[i];
+  }
+  return null;
+}
+
+function showToast(msg) {
+  var el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  if (showToast._t) clearTimeout(showToast._t);
+  showToast._t = setTimeout(function() { el.classList.remove('show'); }, 1400);
+}
+
+/* ===== レンダリング ===== */
+function renderDateBar() {
+  var el = document.getElementById('dateBar');
+  var html = '';
+  for (var i = 0; i < DATE_PRESETS.length; i++) {
+    var d = DATE_PRESETS[i];
+    var active = (d.date === state.date) ? ' active' : '';
+    html += '<button class="date-btn' + active + '" data-date="' + d.date + '">' + d.label + '</button>';
+  }
+  el.innerHTML = html;
+  // 委譲ハンドラ
+  var btns = el.querySelectorAll('.date-btn');
+  for (var j = 0; j < btns.length; j++) {
+    btns[j].addEventListener('click', function() { switchDate(this.getAttribute('data-date')); });
+  }
+}
+
+function renderRecordTabs() {
+  var el = document.getElementById('recordTabs');
+  var html = '';
+  for (var i = 0; i < RECORD_TABS.length; i++) {
+    var t = RECORD_TABS[i];
+    var active = (t.id === state.tab) ? ' active' : '';
+    html += '<div class="record-tab' + active + '" data-tab="' + t.id + '">' + t.label + '</div>';
+  }
+  el.innerHTML = html;
+  var items = el.querySelectorAll('.record-tab');
+  for (var j = 0; j < items.length; j++) {
+    items[j].addEventListener('click', function() { switchTab(this.getAttribute('data-tab')); });
+  }
+}
+
+function renderResidentTabs() {
+  var el = document.getElementById('residentTabs');
+  var members = getCurrentMembers();
+  var html = '';
+  for (var i = 0; i < members.length; i++) {
+    var name = members[i];
+    var short = name.split(' ')[0];
+    var active = (name === state.resident) ? ' active' : '';
+    html += '<div class="resident-tab' + active + '" data-name="' + name + '">' + short + '</div>';
+  }
+  el.innerHTML = html;
+  var items = el.querySelectorAll('.resident-tab');
+  for (var j = 0; j < items.length; j++) {
+    items[j].addEventListener('click', function() { switchResident(this.getAttribute('data-name'), null); });
+  }
+  // アクティブを画面内に
+  setTimeout(function() {
+    var active = el.querySelector('.resident-tab.active');
+    if (active && active.scrollIntoView) {
+      try { active.scrollIntoView({ behavior:'smooth', inline:'center', block:'nearest' }); } catch(e) {}
+    }
+  }, 50);
+}
+
+function renderDropdown() {
+  var el = document.getElementById('residentDropdown');
+  var members = getCurrentMembers();
+  var html = '';
+  for (var i = 0; i < members.length; i++) {
+    var name = members[i];
+    var sel = (name === state.resident) ? ' selected' : '';
+    html += '<option value="' + name + '"' + sel + '>' + name + '</option>';
+  }
+  el.innerHTML = html;
+}
+
+function doRenderContent() {
+  var tab = findRecordTab(state.tab);
+  var tabLabel = tab ? tab.label : '―';
+  document.getElementById('panelTitle').textContent = state.resident + ' さんの ' + tabLabel;
+  document.getElementById('panelBody').innerHTML =
+    '<p><strong>' + state.date + '</strong> の記録</p>' +
+    '<p>ここに「' + tabLabel + '」の中身が表示されます。</p>' +
+    '<p style="color:#888;">（プロト用ダミー：本番ではこの利用者・この日付・このタブの記録データを描画）</p>';
+  document.getElementById('headerTitle').textContent = state.resident + ' 詳細';
+}
+
+function renderContent(animDir) {
+  var inner = document.getElementById('contentInner');
+  if (animDir === 'left' || animDir === 'right') {
+    inner.classList.add(animDir === 'left' ? 'swiping-left' : 'swiping-right');
+    setTimeout(function() {
+      doRenderContent();
+      inner.classList.remove('swiping-left');
+      inner.classList.remove('swiping-right');
+    }, 160);
+  } else {
+    doRenderContent();
+  }
+}
+
+/* ===== 状態変更 ===== */
+function switchDate(date) {
+  state.date = date;
+  var members = getCurrentMembers();
+  var inList = false;
+  for (var i = 0; i < members.length; i++) {
+    if (members[i] === state.resident) { inList = true; break; }
+  }
+  if (!inList) {
+    var oldName = state.resident;
+    state.resident = members[0] || '';
+    showToast(oldName.split(' ')[0] + 'さんは不在 → ' + (state.resident ? state.resident.split(' ')[0] + 'さんに切替' : '在籍者なし'));
+  }
+  renderDateBar();
+  renderResidentTabs();
+  renderDropdown();
+  renderContent(null);
+}
+
+function switchTab(tabId) {
+  state.tab = tabId;
+  renderRecordTabs();
+  renderContent(null);
+}
+
+function switchResident(name, animDir) {
+  if (name === state.resident) return;
+  var members = getCurrentMembers();
+  var ok = false;
+  for (var i = 0; i < members.length; i++) {
+    if (members[i] === name) { ok = true; break; }
+  }
+  if (!ok) return;
+  state.resident = name;
+  renderResidentTabs();
+  renderDropdown();
+  renderContent(animDir);
+}
+
+/* ===== ハンドラ登録 ===== */
+document.getElementById('backBtn').addEventListener('click', function() {
+  alert('（プロト：本番ではメイン画面に戻る）');
+});
+document.getElementById('residentDropdown').addEventListener('change', function() {
+  switchResident(this.value, null);
+});
+
+/* ===== スワイプ ===== */
+var contentArea = document.getElementById('contentArea');
+var touchStart = null;
+var isHorizontalSwipe = false;
+var startX = 0;
+
+contentArea.addEventListener('touchstart', function(e) {
+  if (!e.touches || e.touches.length !== 1) return;
+  var t = e.touches[0];
+  startX = t.clientX;
+  touchStart = { x: t.clientX, y: t.clientY, time: Date.now() };
+  isHorizontalSwipe = false;
+}, { passive: true });
+
+contentArea.addEventListener('touchmove', function(e) {
+  if (!touchStart || !e.touches || e.touches.length !== 1) return;
+  var t = e.touches[0];
+  var dx = t.clientX - touchStart.x;
+  var dy = t.clientY - touchStart.y;
+  if (!isHorizontalSwipe && Math.abs(dx) > 10 && Math.abs(dx) > Math.abs(dy) * 1.5) {
+    isHorizontalSwipe = true;
+  }
+  if (isHorizontalSwipe) {
+    try { e.preventDefault(); } catch(ex) {}
+  }
+}, { passive: false });
+
+contentArea.addEventListener('touchend', function(e) {
+  if (!touchStart) return;
+  var t = e.changedTouches[0];
+  var dx = t.clientX - touchStart.x;
+  var dy = t.clientY - touchStart.y;
+  var dt = Date.now() - touchStart.time;
+  var sX = startX;
+  touchStart = null;
+
+  if (Math.abs(dx) < 50) return;
+  if (Math.abs(dx) < Math.abs(dy) * 1.2) return;
+  if (dt > 1000) return;
+  if (sX < 20) return; // iOS 戻る操作と干渉防止
+
+  var members = getCurrentMembers();
+  var idx = -1;
+  for (var i = 0; i < members.length; i++) {
+    if (members[i] === state.resident) { idx = i; break; }
+  }
+  if (idx === -1) return;
+
+  if (dx < 0) {
+    if (idx >= members.length - 1) {
+      showToast('最後の利用者です');
+    } else {
+      switchResident(members[idx + 1], 'left');
+    }
+  } else {
+    if (idx <= 0) {
+      showToast('最初の利用者です');
+    } else {
+      switchResident(members[idx - 1], 'right');
+    }
+  }
+}, { passive: true });
+
+/* ===== 初期化 ===== */
+try {
+  renderDateBar();
+  renderRecordTabs();
+  renderResidentTabs();
+  renderDropdown();
+  renderContent(null);
+} catch (err) {
+  var box = document.createElement('div');
+  box.className = 'errbox';
+  box.textContent = '[INIT ERROR] ' + err.message + '\n' + (err.stack || '');
+  document.getElementById('errArea').appendChild(box);
+}
+</script>
+
+</body>
+</html>
