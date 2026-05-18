@@ -1559,7 +1559,7 @@ const REC = {
 const N_RECORD_COLS = 57;
 
 /** デプロイのたびに上げる（設定→データ管理の「アプリ情報」で表示） */
-const APP_VERSION='1.2.26';
+const APP_VERSION='1.2.27';
 function isStandaloneWebApp(){
   try{
     if(window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches) return true;
@@ -6007,26 +6007,42 @@ const LW_BOT_ID      = '12222649';
 // テスト：山口さん個人に送信
 // const LW_TEST_USER_ID = 'yamaguchi.hoyichicorporation@works-8846';
 
-/** LINE WORKS Bot でケア内容をGAS経由で送信 */
+/** LINE WORKS Bot でケア・申送りを在庫管理GAS（action: kaigo_lw）経由で送信 */
 async function sendLwCareMessage(content, residentName, time){
-  const url = zaikoGasUrl();
-  if(!url){ alert('在庫管理GAS URLが設定されていません。\n設定画面で在庫管理GAS URLを入力してください。'); return; }
+  const url=zaikoGasUrl();
+  if(!url){
+    alert('LINEWORKS送信には「設定 › 在庫管理GAS URL」が必要です。\n（介護記録の同期GAS URLとは別です）');
+    return false;
+  }
+  const body={
+    token:    zaikoGasToken(),
+    action:   'kaigo_lw',
+    unit:     FAC ? FAC.storageKey : 'kaigo_nishi',
+    resident: residentName || '',
+    time:     time || '',
+    content:  String(content||'').trim()
+  };
   try{
-    await fetch(url, {
-      method: 'POST',
-      mode:   'no-cors',
-      body: JSON.stringify({
-        token:    'KAIGO_ZAIKO_2025',
-        action:   'kaigo_lw',
-        unit:     FAC ? FAC.storageKey : 'kaigo_nishi',
-        resident: residentName || '',
-        time:     time || '',
-        content:  content
-      })
+    const r=await fetch(url,{
+      method:'POST',
+      headers:{'Content-Type':'text/plain'},
+      body:JSON.stringify(body)
     });
+    const t=await r.text();
+    let j=null;
+    try{ j=JSON.parse(t); }catch(_){}
+    if(!r.ok){
+      throw new Error('HTTP '+r.status+(t?': '+t.slice(0,120):''));
+    }
+    if(j&&j.ok===false){
+      throw new Error(j.error||j.message||'GAS応答エラー');
+    }
+    showBriefToast('LINE WORKSへ送信しました',2200,false);
+    return true;
   }catch(e){
-    console.error('[LW送信エラー]', e);
-    alert('LINEWORKSへの送信に失敗しました。\n'+e.message);
+    console.error('[LW送信エラー]', e, body);
+    alert('LINE WORKSへの送信に失敗しました。\n'+e.message+'\n\n設定の「在庫管理GAS URL」が②在庫・LINEWORKS用デプロイか、トークンが一致しているか確認してください。');
+    return false;
   }
 }
 let _editCare=null;
@@ -8650,7 +8666,7 @@ function buildDataSettings(){
     </div>
     <div class="panel-sec">
       <h3>📦 在庫管理アプリ連携</h3>
-      <p style="font-size:14px;color:var(--text2);margin-bottom:10px;">記録保存時に、今週の消費数（西ユニット）を在庫管理GASへ送信します。</p>
+      <p style="font-size:14px;color:var(--text2);margin-bottom:10px;">在庫の週次送信に加え、ケア記録・申送りの「LINE WORKSで共有」もこのGAS（action: <code>kaigo_lw</code>）経由です。介護記録の同期GAS URLとは別デプロイを指定してください。</p>
       <div class="fg"><label>在庫管理GAS URL</label><input type="url" id="kaigo-zaiko-gas-url" value="${zUrlEsc}" placeholder="https://script.google.com/macros/s/.../exec" autocomplete="off"></div>
       <div class="fg"><label>在庫管理トークン</label><input type="password" id="kaigo-zaiko-gas-token" value="${zTokEsc}" placeholder="KAIGO_ZAIKO_2025" autocomplete="off"></div>
       <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;">
