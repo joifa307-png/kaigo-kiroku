@@ -1559,7 +1559,7 @@ const REC = {
 const N_RECORD_COLS = 57;
 
 /** デプロイのたびに上げる（設定→データ管理の「アプリ情報」で表示） */
-const APP_VERSION='1.2.27';
+const APP_VERSION='1.2.28';
 function isStandaloneWebApp(){
   try{
     if(window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches) return true;
@@ -6738,7 +6738,8 @@ function delDayRecord(dkStr){
 }
 
 // ========== サマリー ==========
-function buildResidentDailySummaryRows(name, dateKey){
+function buildResidentDailySummaryRows(name, dateKey, opts){
+  opts=opts||{};
   const rec=getRec(name,dateKey);
   const rows=[];
   const push=(t,cat,body,staff='')=>{
@@ -6774,37 +6775,37 @@ function buildResidentDailySummaryRows(name, dateKey){
   (rec.bath||[]).forEach(b=>push(b.time,'入浴',b.type||'',b.staff||''));
   (rec.care||[]).forEach(c=>push(c.time,'ケア記録',getCareContentText(c),c.staff||''));
   (rec.notes||[]).filter(n=>!n._deleted).forEach(n=>push(n.time||'','申送り',n.content||'',n.writer||''));
-  if(rec.rec&&String(rec.rec.content||'').trim()){
-    push(rec.rec.time||'','レク',String(rec.rec.content||'').trim(),rec.rec.staff||'');
+  const recBody=getRecSummaryText(rec.rec);
+  if(recBody){
+    push(rec.rec.time||'15:00','レク',recBody,rec.rec.staff||'');
   }
-  if(String(rec.day||'').trim()){
+  if(!opts.excludeDayRow&&String(rec.day||'').trim()){
     push('', '1日の様子', String(rec.day||'').trim(), rec.dayWriter||'');
   }
   const m=rec.meal||{};
-  const hasMeal=(k)=>m[k]!=null&&String(m[k]).trim()!=='';
-  const isDayRes=isDayServiceByName(name);
-  if((!isDayRes||mealSectionExplicitlyRecorded(m,'breakfast')) && (hasMeal('bMain')||hasMeal('bSide')||hasMeal('bWater'))){
+  if(shouldShowMealSection(m,'breakfast',name)&&mealSectionExplicitlyRecorded(m,'breakfast')){
     const parts=[];
-    if(hasMeal('bMain')) parts.push('主食:'+m.bMain+'%');
-    if(hasMeal('bSide')) parts.push('副食:'+m.bSide+'%');
-    if(hasMeal('bWater')) parts.push('水分:'+m.bWater+'ml');
-    push(m.bTime||'07:30','朝食',parts.join('、'),'');
+    if(m.bMain!=null&&String(m.bMain).trim()!=='') parts.push('主食:'+m.bMain+'%');
+    if(m.bSide!=null&&String(m.bSide).trim()!=='') parts.push('副食:'+m.bSide+'%');
+    if(String(m.bWater||'').trim()) parts.push('水分:'+m.bWater+'ml');
+    if(parts.length) push(m.bTime||'07:30','朝食',parts.join('、'),'');
   }
-  if(hasMeal('main')||hasMeal('side')||hasMeal('water')||hasMeal('menu')||hasMeal('snack')){
+  if(shouldShowMealSection(m,'lunch',name)&&mealSectionExplicitlyRecorded(m,'lunch')){
     const parts=[];
-    if(hasMeal('main')) parts.push('主食:'+m.main+'%');
-    if(hasMeal('side')) parts.push('副食:'+m.side+'%');
-    if(hasMeal('water')) parts.push('水分:'+m.water+'ml');
-    if(hasMeal('menu')) parts.push('メニュー:'+m.menu);
-    if(hasMeal('snack')) parts.push('おやつ:'+m.snack);
-    push(m.time||'11:50','昼食',parts.join('、'),'');
+    if(m.main!=null&&String(m.main).trim()!=='') parts.push('主食:'+m.main+'%');
+    if(m.side!=null&&String(m.side).trim()!=='') parts.push('副食:'+m.side+'%');
+    if(String(m.water||'').trim()) parts.push('水分:'+m.water+'ml');
+    if(String(normalizeMealFreeText(m.menu)||'').trim()) parts.push('メニュー:'+normalizeMealFreeText(m.menu));
+    const snackTxt=String(normalizeMealFreeText(m.snack)||'').trim();
+    if(snackTxt) parts.push('おやつ:'+snackTxt);
+    if(parts.length) push(m.time||'11:50','昼食',parts.join('、'),'');
   }
-  if((!isDayRes||mealSectionExplicitlyRecorded(m,'dinner')) && (hasMeal('dMain')||hasMeal('dSide')||hasMeal('dWater'))){
+  if(shouldShowMealSection(m,'dinner',name)&&mealSectionExplicitlyRecorded(m,'dinner')){
     const parts=[];
-    if(hasMeal('dMain')) parts.push('主食:'+m.dMain+'%');
-    if(hasMeal('dSide')) parts.push('副食:'+m.dSide+'%');
-    if(hasMeal('dWater')) parts.push('水分:'+m.dWater+'ml');
-    push(m.dTime||'17:30','夕食',parts.join('、'),'');
+    if(m.dMain!=null&&String(m.dMain).trim()!=='') parts.push('主食:'+m.dMain+'%');
+    if(m.dSide!=null&&String(m.dSide).trim()!=='') parts.push('副食:'+m.dSide+'%');
+    if(String(m.dWater||'').trim()) parts.push('水分:'+m.dWater+'ml');
+    if(parts.length) push(m.dTime||'17:30','夕食',parts.join('、'),'');
   }
   MED_TIMINGS.forEach(t=>{
     const md=(rec.med&&rec.med[t.id])||{};
@@ -9085,6 +9086,19 @@ function getCareContentText(c){
     ''
   )).trim();
 }
+/** レク記録の表示用テキスト（チップのみ・見学のみでも返す） */
+function getRecSummaryText(rc){
+  if(!rc) return '';
+  const lines=[];
+  const chips=(rc.chips||[]).filter(Boolean);
+  if(chips.length) lines.push(chips.join('　'));
+  const part=String(rc.part||'').trim();
+  if(part) lines.push(part);
+  const txt=String(rc.content||'').trim();
+  if(txt) lines.push(txt);
+  if(rc.kanken) lines.push('（見学）');
+  return lines.join('\n').trim();
+}
 
 function printVitalRange(){
   const from=document.getElementById('printVitalFrom').value;
@@ -9371,8 +9385,7 @@ function buildPrintPages(sel, dateKey){
   const dateLabel=d.getFullYear()+'年'+(d.getMonth()+1)+'月'+d.getDate()+'日（'+days[d.getDay()]+'）';
   let pages='';
   sel.forEach((name,pidx)=>{
-    const rows=buildResidentDailySummaryRows(name,dkUse);
-    rows.sort((a,b)=>a.t&&b.t?a.t.localeCompare(b.t):a.t?-1:1);
+    const rows=buildResidentDailySummaryRows(name,dkUse,{excludeDayRow:true});
     const trs=rows.map(rr=>'<tr><td>'+escapeHtml(rr.t)+'</td><td>'+escapeHtml(rr.cat)+'</td><td>'+escapeHtml(rr.body)+'</td></tr>').join('')
       ||'<tr><td colspan="3" style="text-align:center;color:#999;">記録なし</td></tr>';
     const rec=getRec(name,dkUse);
