@@ -372,6 +372,11 @@ input,select,textarea{font-family:inherit;font-size:30px;}
   border-radius:var(--r1);background:none;cursor:pointer;white-space:nowrap;}
 .hist-edit{color:var(--blue);font-size:18px;padding:4px 10px;border:1px solid var(--blue);
   border-radius:var(--r1);background:none;cursor:pointer;white-space:nowrap;margin-right:2px;}
+.lw-sent-badge{
+  display:inline-block;margin-left:4px;
+  color:#06C755;font-weight:700;font-size:16px;
+  vertical-align:middle;
+}
 .hist-day{font-size:14px;color:var(--orange2);font-weight:600;margin:6px 0 2px;}
 
 /* ===== オーバーレイ ===== */
@@ -1559,7 +1564,7 @@ const REC = {
 const N_RECORD_COLS = 57;
 
 /** デプロイのたびに上げる（設定→データ管理の「アプリ情報」で表示） */
-const APP_VERSION='1.2.28';
+const APP_VERSION='1.2.29';
 function isStandaloneWebApp(){
   try{
     if(window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches) return true;
@@ -5948,7 +5953,7 @@ function buildCarePanel(){
   const S=db.settings||{};
   const careOpts=(S.careItems||[]).map(o=>`<div class="chip" onclick="toggleChip(this,'${o}')">${o}</div>`).join('');
   const histRow=(c)=>`<div class="hist-item">
-    <div class="hist-time">${recDayLabel(c._dk)} ${normalizeTimeText(c.time)}</div>
+    <div class="hist-time">${recDayLabel(c._dk)} ${normalizeTimeText(c.time)}${lwSentBadgeHtml(c)}</div>
     <div class="hist-content">${c.content||''}</div>
     <button class="hist-edit" onclick="editCare('${c._dk}',${c._i})">編集</button>
     <button class="hist-del" onclick="delCare('${c._dk}',${c._i})">削除</button>
@@ -6006,6 +6011,18 @@ const LW_BOT_ID      = '12222649';
 // const LW_CHANNEL_ID  = '6309ae4b-7564-d103-c98e-f5394142157b';
 // テスト：山口さん個人に送信
 // const LW_TEST_USER_ID = 'yamaguchi.hoyichicorporation@works-8846';
+
+/** LINE WORKS送信済み表示（申送り・ケア記録の履歴用） */
+function lwSentBadgeHtml(item){
+  if(!item||!item.lwSent) return '';
+  return '<span class="lw-sent-badge" title="LINE WORKSへ送信済">【LW】</span>';
+}
+function markRecordLwSent(rec){
+  if(!rec) return;
+  rec.lwSent=true;
+  rec.lwSentAt=Date.now();
+  saveDB();
+}
 
 /** LINE WORKS Bot でケア・申送りを在庫管理GAS（action: kaigo_lw）経由で送信 */
 async function sendLwCareMessage(content, residentName, time){
@@ -6071,10 +6088,12 @@ function saveCare(){
   const forwardToNotes=!!document.getElementById('caForwardChip')?.classList.contains('selected');
   const shareToLw=!!document.getElementById('caLwChip')?.classList.contains('selected');
   if(!content){ alert('内容を入力してください'); return; }
+  let lwTarget=null;
   if(_editCare){
     const r=getRec(curRes,_editCare.dkStr);
     const prev=r.care[_editCare.idx]||{};
     r.care[_editCare.idx]={...prev,time,content,staff,forwardToNotes,sheetU:Date.now()};
+    lwTarget=r.care[_editCare.idx];
     if(forwardToNotes){
       const noteId=prev.forwardNoteId||genId('n');
       const notePayload={id:noteId,time,writer:staff,content,ts:new Date().toISOString(),_deleted:false,sheetU:Date.now()};
@@ -6096,9 +6115,13 @@ function saveCare(){
       item.forwardNoteId=noteId;
     }
     r.care.push(item);
+    lwTarget=item;
   }
-  saveDB(); showSavedToast(); goBack();
-  if(shareToLw){ sendLwCareMessage(content, curRes, time); }
+  saveDB(); showSavedToast();
+  if(shareToLw&&lwTarget){
+    sendLwCareMessage(content,curRes,time).then(ok=>{ if(ok) markRecordLwSent(lwTarget); });
+  }
+  goBack();
 }
 function delCare(dkStr,idx){
   if(!confirm('削除しますか？')) return;
@@ -6562,7 +6585,7 @@ let _editNote=null;
 function buildNotesPanel(){
   const hist=get48h(curRes,'notes');
   const histHtml=hist.length?hist.map(n=>`<div class="hist-item">
-    <div class="hist-time">${recDayLabel(n._dk)} ${normalizeTimeText(n.time)}</div>
+    <div class="hist-time">${recDayLabel(n._dk)} ${normalizeTimeText(n.time)}${lwSentBadgeHtml(n)}</div>
     <div class="hist-content">${n.content}${n.writer?`<br><span class="text-gray">${n.writer}</span>`:''}</div>
     <button class="hist-edit" onclick="editNote('${n._dk}',${n._i})">編集</button>
     <button class="hist-del" onclick="delNote('${n._dk}',${n._i})">削除</button>
@@ -6604,18 +6627,30 @@ function saveNote(){
   const content=document.getElementById('ntContent').value.trim();
   if(!content){ alert('内容を入力してください'); return; }
   const shareToLw=!_editNote&&!!document.getElementById('ntLwChip')?.classList.contains('selected');
+  let lwTarget=null;
   if(_editNote){
     const r=getRec(curRes,_editNote.dkStr);
     const n=r.notes[_editNote.idx];
     if(n){
       r.notes[_editNote.idx]={...n,time,writer,content,sheetU:Date.now()};
+      lwTarget=r.notes[_editNote.idx];
     }
     _editNote=null;
   }else{
-    getRec(curRes).notes.push({id:genId('n'),time,writer,content,ts:new Date().toISOString(),_deleted:false,sheetU:Date.now()});
+    const r=getRec(curRes);
+    const n={id:genId('n'),time,writer,content,ts:new Date().toISOString(),_deleted:false,sheetU:Date.now()};
+    r.notes.push(n);
+    lwTarget=n;
   }
-  saveDB(); showSavedToast(); refreshPanel('notes');
-  if(shareToLw){ sendLwCareMessage(content, curRes, time); }
+  saveDB(); showSavedToast();
+  if(shareToLw&&lwTarget){
+    sendLwCareMessage(content,curRes,time).then(ok=>{
+      if(ok) markRecordLwSent(lwTarget);
+      refreshPanel('notes');
+    });
+  }else{
+    refreshPanel('notes');
+  }
 }
 function delNote(dkStr,idx){
   if(!confirm('削除しますか？')) return;
