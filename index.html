@@ -581,6 +581,35 @@ input,select,textarea{font-family:inherit;font-size:30px;}
   cursor:pointer;
   padding:0;
 }
+.print-photo-thumb{
+  position:relative;
+  width:60px;
+  height:60px;
+  border:1px solid #ccc;
+  border-radius:4px;
+  overflow:hidden;
+}
+.print-photo-thumb img{
+  width:100%;
+  height:100%;
+  object-fit:cover;
+  display:block;
+}
+.print-photo-del{
+  position:absolute;
+  top:1px;
+  right:1px;
+  width:18px;
+  height:18px;
+  background:rgba(0,0,0,0.6);
+  color:#fff;
+  border:none;
+  border-radius:50%;
+  font-size:12px;
+  line-height:1;
+  cursor:pointer;
+  padding:0;
+}
 </style>
 </head>
 <body>
@@ -866,6 +895,10 @@ input,select,textarea{font-family:inherit;font-size:30px;}
     </div>
     <div class="fg"><label>日付</label><input type="date" id="pDate" style="font-size:18px;padding:8px 10px;" onchange="refreshPrintResidentChips()"></div>
     <div class="fg" style="margin-top:12px;"><label>利用者を選択</label><div id="pResidents" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:6px;"></div></div>
+    <div class="fg" id="printPhotoSection" style="margin-top:12px;display:none;">
+      <label>写真添付（任意・最大2枚／人）</label>
+      <div id="printPhotoList" style="display:flex;flex-direction:column;gap:8px;margin-top:6px;"></div>
+    </div>
     <div style="display:flex;gap:10px;margin-top:18px;justify-content:flex-end;">
       <button class="btn btn-primary" onclick="doPrint()" style="font-size:20px;padding:10px 28px;">🖨 印刷・PDF</button>
     </div>
@@ -928,6 +961,7 @@ function initFacility(facId){
   if(!id) return false;
   FACILITY_ID = id;
   FAC = FACILITIES[id];
+  cleanupOldPhotos();
   return true;
 }
 
@@ -968,7 +1002,6 @@ function startApp(){
     setTimeout(()=>{
       try{
         loadDB();
-        cleanupOldPhotos();
         gasMirrorToCookies();
         setSyncStatus('--','var(--text3)');
         renderDate();
@@ -1595,7 +1628,7 @@ const REC = {
 const N_RECORD_COLS = 57;
 
 /** デプロイのたびに上げる（設定→データ管理の「アプリ情報」で表示） */
-const APP_VERSION='1.3.1';
+const APP_VERSION='1.4.0';
 function isStandaloneWebApp(){
   try{
     if(window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches) return true;
@@ -6805,7 +6838,14 @@ function readFileAsDataURL(file){
     reader.readAsDataURL(file);
   });
 }
+function isPhotoOnDayPanel(){
+  return FACILITY_ID==='minami';
+}
+function isPhotoOnPrintDialog(){
+  return FACILITY_ID==='nishi';
+}
 function cleanupOldPhotos(){
+  if(!isPhotoOnDayPanel()) return;
   const today=dk();
   const altPrefix='kaigo_photos_';
   const toRemove=[];
@@ -6821,7 +6861,7 @@ function cleanupOldPhotos(){
   });
   if(toRemove.length>0) console.log('[Photo Cleanup] Removed '+toRemove.length+' old photos');
 }
-function buildPhotoSection(name, dateKey){
+function buildPhotoSectionForDay(name, dateKey){
   const photos=getPhotosFor(name, dateKey);
   const thumbsHtml=photos.map(function(url, idx){
     return `<div class="day-photo-thumb">
@@ -6843,6 +6883,7 @@ function buildPhotoSection(name, dateKey){
   </div>`;
 }
 async function onDayPhotoSelected(ev){
+  if(!isPhotoOnDayPanel()) return;
   const file=ev.target.files&&ev.target.files[0];
   ev.target.value='';
   if(!file) return;
@@ -6872,11 +6913,12 @@ function onDayPhotoRemove(idx){
   refreshDayPhotoSection();
 }
 function refreshDayPhotoSection(){
+  if(!isPhotoOnDayPanel()) return;
   const editDate=document.getElementById('dayEditDate')?.value||dk();
   const section=document.getElementById('dayPhotoSection');
   if(!section) return;
   const wrapper=document.createElement('div');
-  wrapper.innerHTML=buildPhotoSection(curRes, editDate);
+  wrapper.innerHTML=buildPhotoSectionForDay(curRes, editDate);
   const newSection=wrapper.firstElementChild;
   if(newSection) section.parentNode.replaceChild(newSection, section);
 }
@@ -6929,7 +6971,7 @@ function buildDayPanel(){
     <button class="hist-del" onclick="delDayRecord('${h._dk}')">削除</button>
   </div>`).join(''):'<div class="text-gray" style="font-size:14px;padding:8px 0;">記録なし</div>';
   const editDate=dk();
-  const photoHtml=buildPhotoSection(curRes, editDate);
+  const photoHtml=isPhotoOnDayPanel()?buildPhotoSectionForDay(curRes, editDate):'';
   return `<div class="panel">
     <div class="panel-sec"><h3>直近の記録（3回分）</h3><div class="hist-list">${dayHistHtml}</div></div>
     <div class="panel-sec" id="dayForm">
@@ -6977,7 +7019,7 @@ function editDayRecord(dkStr){
     modeLabel.style.display='block';
     modeLabel.textContent=recordEditLabelByDateTime(dkStr,hmFromTs(r._dayU));
   }
-  refreshDayPhotoSection();
+  if(isPhotoOnDayPanel()) refreshDayPhotoSection();
   document.getElementById('dayForm').scrollIntoView({behavior:'smooth'});
 }
 function delDayRecord(dkStr){
@@ -9612,6 +9654,88 @@ function parsePrintDate(dateKey){
   if(m) return new Date(+m[1],+m[2]-1,+m[3]);
   return new Date(curDate.getFullYear(),curDate.getMonth(),curDate.getDate());
 }
+window._printPhotos=window._printPhotos||{};
+function hashCode(s){
+  let h=0;
+  const str=String(s||'');
+  for(let i=0;i<str.length;i++){
+    h=((h<<5)-h)+str.charCodeAt(i);
+    h|=0;
+  }
+  return h;
+}
+function refreshPrintPhotoSection(){
+  const section=document.getElementById('printPhotoSection');
+  if(!section) return;
+  if(!isPhotoOnPrintDialog()){
+    section.style.display='none';
+    return;
+  }
+  section.style.display='';
+  rebuildPrintPhotoList();
+}
+function rebuildPrintPhotoList(){
+  const list=document.getElementById('printPhotoList');
+  if(!list) return;
+  const selectedNames=[...document.querySelectorAll('#pResidents .chip.selected')]
+    .map(b=>b.getAttribute('data-res-name')||b.textContent);
+  if(selectedNames.length===0){
+    list.innerHTML='<span class="text-gray" style="font-size:13px;">利用者を選択すると、各人の写真添付欄が表示されます</span>';
+    return;
+  }
+  list.innerHTML=selectedNames.map(name=>{
+    const photos=(window._printPhotos&&window._printPhotos[name])||[];
+    const nmAttr=escapeAttr(name);
+    const thumbsHtml=photos.map((url,idx)=>`
+      <div class="print-photo-thumb">
+        <img src="${escapeAttr(url)}" alt="">
+        <button type="button" class="print-photo-del" onclick="onPrintPhotoRemove('${nmAttr}',${idx})">×</button>
+      </div>
+    `).join('');
+    const canAdd=photos.length<2;
+    const inputId='printPhotoInput_'+Math.abs(hashCode(name));
+    const btnHtml=canAdd?`
+      <input type="file" accept="image/*" id="${inputId}" style="display:none;" onchange="onPrintPhotoSelected(event,'${nmAttr}')">
+      <button type="button" class="btn btn-gray btn-sm" onclick="document.getElementById('${inputId}').click()">
+        📷 ${photos.length===0?'写真追加':'写真追加（あと'+(2-photos.length)+'枚）'}
+      </button>
+    `:'<span class="text-gray" style="font-size:12px;">写真は2枚までです</span>';
+    return `<div style="border:1px solid var(--bdr);border-radius:6px;padding:8px;">
+      <div style="font-weight:600;font-size:14px;margin-bottom:6px;">${escapeHtml(name)}</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px;">${thumbsHtml}</div>
+      <div>${btnHtml}</div>
+    </div>`;
+  }).join('');
+}
+async function onPrintPhotoSelected(ev, name){
+  const file=ev.target.files&&ev.target.files[0];
+  ev.target.value='';
+  if(!file||!name) return;
+  if(!file.type.startsWith('image/')){
+    alert('画像ファイルを選択してください');
+    return;
+  }
+  try{
+    const rawUrl=await readFileAsDataURL(file);
+    const resized=await resizePhotoDataUrl(rawUrl, 1200);
+    if(!window._printPhotos[name]) window._printPhotos[name]=[];
+    if(window._printPhotos[name].length>=2){
+      alert('写真は最大2枚までです');
+      return;
+    }
+    window._printPhotos[name].push(resized);
+    rebuildPrintPhotoList();
+  }catch(e){
+    alert('写真の読み込みに失敗しました');
+    console.error(e);
+  }
+}
+function onPrintPhotoRemove(name, idx){
+  if(!window._printPhotos||!window._printPhotos[name]) return;
+  window._printPhotos[name].splice(idx, 1);
+  if(window._printPhotos[name].length===0) delete window._printPhotos[name];
+  rebuildPrintPhotoList();
+}
 function refreshPrintResidentChips(){
   const cont=document.getElementById('pResidents');
   if(!cont) return;
@@ -9621,12 +9745,15 @@ function refreshPrintResidentChips(){
   cont.innerHTML=resList.map(r=>{
     const nm=escapeAttr(r.name);
     const label=escapeHtml(r.name||'');
-    return `<button type="button" class="chip" style="border:2px solid var(--bdr);" data-res-name="${nm}" onclick="this.classList.toggle('selected')">${label}</button>`;
+    return `<button type="button" class="chip" style="border:2px solid var(--bdr);" data-res-name="${nm}" onclick="this.classList.toggle('selected');rebuildPrintPhotoList();">${label}</button>`;
   }).join('');
+  rebuildPrintPhotoList();
 }
 function openPrint(){
   document.getElementById('pDate').value=dk();
+  if(isPhotoOnPrintDialog()) window._printPhotos={};
   refreshPrintResidentChips();
+  refreshPrintPhotoSection();
   openOv('ovPrint');
 }
 
@@ -9646,7 +9773,12 @@ function buildPrintPages(sel, dateKey){
     const rr=(db.residents||[]).find(x=>normalizeResidentName(x.name)===normalizeResidentName(name));
     if(rr){const dNum=d.getDate();for(let dd=dNum;dd<(rr.sched||[]).length;dd++){if(rr.sched[dd]===1){const nd=new Date(d.getFullYear(),d.getMonth(),dd+1);nxt=(nd.getMonth()+1)+'月'+nd.getDate()+'日（'+days[nd.getDay()]+'）';break;}}}
     const isLast=pidx===sel.length-1;
-    const photos=getPhotosFor(name, dkUse);
+    let photos=[];
+    if(isPhotoOnDayPanel()){
+      photos=getPhotosFor(name, dkUse);
+    }else if(isPhotoOnPrintDialog()){
+      photos=(window._printPhotos&&window._printPhotos[name])||[];
+    }
     let photosHtml='';
     if(photos.length>0){
       const imgs=photos.map(function(url){
@@ -9716,6 +9848,9 @@ function doPrint(){
   const url=URL.createObjectURL(blob);
   const w=window.open(url,'_blank','width=800,height=700');
   if(!w){alert('ポップアップを許可してください');return;}
+  if(isPhotoOnPrintDialog()){
+    setTimeout(function(){ window._printPhotos={}; }, 500);
+  }
 }
 
 // ========== 月次バックアップ ==========
