@@ -6887,8 +6887,11 @@ async function onDayPhotoSelected(ev){
   const file=ev.target.files&&ev.target.files[0];
   ev.target.value='';
   if(!file) return;
-  if(!file.type.startsWith('image/')){
-    alert('画像ファイルを選択してください');
+  const isImage=
+    (file.type&&file.type.startsWith('image/'))||
+    /\.(jpe?g|png|gif|webp|heic|heif)$/i.test(file.name||'');
+  if(!isImage){
+    alert('画像ファイルを選択してください（jpg, png, gif, webp, heic）');
     return;
   }
   try{
@@ -9711,8 +9714,11 @@ async function onPrintPhotoSelected(ev, name){
   const file=ev.target.files&&ev.target.files[0];
   ev.target.value='';
   if(!file||!name) return;
-  if(!file.type.startsWith('image/')){
-    alert('画像ファイルを選択してください');
+  const isImage=
+    (file.type&&file.type.startsWith('image/'))||
+    /\.(jpe?g|png|gif|webp|heic|heif)$/i.test(file.name||'');
+  if(!isImage){
+    alert('画像ファイルを選択してください（jpg, png, gif, webp, heic）');
     return;
   }
   try{
