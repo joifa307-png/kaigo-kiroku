@@ -1595,7 +1595,7 @@ const REC = {
 const N_RECORD_COLS = 57;
 
 /** デプロイのたびに上げる（設定→データ管理の「アプリ情報」で表示） */
-const APP_VERSION='1.3.0';
+const APP_VERSION='1.3.1';
 function isStandaloneWebApp(){
   try{
     if(window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches) return true;
@@ -9652,7 +9652,7 @@ function buildPrintPages(sel, dateKey){
       const imgs=photos.map(function(url){
         return '<div class="photo-cell"><img src="'+url+'" alt=""></div>';
       }).join('');
-      photosHtml='<div class="photos" data-count="'+photos.length+'">'+imgs+'</div>';
+      photosHtml='<div class="photos-block"><div class="photos-heading">【今日の1枚】</div><div class="photos" data-count="'+photos.length+'">'+imgs+'</div></div>';
     }
     pages+='<div class="page'+(isLast?' last':'')+'">'
       +'<h1>介護記録（連絡帳）</h1>'
@@ -9683,7 +9683,7 @@ function buildPrintHtml(pages){
     +'.biko{margin-bottom:6pt;}'
     +'.biko-label{font-weight:bold;font-size:9.5pt;margin-bottom:2pt;}'
     +'.biko-body{border:1px solid #bbb;padding:4pt;font-size:9.5pt;line-height:1.6;min-height:24pt;white-space:pre-wrap;}'
-    +'.next{text-align:right;font-size:9pt;}'+'.photos{display:flex;gap:3mm;justify-content:center;align-items:stretch;margin:4pt 0;}'+'.photos[data-count="1"] .photo-cell{flex:0 0 auto;max-width:100%;}'+'.photos[data-count="2"] .photo-cell{flex:1 1 0;max-width:48%;}'+'.photo-cell{display:flex;align-items:center;justify-content:center;overflow:hidden;border:0.3pt solid #ddd;max-height:55mm;}'+'.photo-cell img{max-width:100%;max-height:55mm;object-fit:contain;display:block;}'
+    +'.next{text-align:right;font-size:9pt;}'+'.photos-block{margin:4pt 0;}'+'.photos-heading{font-weight:bold;font-size:9.5pt;margin-bottom:2pt;text-align:center;}'+'.photos{display:flex;gap:3mm;justify-content:center;align-items:stretch;}'+'.photos[data-count="1"] .photo-cell{flex:0 0 auto;max-width:100%;max-height:66mm;}'+'.photos[data-count="1"] .photo-cell img{max-height:66mm;}'+'.photos[data-count="2"] .photo-cell{flex:1 1 0;max-width:48%;}'+'.photo-cell{display:flex;align-items:center;justify-content:center;overflow:hidden;border:0.3pt solid #ddd;max-height:55mm;}'+'.photo-cell img{max-width:100%;max-height:55mm;object-fit:contain;display:block;}'
     +'.noprint{padding:8px;background:#f5f5f5;display:flex;gap:8px;justify-content:center;align-items:center;flex-wrap:wrap;}'
     +'@media screen{.page{width:148mm;min-height:210mm;margin:10px auto;padding:10mm;background:#fff;border:1px solid #ddd;}}'
     +'@media print{'
