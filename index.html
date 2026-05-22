@@ -8281,19 +8281,23 @@ function importBasicInfoCSV(file){
     const rows=_parseCsvText(e.target.result||'');
     const body=rows.slice(1);
     const matches=[];
-    const skips=[];
+    let addCount=0;
     body.forEach(r=>{
       const name=normalizeResidentName(r[0]||'');
       if(!name) return;
       const hit=(db.residents||[]).find(x=>normalizeResidentName(x.name)===name);
-      if(!hit){ skips.push(name); return; }
-      matches.push({id:hit.id,name:hit.name,birthDate:r[2]||'',gender:r[4]||'',phone:r[5]||''});
+      if(!hit){
+        addCount++;
+        matches.push({id:genId('r'),name,birthDate:r[2]||'',gender:r[4]||'',phone:r[5]||'',isNew:true});
+        return;
+      }
+      matches.push({id:hit.id,name:hit.name,birthDate:r[2]||'',gender:r[4]||'',phone:r[5]||'',isNew:false});
     });
     window.__resInfoImport={kind:'basic',data:matches};
     _previewToEl(`<div style="font-weight:700;margin-bottom:6px;">基本情報CSV プレビュー</div>
-      <div style="color:var(--text3);font-size:12px;margin-bottom:8px;">一致: ${matches.length}件 / スキップ: ${skips.length}件</div>
+      <div style="color:var(--text3);font-size:12px;margin-bottom:8px;">反映対象: ${matches.length}件（新規追加: ${addCount}件）</div>
       <div style="max-height:180px;overflow:auto;border:1px solid var(--border2);border-radius:var(--r1);padding:8px;">${matches.slice(0,50).map(x=>`${escapeHtml(x.name)} / ${escapeHtml(x.birthDate)} / ${escapeHtml(x.gender)} / ${escapeHtml(x.phone)}`).join('<br>')||'（一致なし）'}</div>
-      ${skips.length?`<div style="margin-top:8px;color:var(--text3);font-size:12px;">取込スキップ（利用者未登録）: ${escapeHtml(skips.slice(0,30).join('、'))}${skips.length>30?'…':''}</div>`:''}
+      ${addCount?`<div style="margin-top:8px;color:var(--blue);font-size:12px;">未登録の利用者は新規追加して反映します。</div>`:''}
       <div style="margin-top:10px;"><button type="button" class="btn btn-primary btn-sm" onclick="applyResidentInfoImport()">反映する</button></div>`);
   };
   reader.readAsText(file, 'Shift_JIS');
@@ -8305,20 +8309,24 @@ function importCertInfoCSV(file){
     const rows=_parseCsvText(e.target.result||'');
     const body=rows.slice(1);
     const matches=[];
-    const skips=[];
+    let addCount=0;
     body.forEach(r=>{
       const name=normalizeResidentName(r[0]||'');
       if(!name) return;
       const hit=(db.residents||[]).find(x=>normalizeResidentName(x.name)===name);
-      if(!hit){ skips.push(name); return; }
       const cost=(String(r[5]||'').trim()||'1割');
-      matches.push({id:hit.id,name:hit.name,insuredNumber:_cleanDigits(r[2]||''),care:r[3]||'',careExpiry:r[4]||'',costShare:cost});
+      if(!hit){
+        addCount++;
+        matches.push({id:genId('r'),name,insuredNumber:_cleanDigits(r[2]||''),care:r[3]||'',careExpiry:r[4]||'',costShare:cost,isNew:true});
+        return;
+      }
+      matches.push({id:hit.id,name:hit.name,insuredNumber:_cleanDigits(r[2]||''),care:r[3]||'',careExpiry:r[4]||'',costShare:cost,isNew:false});
     });
     window.__resInfoImport={kind:'cert',data:matches};
     _previewToEl(`<div style="font-weight:700;margin-bottom:6px;">証書情報CSV プレビュー</div>
-      <div style="color:var(--text3);font-size:12px;margin-bottom:8px;">一致: ${matches.length}件 / スキップ: ${skips.length}件</div>
+      <div style="color:var(--text3);font-size:12px;margin-bottom:8px;">反映対象: ${matches.length}件（新規追加: ${addCount}件）</div>
       <div style="max-height:180px;overflow:auto;border:1px solid var(--border2);border-radius:var(--r1);padding:8px;">${matches.slice(0,50).map(x=>`${escapeHtml(x.name)} / ${escapeHtml(x.insuredNumber)} / ${escapeHtml(x.care)} / ${escapeHtml(x.careExpiry)} / ${escapeHtml(x.costShare)}`).join('<br>')||'（一致なし）'}</div>
-      ${skips.length?`<div style="margin-top:8px;color:var(--text3);font-size:12px;">取込スキップ（利用者未登録）: ${escapeHtml(skips.slice(0,30).join('、'))}${skips.length>30?'…':''}</div>`:''}
+      ${addCount?`<div style="margin-top:8px;color:var(--blue);font-size:12px;">未登録の利用者は新規追加して反映します。</div>`:''}
       <div style="margin-top:10px;"><button type="button" class="btn btn-primary btn-sm" onclick="applyResidentInfoImport()">反映する</button></div>`);
   };
   reader.readAsText(file, 'Shift_JIS');
@@ -8369,7 +8377,27 @@ function applyResidentInfoImport(){
   }
   const data=Array.isArray(imp.data)?imp.data:[];
   data.forEach(x=>{
-    const r=(db.residents||[]).find(rr=>String(rr.id)===String(x.id));
+    let r=(db.residents||[]).find(rr=>String(rr.id)===String(x.id));
+    if(!r&&x&&x.isNew){
+      const name=normalizeResidentName(x.name||'');
+      if(!name) return;
+      const existingByName=(db.residents||[]).find(rr=>normalizeResidentName(rr.name)===name);
+      if(existingByName){
+        r=existingByName;
+      }else{
+        r={
+          id:String(x.id||genId('r')),
+          name,
+          care:String(x.care||'').trim()||'要介護５',
+          sched:Array(31).fill(0),
+          serviceType:'resident',
+          _u:Date.now()
+        };
+        _ensureResidentBillingFields(r);
+        db.residents.push(r);
+        clearResidentTombstone(r);
+      }
+    }
     if(!r) return;
     _ensureResidentBillingFields(r);
     if(imp.kind==='basic'){
@@ -8384,6 +8412,7 @@ function applyResidentInfoImport(){
     }
     r._u=Date.now();
   });
+  normalizeResidentsOrder();
   saveDB();
   renderSettingsPanel('resident_info');
   showBriefToast('反映しました',1800,false);
