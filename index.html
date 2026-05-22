@@ -1631,7 +1631,7 @@ const REC = {
 const N_RECORD_COLS = 57;
 
 /** デプロイのたびに上げる（設定→データ管理の「アプリ情報」で表示） */
-const APP_VERSION='1.4.1';
+const APP_VERSION='1.4.2';
 function isStandaloneWebApp(){
   try{
     if(window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches) return true;
@@ -8376,6 +8376,7 @@ function applyResidentInfoImport(){
     return;
   }
   const data=Array.isArray(imp.data)?imp.data:[];
+  let newCount=0;
   data.forEach(x=>{
     let r=(db.residents||[]).find(rr=>String(rr.id)===String(x.id));
     if(!r&&x&&x.isNew){
@@ -8395,6 +8396,7 @@ function applyResidentInfoImport(){
         };
         _ensureResidentBillingFields(r);
         db.residents.push(r);
+        newCount++;
         clearResidentTombstone(r);
       }
     }
@@ -8415,7 +8417,7 @@ function applyResidentInfoImport(){
   normalizeResidentsOrder();
   saveDB();
   renderSettingsPanel('resident_info');
-  showBriefToast('反映しました',1800,false);
+  showBriefToast(`反映しました（新規 ${newCount}件）`,1800,false);
 }
 
 function buildResidentSettings(){
