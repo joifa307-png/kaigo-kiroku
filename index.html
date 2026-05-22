@@ -1077,6 +1077,7 @@ const SETTINGS_MERGE_UNION_KEYS=new Set([
 const DEFAULT_SETTINGS = {
   facilityName: '',
   logoB64: '',
+  logoMime: 'image/png',
   staffList: [],
   exUrineOptions:  ['なし','少量','中量','多量'],
   exUrineMlOptions:['20','50','100','150','200','300'],
@@ -1628,7 +1629,7 @@ const REC = {
 const N_RECORD_COLS = 57;
 
 /** デプロイのたびに上げる（設定→データ管理の「アプリ情報」で表示） */
-const APP_VERSION='1.4.0';
+const APP_VERSION='1.4.1';
 function isStandaloneWebApp(){
   try{
     if(window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches) return true;
@@ -5049,7 +5050,7 @@ function getLastStool(name){
         const e=found[found.length-1];
         const et=normalizeTimeText(e.time)||'00:00';
         const ts=timestampFromDateKeyAndHm(dk(dt), et);
-        return {dt:ts, dayStr:['日','月','火','水','木','金','土'][dt.getDay()], time:et};
+        return {dt:ts, dk:dk(dt), dayStr:['日','月','火','水','木','金','土'][dt.getDay()], time:et};
       }
     }
   }
@@ -5223,12 +5224,17 @@ function renderMain(){
       else if(!Number.isFinite(_ls.dt)){
         lsc=`<span class="cell-val" style="font-size:14px;">${_ls.dayStr}曜 ${normalizeTimeText(_ls.time)}</span>`;
       }else{
-        /** 経過時間から24h分を引いて帯判定（＝最終排便時刻に+24hしたものと比較）。警告「－n日」が1日分遅れる */
-        const _ha=(Date.now()-_ls.dt)/3600000-24;
-        if(_ha<48) lsc=`<span class="cell-val" style="font-size:14px;">${_ls.dayStr}曜 ${normalizeTimeText(_ls.time)}</span>`;
-        else if(_ha<60) lsc='<span class="cell-warn">－2日</span>';
-        else if(_ha<72) lsc='<span class="cell-warn">－3日</span>';
-        else lsc='<span class="cell-warn">－4日</span>';
+        // 時刻ではなく「日付差」で判定（例: 1日排便 / 4日表示 -> -3日）
+        const _today0=new Date(curDate.getFullYear(),curDate.getMonth(),curDate.getDate()).getTime();
+        const _stoolDate=(String(_ls.dk||'').match(/^(\d{4})-(\d{2})-(\d{2})$/)||null);
+        const _stool0=_stoolDate
+          ?new Date(Number(_stoolDate[1]),Number(_stoolDate[2])-1,Number(_stoolDate[3])).getTime()
+          :new Date(new Date(_ls.dt).getFullYear(),new Date(_ls.dt).getMonth(),new Date(_ls.dt).getDate()).getTime();
+        const _dd=Math.floor((_today0-_stool0)/86400000);
+        if(!Number.isFinite(_dd)||_dd<0||_dd<=2) lsc=`<span class="cell-val" style="font-size:14px;">${_ls.dayStr}曜 ${normalizeTimeText(_ls.time)}</span>`;
+        else if(_dd===3) lsc='<span class="cell-warn">－3日</span>';
+        else if(_dd===4) lsc='<span class="cell-warn">－4日</span>';
+        else lsc='<span class="cell-warn">－5日</span>';
       }
     }
     // 入浴
@@ -5293,7 +5299,11 @@ function renderFacilityHeader(){
   if(el) el.textContent = S.facilityName || FAC.name;
   const logo=document.getElementById('mainLogo');
   if(logo){
-    if(S.logoB64){ logo.src='data:image/png;base64,'+S.logoB64; logo.style.cssText='display:block;height:60px;width:auto;'; }
+    if(S.logoB64){
+      const rawLogo=String(S.logoB64||'');
+      logo.src=/^data:image\//i.test(rawLogo)?rawLogo:('data:'+String(S.logoMime||'image/png')+';base64,'+rawLogo);
+      logo.style.cssText='display:block;height:60px;width:auto;';
+    }
     else { logo.style.cssText='display:none;'; }
   }
   const verEl=document.getElementById('hdrAppVer');
@@ -7413,7 +7423,7 @@ function buildFacilitySettings(){
     </div>
     <div class="panel-sec">
       <h3>ロゴ画像</h3>
-      ${S.logoB64?`<img src="data:image/png;base64,${S.logoB64}" style="max-height:60px;margin-bottom:10px;display:block;">`:'' }
+      ${S.logoB64?`<img src="${(/^data:image\//i.test(String(S.logoB64||''))?String(S.logoB64||''):`data:${String(S.logoMime||'image/png')};base64,${String(S.logoB64||'')}`)}" style="max-height:60px;margin-bottom:10px;display:block;">`:'' }
       <div class="fg"><label>画像ファイル（PNG/JPG）</label>
         <input type="file" id="logoFile" accept="image/*" onchange="loadLogo(this)">
       </div>
@@ -7430,10 +7440,26 @@ function saveFacilityName(){
 }
 function loadLogo(input){
   const file=input.files[0]; if(!file) return;
+  const isImage=
+    (file.type&&file.type.startsWith('image/'))||
+    /\.(jpe?g|png|gif|webp|heic|heif)$/i.test(file.name||'');
+  if(!isImage){
+    alert('画像ファイルを選択してください（jpg, png, gif, webp, heic）');
+    input.value='';
+    return;
+  }
   const reader=new FileReader();
   reader.onload=e=>{
-    const b64=e.target.result.split(',')[1];
-    db.settings.logoB64=b64; saveDB();
+    const dataUrl=String(e.target.result||'');
+    const m=dataUrl.match(/^data:(image\/[a-z0-9.+-]+);base64,/i);
+    if(m){
+      db.settings.logoMime=String(m[1]||'image/png').toLowerCase();
+      db.settings.logoB64=dataUrl.split(',')[1]||'';
+    }else{
+      db.settings.logoMime='image/png';
+      db.settings.logoB64=dataUrl.split(',')[1]||'';
+    }
+    saveDB();
     renderSettingsPanel('facility');
   };
   reader.readAsDataURL(file);
