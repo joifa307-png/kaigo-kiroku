@@ -1157,6 +1157,7 @@ const LEGACY_DEFAULT_DAY_JSON = JSON.stringify(['穏やか','笑顔あり','活�
 let db = { residents:[], records:{}, supplies:[], settings:{...DEFAULT_SETTINGS} };
 let syncDirty = false;
 let syncTimer = null;
+let syncDirtyVersion = 0;
 let curDate = new Date(); curDate.setHours(0,0,0,0);
 let curRes = null;
 let curTab = 'vital';
@@ -1353,6 +1354,7 @@ function saveDB(){
   mirrorResidentTypesToLocalStorage();
   saveSettingsSnapshot();
   syncDirty = true;
+  syncDirtyVersion++;
   localStorage.setItem(FAC.storageKey+'_dirty','1'); // ページ再読込後も未送信フラグを保持
   /** 在庫管理への週次消費数同期は集計送信ボタン押下時のみ行う（saveDB内では呼ばない） */
   if(!window._kaigoGasSaving) scheduleGasSync();
@@ -3216,6 +3218,7 @@ function runGasPushCycle(){
   if(!gasConfigured()){ setSyncStatusIfGasMissing(); return Promise.resolve(); }
   if(!syncDirty) return Promise.resolve();
   const sk=FAC.storageKey;
+  const cycleVersionStart=syncDirtyVersion;
   setSyncStatus('同期中...','#185FA5');
   return gasPost({action:'pull', sheetName:FAC.sheetName})
     .then(j=>{
@@ -3266,11 +3269,18 @@ function runGasPushCycle(){
       finalizePushSuccessState_(sk,wantedRids);
       persistLocalQuiet();
       mirrorResidentTypesToLocalStorage();
-      syncDirty=false;
-      localStorage.removeItem(sk+'_dirty');
+      // 同期中に新規保存が入った場合は未送信フラグを残し、次便を必ず実行する
+      const hasNewerChanges=(syncDirtyVersion!==cycleVersionStart);
+      syncDirty=hasNewerChanges;
+      if(syncDirty) localStorage.setItem(sk+'_dirty','1');
+      else localStorage.removeItem(sk+'_dirty');
       renderMain();
       const n=new Date();
       setSyncStatus(`反映済 ${n.getHours()}:${pad(n.getMinutes())}`,'green');
+      if(hasNewerChanges){
+        // 直前push中に追加入力された分を確実に送る（次便）
+        scheduleGasSync();
+      }
     })
     .catch(e=>{
       if(e&&e.silent){
