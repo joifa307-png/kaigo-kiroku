@@ -1535,7 +1535,15 @@ function settingHasValue(v){
   if(Array.isArray(v)) return v.length>0;
   if(v===null||v===undefined) return false;
   if(typeof v==='string') return v.trim()!=='';
+  if(typeof v==='object') return Object.keys(v).length>0;
   return true;
+}
+/** 同期マージでリモートが空・ローカルに中身があるとき、設定を消さない */
+function shouldKeepLocalSettingOnRemoteWin(key, localVal, remoteVal){
+  if(SETTINGS_MERGE_UNION_KEYS.has(key)) return false;
+  if(key==='residentTypes'||key==='logoB64') return false;
+  if(!settingHasValue(remoteVal) && settingHasValue(localVal)) return true;
+  return false;
 }
 function saveSettingsSnapshot(){
   if(!FAC||!db||!db.settings) return;
@@ -1635,7 +1643,7 @@ const REC = {
 const N_RECORD_COLS = 57;
 
 /** デプロイのたびに上げる（設定→データ管理の「アプリ情報」で表示） */
-const APP_VERSION='1.4.5';
+const APP_VERSION='1.4.6';
 function isStandaloneWebApp(){
   try{
     if(window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches) return true;
@@ -1851,7 +1859,11 @@ function getResidentClassification(name, settingsOpt, residentsOpt){
   }
   const resList=(residentsOpt!==undefined&&residentsOpt!==null)?residentsOpt:((typeof db!=='undefined'&&db&&db.residents)||[]);
   const r=(resList||[]).find(x=>normalizeResidentName(x&&x.name)===nm);
-  if(r) return residentServiceTypeOrDefault(r)==='day'?'day':'inpatient';
+  if(r){
+    const sched=Array.isArray(r.sched)?r.sched:[];
+    if(sched.length>0&&!sched.some(v=>Number(v)===1)) return 'day';
+    return inferServiceTypeFromSched(sched)==='day'?'day':'inpatient';
+  }
   return 'day';
 }
 function ensureResidentTypeAbsentOnly(nameFromImport){
@@ -3027,7 +3039,10 @@ function mergePulledDb(local, remote){
       if(k==='logoB64') return;
       if(SETTINGS_MERGE_UNION_KEYS.has(k)) return;
       if(k==='residentTypes') return;
-      if(_numU(ru[k])>_numU(lu[k])) out.settings[k]=cloneDeep(remote.settings[k]);
+      if(_numU(ru[k])>_numU(lu[k])){
+        const rv=remote.settings[k], lv=(local.settings||{})[k];
+        if(!shouldKeepLocalSettingOnRemoteWin(k, lv, rv)) out.settings[k]=cloneDeep(rv);
+      }
     });
     out.settings.residentTypes=mergeResidentTypesMaps(
       (local.settings||{}).residentTypes,
@@ -5209,7 +5224,7 @@ function bindMainResTableDelegation(){
     if(col===0||col===1){ openScheduleScreen(nameRaw); return; }
     if(col===2){ openDetail(nameRaw,'notes'); return; }
     if(col===3){
-      if(ev.target.closest('.res-del-btn')){ delResidentByName(nameRaw); return; }
+      if(ev.target.closest('.res-del-btn')){ removeResidentFromMainDay(nameRaw); return; }
       openSummary(nameRaw);
       return;
     }
@@ -5329,6 +5344,7 @@ function renderMain(){
       else if(_isToday&&_nowH>=th) _mParts.push('<span style="color:var(--orange2);font-weight:700;">？</span>');
     });
     const mdc=_mParts.length?`<span class="cell-val" style="font-size:18px;letter-spacing:1px;">${_mParts.join('')}</span>`:'<span class="cell-empty">—</span>';
+    const showMainDelBtn=!r._mainGhost && getResidentClassification(r.name)!=='inpatient';
 
     return `<tr data-res-name="${escapeAttr(r.name)}">
       <td style="width:36px;min-width:36px;padding:4px;text-align:center;">${yoteiCell}</td>
@@ -5340,7 +5356,7 @@ function renderMain(){
             <div class="name-txt">${r.name}</div>
             <div class="name-sub">${r.care||''}</div>
           </div>
-          ${r._mainGhost?'':`<button type="button" class="res-del-btn no-print">×</button>`}
+          ${showMainDelBtn?`<button type="button" class="res-del-btn no-print" title="この日の一覧から外す">×</button>`:''}
         </div>
       </td>
       <td class="res-div-l">${tc}</td>
@@ -8458,6 +8474,7 @@ function applyResidentInfoImport(){
         db.residents.push(r);
         newCount++;
         clearResidentTombstone(r);
+        ensureResidentTypeAbsentOnly(r.name);
       }
     }
     if(!r) return;
@@ -8546,12 +8563,33 @@ function delResident(idx){
   db.residents.splice(idx,1);
   saveDB(); renderSettingsPanel('residents');
 }
-// メイン画面の×ボタンから削除（opts.refreshResidentMgmt で利用者管理タブを再描画）
+/** メイン表の×：この日の予定から外すだけ（利用者そのものは削除しない） */
+function removeResidentFromMainDay(name){
+  const dayIdx=curDate.getDate()-1;
+  const nm=normalizeResidentName(name);
+  const r=(db.residents||[]).find(x=>normalizeResidentName(x.name)===nm);
+  if(!r) return;
+  if(getResidentClassification(r.name)==='inpatient'){
+    alert('入所者はメイン画面から外せません。\n「利用者基本情報」で区分を変更するか、設定の利用者管理で削除してください。');
+    return;
+  }
+  const dLabel=`${curDate.getMonth()+1}月${curDate.getDate()}日`;
+  if(!confirm(`「${r.name}」を ${dLabel} の一覧から外しますか？\n\n※利用者そのものは削除されません（この日の予定が0になります）。`)) return;
+  saveSettingsSnapshot();
+  if(!r.sched) r.sched=Array(31).fill(0);
+  r.sched[dayIdx]=0;
+  r._u=Date.now();
+  saveDB();
+  renderMain();
+}
+// 利用者管理タブから完全削除（opts.refreshResidentMgmt で利用者管理タブを再描画）
 function delResidentByName(name, opts){
   opts=opts||{};
-  const idx=db.residents.findIndex(r=>r.name===name);
+  const nm=normalizeResidentName(name);
+  const idx=db.residents.findIndex(r=>normalizeResidentName(r.name)===nm);
   if(idx<0) return;
-  if(!confirm(`「${name}」を削除しますか？\n記録データは残ります`)) return;
+  if(!confirm(`「${db.residents[idx].name}」を削除しますか？\n記録データは残ります`)) return;
+  saveSettingsSnapshot();
   const target=db.residents[idx];
   markResidentTombstone(target);
   db.residents.splice(idx,1);
@@ -8640,6 +8678,7 @@ function addResidentFromMain(){
   clearResidentTombstone(rec);
   ensureResidentUBeatsTombstone(rec);
   markResidentRevive(rec);
+  ensureResidentTypeAbsentOnly(rec.name);
   db.residents.push(rec);
   saveDB(); closeOv('ovAddRes'); renderMain();
 }
