@@ -3266,11 +3266,14 @@ function runGasPushCycle(){
     .then(()=>{
       const sk=FAC.storageKey;
       const wantedRids=extractRecRidsFromSheetRows(dbToSheet(db));
-      finalizePushSuccessState_(sk,wantedRids);
       persistLocalQuiet();
       mirrorResidentTypesToLocalStorage();
       // 同期中に新規保存が入った場合は未送信フラグを残し、次便を必ず実行する
       const hasNewerChanges=(syncDirtyVersion!==cycleVersionStart);
+      if(!hasNewerChanges){
+        // この便で端末状態を全て反映できたときだけ、差分基準時刻を前進
+        finalizePushSuccessState_(sk,wantedRids);
+      }
       syncDirty=hasNewerChanges;
       if(syncDirty) localStorage.setItem(sk+'_dirty','1');
       else localStorage.removeItem(sk+'_dirty');
