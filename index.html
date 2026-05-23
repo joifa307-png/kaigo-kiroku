@@ -1090,6 +1090,8 @@ const DEFAULT_SETTINGS = {
   supplyProducts:  ['ずれずに安心パット','尿パットレギュラー（男女兼用）','尿パット（10回吸収）','尿パット（安心夜用）','ワイドパット','ビッグパット','リハビリパンツS','リハビリパンツM','リハビリパンツL','リハビリパンツLL','オムツS','オムツM','オムツL','オムツLL'],
   /** 利用者削除の墓石 { [id]: 削除時刻ms }。同期でシートから復活させない */
   _residentDel: {},
+  /** 利用者の復活時刻 { [id/nameキー]: 復活時刻ms }。削除墓石より新しければ復活を優先 */
+  _residentRevive: {},
   /** 記録行・服薬枠・消耗品などの削除墓石 { [キー]: 削除時刻ms }。pull→マージでシート側の古い行が復活しないようにする */
   _recordItemDel: {},
   /** 利用者ごとの表示・集計区分 { 氏名: 'inpatient' | 'day' }。設定「利用者管理」・Excel追加・GAS同期の対象 */
@@ -1330,6 +1332,8 @@ function loadDB(){
   if(!db._setU) db._setU={};
   if(!db.settings._residentDel||typeof db.settings._residentDel!=='object'||Array.isArray(db.settings._residentDel))
     db.settings._residentDel={};
+  if(!db.settings._residentRevive||typeof db.settings._residentRevive!=='object'||Array.isArray(db.settings._residentRevive))
+    db.settings._residentRevive={};
   if(!db.settings._recordItemDel||typeof db.settings._recordItemDel!=='object'||Array.isArray(db.settings._recordItemDel))
     db.settings._recordItemDel={};
   initializeSetUForExistingSettings();
@@ -1631,7 +1635,7 @@ const REC = {
 const N_RECORD_COLS = 57;
 
 /** デプロイのたびに上げる（設定→データ管理の「アプリ情報」で表示） */
-const APP_VERSION='1.4.3';
+const APP_VERSION='1.4.4';
 function isStandaloneWebApp(){
   try{
     if(window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches) return true;
@@ -2859,10 +2863,21 @@ function residentDelMaxTs(resDel, r){
   if(nm) cands.push(_numU(del['name:'+nm]));
   return Math.max(0,...cands);
 }
-function residentDroppedByTombstone(r,resDel){
+function residentReviveMaxTs(resRevive, r){
+  const rev=resRevive&&typeof resRevive==='object'&&!Array.isArray(resRevive)?resRevive:{};
+  const id=String(r&&r.id||'').trim();
+  const nm=normalizeResidentName(r&&r.name||'');
+  const cands=[];
+  if(id) cands.push(_numU(rev['id:'+id]));
+  if(nm) cands.push(_numU(rev['name:'+nm]));
+  return Math.max(0,...cands);
+}
+function residentDroppedByTombstone(r,resDel,resRevive){
   if(!resDel) return false;
   const delAt=residentDelMaxTs(resDel,r);
   if(!delAt) return false;
+  const reviveAt=residentReviveMaxTs(resRevive,r);
+  if(reviveAt>=delAt) return false;
   return _numU(r._u)<=delAt;
 }
 /**
@@ -2910,12 +2925,13 @@ function mergeResidentGroup(versions){
   best.serviceType=residentServiceTypeOrDefault(best);
   return best;
 }
-function mergeResidentsLoc(a, b, resDel){
+function mergeResidentsLoc(a, b, resDel, resRevive){
   resDel=resDel||{};
+  resRevive=resRevive||{};
   const groups=new Map();
   const add=(list)=>{
     (list||[]).forEach(r=>{
-      if(residentDroppedByTombstone(r,resDel)) return;
+      if(residentDroppedByTombstone(r,resDel,resRevive)) return;
       const key=String(r.name||r.id||'');
       if(!groups.has(key)) groups.set(key,[]);
       groups.get(key).push(r);
@@ -2966,7 +2982,11 @@ function mergePulledDb(local, remote){
       (local.settings||{})._residentDel,
       (remote.settings||{})._residentDel
     );
-    out.residents=mergeResidentsLoc(local.residents, remote.residents, mergedResDel);
+    const mergedResRevive=mergeResidentDelMaps(
+      (local.settings||{})._residentRevive,
+      (remote.settings||{})._residentRevive
+    );
+    out.residents=mergeResidentsLoc(local.residents, remote.residents, mergedResDel, mergedResRevive);
     out.supplies=mergeSuppliesLoc(local.supplies, remote.supplies);
     out.settings=cloneDeep(local.settings||{});
     const ru=remote._setU||{}, lu=local._setU||{};
@@ -3018,6 +3038,7 @@ function mergePulledDb(local, remote){
     normalizeVitalTempsInRecords(out.records);
     coalesceAllRecordArrays(out.records);
     out.settings._residentDel=mergeResidentDelMaps(mergedResDel, out.settings._residentDel||{});
+    out.settings._residentRevive=mergeResidentDelMaps(mergedResRevive, out.settings._residentRevive||{});
     out.settings._recordItemDel=mergeResidentDelMaps(mergedItemDel, out.settings._recordItemDel||{});
     const logo=(local.settings||{}).logoB64;
     if(logo) out.settings.logoB64=logo;
@@ -8399,6 +8420,7 @@ function applyResidentInfoImport(){
         };
         _ensureResidentBillingFields(r);
         ensureResidentUBeatsTombstone(r);
+        markResidentRevive(r);
         db.residents.push(r);
         newCount++;
         clearResidentTombstone(r);
@@ -8464,6 +8486,7 @@ function addResident(){
   if(!name){ alert('氏名を入力してください'); return; }
   const rec={id:genId('r'),name,care,sched:Array(31).fill(0),_u:Date.now(),serviceType:'resident'};
   ensureResidentUBeatsTombstone(rec);
+  markResidentRevive(rec);
   db.residents.push(rec);
   saveDB(); renderSettingsPanel('residents');
 }
@@ -8520,6 +8543,19 @@ function clearResidentTombstone(resident){
   }
   if(changed) touchSetU('_residentDel');
 }
+function markResidentRevive(resident){
+  if(!resident) return;
+  const sid=String(resident.id||'').trim();
+  const nm=normalizeResidentName(resident.name||'');
+  if(!sid&&!nm) return;
+  db.settings=db.settings||{};
+  if(!db.settings._residentRevive||typeof db.settings._residentRevive!=='object'||Array.isArray(db.settings._residentRevive))
+    db.settings._residentRevive={};
+  const ts=Math.max(Date.now(), _numU(resident._u));
+  if(sid) db.settings._residentRevive['id:'+sid]=Math.max(_numU(db.settings._residentRevive['id:'+sid]), ts);
+  if(nm) db.settings._residentRevive['name:'+nm]=Math.max(_numU(db.settings._residentRevive['name:'+nm]), ts);
+  touchSetU('_residentRevive');
+}
 /**
  * 再登録時に tombstone（削除墓石）より新しい _u を保証する。
  * 墓石マップは max マージで「削除解除」を同期できないため、利用者側 _u で必ず勝たせる。
@@ -8527,7 +8563,8 @@ function clearResidentTombstone(resident){
 function ensureResidentUBeatsTombstone(resident){
   if(!resident) return;
   const delAt=residentDelMaxTs((db.settings||{})._residentDel||{}, resident);
-  resident._u=Math.max(_numU(resident._u), Date.now(), delAt+1);
+  const reviveAt=residentReviveMaxTs((db.settings||{})._residentRevive||{}, resident);
+  resident._u=Math.max(_numU(resident._u), Date.now(), delAt+1, reviveAt+1);
 }
 // メイン画面の＋ボタンから追加
 function openAddResOv(){
@@ -8568,6 +8605,7 @@ function addResidentFromMain(){
   const rec={id:genId('r'),name,care,sched,serviceType:'resident',_u:Date.now()};
   clearResidentTombstone(rec);
   ensureResidentUBeatsTombstone(rec);
+  markResidentRevive(rec);
   db.residents.push(rec);
   saveDB(); closeOv('ovAddRes'); renderMain();
 }
