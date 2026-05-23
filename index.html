@@ -1635,7 +1635,7 @@ const REC = {
 const N_RECORD_COLS = 57;
 
 /** デプロイのたびに上げる（設定→データ管理の「アプリ情報」で表示） */
-const APP_VERSION='1.4.4';
+const APP_VERSION='1.4.5';
 function isStandaloneWebApp(){
   try{
     if(window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches) return true;
@@ -2749,6 +2749,35 @@ function mergeResidentDelMaps(x,y){
   });
   return out;
 }
+function isInpatientTypeValue(v){
+  const s=String(v==null?'':v).trim().toLowerCase();
+  return s==='inpatient'||s==='resident'||s==='入所';
+}
+/** 利用者区分マップを氏名正規化キーでマージ。入所側が一方でもあれば入所を優先（同期で☑が一括消失しないように） */
+function mergeResidentTypesMaps(a,b){
+  const out={};
+  const normVal=new Map();
+  function ingest(src){
+    if(!src||typeof src!=='object'||Array.isArray(src)) return;
+    Object.keys(src).forEach(k=>{
+      const nk=normalizeResidentName(k);
+      if(!nk) return;
+      const v=String(src[k]==null?'':src[k]).trim().toLowerCase()||'day';
+      const cur=normVal.get(nk);
+      if(cur===undefined){
+        normVal.set(nk, isInpatientTypeValue(v)?'inpatient':'day');
+      }else if(isInpatientTypeValue(v)||isInpatientTypeValue(cur)){
+        normVal.set(nk,'inpatient');
+      }else{
+        normVal.set(nk,'day');
+      }
+    });
+  }
+  ingest(a);
+  ingest(b);
+  normVal.forEach((v,nk)=>{ out[nk]=v; });
+  return out;
+}
 /** 設定ラベルの同値正規化（例: 尿量 1000 と 1,000 を同一とみなす） */
 function canonicalSettingLabel(key, s){
   const v=String(s==null?'':s).trim();
@@ -2997,8 +3026,13 @@ function mergePulledDb(local, remote){
     Object.keys(remote.settings||{}).forEach(k=>{
       if(k==='logoB64') return;
       if(SETTINGS_MERGE_UNION_KEYS.has(k)) return;
+      if(k==='residentTypes') return;
       if(_numU(ru[k])>_numU(lu[k])) out.settings[k]=cloneDeep(remote.settings[k]);
     });
+    out.settings.residentTypes=mergeResidentTypesMaps(
+      (local.settings||{}).residentTypes,
+      (remote.settings||{}).residentTypes
+    );
     SETTINGS_MERGE_UNION_KEYS.forEach(k=>{
       if(!Object.prototype.hasOwnProperty.call(DEFAULT_SETTINGS,k)) return;
       const def=DEFAULT_SETTINGS[k];
