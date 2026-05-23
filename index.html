@@ -1631,7 +1631,7 @@ const REC = {
 const N_RECORD_COLS = 57;
 
 /** デプロイのたびに上げる（設定→データ管理の「アプリ情報」で表示） */
-const APP_VERSION='1.4.2';
+const APP_VERSION='1.4.3';
 function isStandaloneWebApp(){
   try{
     if(window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches) return true;
@@ -8398,6 +8398,7 @@ function applyResidentInfoImport(){
           _u:Date.now()
         };
         _ensureResidentBillingFields(r);
+        ensureResidentUBeatsTombstone(r);
         db.residents.push(r);
         newCount++;
         clearResidentTombstone(r);
@@ -8461,7 +8462,9 @@ function addResident(){
   const name=document.getElementById('newResName').value.trim();
   const care=document.getElementById('newResCare').value;
   if(!name){ alert('氏名を入力してください'); return; }
-  db.residents.push({id:genId('r'),name,care,sched:Array(31).fill(0),_u:Date.now(),serviceType:'resident'});
+  const rec={id:genId('r'),name,care,sched:Array(31).fill(0),_u:Date.now(),serviceType:'resident'};
+  ensureResidentUBeatsTombstone(rec);
+  db.residents.push(rec);
   saveDB(); renderSettingsPanel('residents');
 }
 function markResidentTombstone(resident){
@@ -8517,6 +8520,15 @@ function clearResidentTombstone(resident){
   }
   if(changed) touchSetU('_residentDel');
 }
+/**
+ * 再登録時に tombstone（削除墓石）より新しい _u を保証する。
+ * 墓石マップは max マージで「削除解除」を同期できないため、利用者側 _u で必ず勝たせる。
+ */
+function ensureResidentUBeatsTombstone(resident){
+  if(!resident) return;
+  const delAt=residentDelMaxTs((db.settings||{})._residentDel||{}, resident);
+  resident._u=Math.max(_numU(resident._u), Date.now(), delAt+1);
+}
 // メイン画面の＋ボタンから追加
 function openAddResOv(){
   const dayIdx = curDate.getDate()-1;
@@ -8555,6 +8567,7 @@ function addResidentFromMain(){
   if(dayIdx>=0&&dayIdx<31) sched[dayIdx]=1;
   const rec={id:genId('r'),name,care,sched,serviceType:'resident',_u:Date.now()};
   clearResidentTombstone(rec);
+  ensureResidentUBeatsTombstone(rec);
   db.residents.push(rec);
   saveDB(); closeOv('ovAddRes'); renderMain();
 }
