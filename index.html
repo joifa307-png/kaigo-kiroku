@@ -1643,7 +1643,7 @@ const REC = {
 const N_RECORD_COLS = 57;
 
 /** デプロイのたびに上げる（設定→データ管理の「アプリ情報」で表示） */
-const APP_VERSION='1.4.6';
+const APP_VERSION='1.4.7';
 function isStandaloneWebApp(){
   try{
     if(window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches) return true;
@@ -1909,6 +1909,8 @@ function buildResidentHeaderRow(){
   h.push('shoguUnit');        // 49
   h.push('dailyServiceCodes'); // 50
   h.push('bathSched');         // 51
+  h.push('gender');            // 52
+  h.push('phone');             // 53
   return h;
 }
 function buildRecordHeaderRow(){
@@ -2016,6 +2018,8 @@ function dbToSheet(inDb){
     row.push(String(r.shoguUnit||0));
     row.push(JSON.stringify(r.dailyServiceCodes||{}));
     row.push(JSON.stringify(r.bathSched||[]));
+    row.push(String(r.gender||''));
+    row.push(String(r.phone||''));
     rows.push(PR(row));
   });
   rows.push(PR([]));
@@ -2351,6 +2355,8 @@ function sheetToDb(rows){
     const v=JSON.parse(r[51]||'[]');
     return Array.isArray(v)?v:new Array(31).fill(0);
   }catch(e){return new Array(31).fill(0);}}()),
+      gender:            String(r[52]||''),
+      phone:             String(r[53]||''),
     });
     i++;
   }
@@ -2943,7 +2949,7 @@ function mergeResidentGroup(versions){
   best._u=Math.max(...v0.map(r=>_numU(r._u)));
   // 請求フィールドは空でない値を優先して引き継ぐ
   const billingFields=['insuredNumber','careManagerOffice','careManagerName',
-    'birthDate','careExpiry','costShare','serviceCodeKey','shoguCode','shoguUnit',
+    'birthDate','careExpiry','costShare','gender','phone','serviceCodeKey','shoguCode','shoguUnit',
     'addonCodes','sameBuilding','transportType','startTime','endTime',
     'dailyServiceCodes','bathSched'];
   billingFields.forEach(f=>{
@@ -3147,6 +3153,34 @@ function persistLocalQuiet(){
 
 /** シート「利用者」行の更新時刻列（sheetToDb と同じく 34 = スケジュール31列の直後） */
 const KAIGO_RESIDENT_U_COL = 34;
+/** 直近プッシュ時刻より新しい利用者 _u を付与（証書・ケアマネ取込が差分同期で漏れないように） */
+function lastPushTsForSync_(){
+  if(!FAC) return 0;
+  return _numU(localStorage.getItem(FAC.storageKey+KAIGO_PUSH_TS_SUFFIX));
+}
+function touchResidentUForSync(r, staggerIdx){
+  if(!r) return;
+  const base=Math.max(Date.now(), lastPushTsForSync_()+1);
+  const bump=(typeof staggerIdx==='number'&&staggerIdx>=0)?staggerIdx:0;
+  r._u=Math.max(_numU(r._u), base+bump);
+}
+/** ケアマネCSVの事業所一覧を settings.careManagerList にマージ（既存の担当者名は維持） */
+function mergeCareManagerOfficesIntoList(existing, assignments){
+  const list=Array.isArray(existing)?existing.slice():[];
+  const byCode=new Map();
+  list.forEach(cm=>{
+    const c=String(cm&&cm.officeCode||'').trim();
+    if(c) byCode.set(c, cm);
+  });
+  (assignments||[]).forEach(a=>{
+    const code=String(a.officeCode||'').trim();
+    if(!code||byCode.has(code)) return;
+    const ent={officeCode:code, officeName:String(a.officeName||''), name:''};
+    byCode.set(code, ent);
+    list.push(ent);
+  });
+  return list;
+}
 const KAIGO_PUSH_TS_SUFFIX = ':last_push_ts_v1';
 const KAIGO_PUSH_RIDS_SUFFIX = ':rid_snapshot_v1';
 const KAIGO_DELTA_MAX_PATCH_ROWS = 3500;
@@ -8256,10 +8290,12 @@ function saveResidentInfoAll(){
     }else if(f === 'careManagerKey'){
       cmSel.set(rid, parseInt(el.value,10));
     }
+    touchResidentUForSync(r);
   });
   // ケアマネ関連は一括で反映（事業所→担当者の順で整合）
   const cmList=(db.settings.careManagerList||[]);
   const offices=getCareManagerOffices(cmList);
+  let cmSyncIdx=0;
   (db.residents||[]).forEach(r=>{
     const rid=String(r.id);
     if(!cmOfficeSel.has(rid) && !cmSel.has(rid)) return;
@@ -8281,10 +8317,10 @@ function saveResidentInfoAll(){
       r.careManagerName=cm.name;
       r.careManagerOffice=cm.officeCode;
     }
-    r._u=Date.now();
+    touchResidentUForSync(r, cmSyncIdx++);
   });
   saveDB();
-  showBriefToast('利用者基本情報を保存しました', 1800, false);
+  showBriefToast('利用者基本情報を保存しました（同期で他端末へ）', 2400, false);
 }
 
 function getCareManagerOffices(cmList){
@@ -8441,17 +8477,29 @@ function applyResidentInfoImport(){
   const imp=window.__resInfoImport;
   if(!imp||!imp.kind){ alert('取込データがありません'); return; }
   if(imp.kind==='careManager'){
+    const assignments=Array.isArray(imp.data)?imp.data:[];
     db.settings=db.settings||{};
-    db.settings.careManagerList=Array.isArray(imp.data)?imp.data:[];
+    db.settings.careManagerList=mergeCareManagerOfficesIntoList(db.settings.careManagerList||[], assignments);
     touchSetU('careManagerList');
+    let assigned=0;
+    assignments.forEach((entry, i)=>{
+      const nm=normalizeResidentName(entry.name||'');
+      if(!nm) return;
+      const r=(db.residents||[]).find(rr=>normalizeResidentName(rr.name)===nm);
+      if(!r) return;
+      _ensureResidentBillingFields(r);
+      r.careManagerOffice=String(entry.officeCode||'').trim();
+      touchResidentUForSync(r, i);
+      assigned++;
+    });
     saveDB();
     renderSettingsPanel('resident_info');
-    showBriefToast('ケアマネ一覧を反映しました',1800,false);
+    showBriefToast(`ケアマネ事業所を反映しました（${assigned}名・同期で他端末へ）`,2400,false);
     return;
   }
   const data=Array.isArray(imp.data)?imp.data:[];
   let newCount=0;
-  data.forEach(x=>{
+  data.forEach((x, i)=>{
     let r=(db.residents||[]).find(rr=>String(rr.id)===String(x.id));
     if(!r&&x&&x.isNew){
       const name=normalizeResidentName(x.name||'');
@@ -8489,12 +8537,13 @@ function applyResidentInfoImport(){
       r.careExpiry=String(x.careExpiry||'').trim();
       r.costShare=String(x.costShare||'').trim()||'1割';
     }
-    r._u=Date.now();
+    touchResidentUForSync(r, i);
   });
   normalizeResidentsOrder();
   saveDB();
   renderSettingsPanel('resident_info');
-  showBriefToast(`反映しました（新規 ${newCount}件）`,1800,false);
+  const kindLabel=imp.kind==='cert'?'証書情報':imp.kind==='basic'?'基本情報':'情報';
+  showBriefToast(`${kindLabel}を反映しました（新規 ${newCount}件・同期で他端末へ）`,2600,false);
 }
 
 function buildResidentSettings(){
