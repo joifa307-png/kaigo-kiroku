@@ -1643,7 +1643,7 @@ const REC = {
 const N_RECORD_COLS = 57;
 
 /** デプロイのたびに上げる（設定→データ管理の「アプリ情報」で表示） */
-const APP_VERSION='1.4.7';
+const APP_VERSION='1.4.9';
 function isStandaloneWebApp(){
   try{
     if(window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches) return true;
@@ -2070,9 +2070,8 @@ function dbToSheet(inDb){
         a[REC.k]='care'; a[REC.dk]=dk; a[REC.nm]=name; a[REC.uu]=String(_numU(v.sheetU||v.u||0));
         a[REC.seq]=String(idx); a[REC.tm]=v.time||'';
         a[REC.ca0]=v.content||''; a[REC.ca1]=v.staff||'';
-        if(v.forwardToNotes||v.forwardNoteId){
-          a[REC.exj]=JSON.stringify({forwardToNotes:!!v.forwardToNotes,forwardNoteId:v.forwardNoteId||''});
-        }
+        const careExj=buildCareRecordExj(v);
+        if(careExj) a[REC.exj]=careExj;
         pushR(a);
       });
       (rec.notes||[]).forEach((v,idx)=>{
@@ -2082,7 +2081,8 @@ function dbToSheet(inDb){
         a[REC.k]='notes'; a[REC.dk]=dk; a[REC.nm]=name; a[REC.uu]=String(_numU(v.sheetU||v.u||0));
         a[REC.seq]=String(idx); a[REC.tm]=v.time||'';
         a[REC.nt0]=v.content||''; a[REC.nt1]=v.writer||''; a[REC.nt2]=v.ts||'';
-        if(v._deleted) a[REC.exj]=JSON.stringify({_deleted:1});
+        const noteExj=buildNotesRecordExj(v);
+        if(noteExj) a[REC.exj]=noteExj;
         pushR(a);
       });
 
@@ -2194,6 +2194,33 @@ function ensureDay(dbOut, dk, name){
   return r;
 }
 
+function buildCareRecordExj(v){
+  const exj={};
+  if(v&&(v.forwardToNotes||v.forwardNoteId)){
+    exj.forwardToNotes=!!v.forwardToNotes;
+    exj.forwardNoteId=v.forwardNoteId||'';
+  }
+  if(v&&v.lwSent){
+    exj.lwSent=1;
+    if(_numU(v.lwSentAt)) exj.lwSentAt=_numU(v.lwSentAt);
+  }
+  return Object.keys(exj).length?JSON.stringify(exj):'';
+}
+function buildNotesRecordExj(v){
+  const exj={};
+  if(v&&v._deleted) exj._deleted=1;
+  if(v&&v.lwSent){
+    exj.lwSent=1;
+    if(_numU(v.lwSentAt)) exj.lwSentAt=_numU(v.lwSentAt);
+  }
+  return Object.keys(exj).length?JSON.stringify(exj):'';
+}
+function applyLwSentFromExj(exj, target){
+  if(!target||!exj||!exj.lwSent) return;
+  target.lwSent=true;
+  if(_numU(exj.lwSentAt)) target.lwSentAt=_numU(exj.lwSentAt);
+}
+
 function applyRecordRow(dbOut, row){
   row=padSheetRow(Array.isArray(row)?row.slice():[], N_RECORD_COLS);
   const kind=String(row[REC.k]||'').trim();
@@ -2230,7 +2257,7 @@ function applyRecordRow(dbOut, row){
     return;
   }
   if(kind==='care'){
-    rec.care.push({
+    const careRow={
       id:String(row[REC.rid]||genId('c')),
       time:tm||'',
       content:row[REC.ca0],
@@ -2238,11 +2265,13 @@ function applyRecordRow(dbOut, row){
       forwardToNotes:!!exj.forwardToNotes,
       forwardNoteId:exj.forwardNoteId||'',
       sheetU:u
-    });
+    };
+    applyLwSentFromExj(exj, careRow);
+    rec.care.push(careRow);
     return;
   }
   if(kind==='notes'){
-    rec.notes.push({
+    const noteRow={
       id:String(row[REC.rid]||genId('n')),
       time:tm||'',
       content:row[REC.nt0],
@@ -2250,7 +2279,9 @@ function applyRecordRow(dbOut, row){
       ts:row[REC.nt2]||new Date().toISOString(),
       _deleted:!!Number(exj._deleted||0),
       sheetU:u
-    });
+    };
+    applyLwSentFromExj(exj, noteRow);
+    rec.notes.push(noteRow);
     return;
   }
   if(kind==='meal'){
@@ -6351,7 +6382,10 @@ function saveCare(){
     markRecordLwSent(lwTarget);
     sendLwCareMessage(content,curRes,time).then(ok=>{
       if(!ok) clearRecordLwSent(lwTarget);
+      refreshPanel('care');
+      goBack();
     });
+    return;
   }
   goBack();
 }
@@ -8221,12 +8255,12 @@ function buildResidentInfoSettings(){
       <td><input type="text" class="res-info-inp" data-res-id="${rid}" data-field="careExpiry" value="${escapeAttr(String(r.careExpiry||''))}" placeholder="YYYY/MM/DD"></td>
       <td><input type="text" class="res-info-inp" data-res-id="${rid}" data-field="costShare" value="${escapeAttr(String(r.costShare||''))}" placeholder="1割"></td>
       <td>
-        <select class="res-info-sel" data-res-id="${rid}" data-field="careManagerOfficeKey" onchange="onCareManagerOfficeChanged(this)">
+        <select class="res-info-sel" data-res-id="${rid}" data-field="careManagerOfficeKey" onchange="onCareManagerOfficeChanged(this);saveResidentCareManagerFromRow('${rid}')">
           ${officeOpts.replace(`value=\"${officeIdx}\"`, `value=\"${officeIdx}\" selected`)}
         </select>
       </td>
       <td>
-        <select class="res-info-sel" data-res-id="${rid}" data-field="careManagerKey">
+        <select class="res-info-sel" data-res-id="${rid}" data-field="careManagerKey" onchange="saveResidentCareManagerFromRow('${rid}')">
           ${cmOptsForRow}
         </select>
       </td>
@@ -8259,9 +8293,43 @@ function buildResidentInfoSettings(){
       </div>
       <div style="margin-top:10px;">
         <button type="button" class="btn btn-primary btn-sm" onclick="saveResidentInfoAll()">一括保存</button>
+        <p style="font-size:12px;color:var(--text3);margin-top:8px;">居宅介護支援事業所・ケアマネは選択すると自動保存し、約2.5秒後に GAS へ同期します。その他の項目は「一括保存」後に同期されます。</p>
       </div>
     </div>
   </div>`;
+}
+
+/** 利用者行のケアマネ事業所・担当者をプルダウン選択から db に反映 */
+function applyResidentCareManagerSelection(r, oIdx, cmIdx, cmList, offices){
+  if(!r) return;
+  _ensureResidentBillingFields(r);
+  const list=cmList||(db.settings.careManagerList||[]);
+  const offs=offices||getCareManagerOffices(list);
+  if(Number.isFinite(oIdx)&&oIdx>=0&&offs[oIdx]){
+    r.careManagerOffice=String(offs[oIdx].officeCode||'');
+    if(!Number.isFinite(cmIdx)||cmIdx<0) r.careManagerName='';
+  }else{
+    r.careManagerOffice='';
+    r.careManagerName='';
+  }
+  if(Number.isFinite(cmIdx)&&cmIdx>=0&&list[cmIdx]){
+    const cm=list[cmIdx];
+    r.careManagerName=cm.name;
+    r.careManagerOffice=cm.officeCode;
+  }
+}
+/** ケアマネ手動選択のたびに保存＋同期（事業所・担当者は利用者行に載る） */
+function saveResidentCareManagerFromRow(rid){
+  const r=(db.residents||[]).find(x=>String(x.id)===String(rid));
+  if(!r) return;
+  const officeSel=document.querySelector(`select.res-info-sel[data-res-id="${CSS.escape(String(rid))}"][data-field="careManagerOfficeKey"]`);
+  const cmSel=document.querySelector(`select.res-info-sel[data-res-id="${CSS.escape(String(rid))}"][data-field="careManagerKey"]`);
+  const oIdx=officeSel?parseInt(officeSel.value,10):-1;
+  const cmIdx=cmSel?parseInt(cmSel.value,10):-1;
+  applyResidentCareManagerSelection(r, oIdx, cmIdx);
+  touchResidentUForSync(r);
+  saveDB();
+  showBriefToast('ケアマネを保存しました（他端末へ同期）', 2200, false);
 }
 
 function saveResidentInfoAll(){
@@ -8299,24 +8367,9 @@ function saveResidentInfoAll(){
   (db.residents||[]).forEach(r=>{
     const rid=String(r.id);
     if(!cmOfficeSel.has(rid) && !cmSel.has(rid)) return;
-    _ensureResidentBillingFields(r);
     const oIdx=cmOfficeSel.has(rid)?cmOfficeSel.get(rid):-1;
     const cmIdx=cmSel.has(rid)?cmSel.get(rid):-1;
-    if(Number.isFinite(oIdx) && oIdx>=0 && offices[oIdx]){
-      r.careManagerOffice=String(offices[oIdx].officeCode||'');
-      if(!Number.isFinite(cmIdx) || cmIdx<0){
-        r.careManagerName='';
-      }
-    }else{
-      // 未設定
-      r.careManagerOffice='';
-      r.careManagerName='';
-    }
-    if(Number.isFinite(cmIdx) && cmIdx>=0 && cmList[cmIdx]){
-      const cm=cmList[cmIdx];
-      r.careManagerName=cm.name;
-      r.careManagerOffice=cm.officeCode;
-    }
+    applyResidentCareManagerSelection(r, oIdx, cmIdx, cmList, offices);
     touchResidentUForSync(r, cmSyncIdx++);
   });
   saveDB();
