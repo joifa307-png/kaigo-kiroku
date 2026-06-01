@@ -1643,7 +1643,7 @@ const REC = {
 const N_RECORD_COLS = 57;
 
 /** デプロイのたびに上げる（設定→データ管理の「アプリ情報」で表示） */
-const APP_VERSION='1.4.9';
+const APP_VERSION='1.5.0';
 function isStandaloneWebApp(){
   try{
     if(window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches) return true;
@@ -2326,11 +2326,17 @@ function applyRecordRow(dbOut, row){
 }
 
 /** A1 がずれていると sheetToDb が空になり「取得は成功したが反映されない」になる */
+function normalizeSyncMarkerCell(v){
+  return String(v==null?'':v).replace(/\uFEFF/g,'').trim();
+}
 function sheetTopCell(rows){
   if(!rows||!rows.length||!rows[0]||!rows[0].length) return '';
-  const v=rows[0][0];
-  if(v==null||v===undefined) return '';
-  return String(v).trim();
+  return normalizeSyncMarkerCell(rows[0][0]);
+}
+function localDbHasSyncableData(){
+  return (db.residents||[]).length>0
+    || Object.keys(db.records||{}).length>0
+    || (db.supplies||[]).length>0;
 }
 function sheetHasValidSyncMarker(rows){
   return sheetTopCell(rows)===SYNC_MARKER;
@@ -3359,8 +3365,16 @@ function runGasPushCycle(){
     .then(j=>{
       const raw=j.rows||[];
       if(sheetLooksLikeCorruptMarker(raw)){
-        setSyncStatus('同期:A1不正(中断)','orange');
-        return Promise.reject(Object.assign(new Error('bad_sheet_marker'),{silent:true}));
+        const got=sheetTopCell(raw)||'(空)';
+        if(!localDbHasSyncableData()){
+          setSyncStatus('同期:A1不正(中断)','orange');
+          console.warn('runGasPushCycle: シート「'+FAC.sheetName+'」A1は「'+SYNC_MARKER+'」が必要。実際:', got);
+          return Promise.reject(Object.assign(new Error('bad_sheet_marker'),{silent:true,a1:got}));
+        }
+        setSyncStatus('シートA1修復中…','#185FA5');
+        const fullRows=dbToSheet(db);
+        return gasPost({action:'push',sheetName:FAC.sheetName,rows:fullRows})
+          .then(()=>({_sheetRepaired:true}));
       }
       const remote=sheetToDb(raw);
       db=mergePulledDb(db, remote);
@@ -3396,9 +3410,9 @@ function runGasPushCycle(){
       if(!pushBody){
         pushBody={action:'push',sheetName:FAC.sheetName,rows:fullRows};
       }
-      return gasPost(pushBody);
+      return gasPost(pushBody).then(()=>({_sheetRepaired:false}));
     })
-    .then(()=>{
+    .then(meta=>{
       const sk=FAC.storageKey;
       const wantedRids=extractRecRidsFromSheetRows(dbToSheet(db));
       persistLocalQuiet();
@@ -3414,7 +3428,11 @@ function runGasPushCycle(){
       else localStorage.removeItem(sk+'_dirty');
       renderMain();
       const n=new Date();
-      setSyncStatus(`反映済 ${n.getHours()}:${pad(n.getMinutes())}`,'green');
+      const repaired=!!(meta&&meta._sheetRepaired);
+      setSyncStatus(repaired?`A1修復して反映済 ${n.getHours()}:${pad(n.getMinutes())}`:`反映済 ${n.getHours()}:${pad(n.getMinutes())}`,'green');
+      if(repaired){
+        showBriefToast('「'+FAC.sheetName+'」シートのA1を修復して同期しました', 3200, false);
+      }
       if(hasNewerChanges){
         // 直前push中に追加入力された分を確実に送る（次便）
         scheduleGasSync();
@@ -3422,6 +3440,10 @@ function runGasPushCycle(){
     })
     .catch(e=>{
       if(e&&e.silent){
+        if(String(e.message||'').indexOf('bad_sheet_marker')>=0){
+          const a1=e.a1!=null?String(e.a1):'';
+          showBriefToast('シート「'+(FAC&&FAC.sheetName||'')+'」のA1が「'+SYNC_MARKER+'」ではありません（現在:「'+a1+'」）。スプレッドシートのA1を確認するか、この端末にデータがある状態で🔄同期してください。', 6000, true);
+        }
         return Promise.reject(e);
       }
       console.error(e);
