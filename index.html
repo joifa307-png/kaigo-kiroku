@@ -1353,7 +1353,7 @@ function saveDB(){
   }catch(_){}
   if(!FAC) return;
   initializeSetUForExistingSettings();
-  localStorage.setItem(FAC.storageKey, JSON.stringify(db));
+  writeFacilityDbToLocalStorage();
   syncLogoMirror();
   mirrorResidentTypesToLocalStorage();
   saveSettingsSnapshot();
@@ -1643,7 +1643,7 @@ const REC = {
 const N_RECORD_COLS = 57;
 
 /** デプロイのたびに上げる（設定→データ管理の「アプリ情報」で表示） */
-const APP_VERSION='1.5.0';
+const APP_VERSION='1.5.1';
 function isStandaloneWebApp(){
   try{
     if(window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches) return true;
@@ -2347,6 +2347,24 @@ function sheetLooksLikeCorruptMarker(rows){
   const t=sheetTopCell(rows);
   if(rows.length===1 && !t) return false;
   return true;
+}
+/** A1だけ不正でも RESIDENTS/RECORDS 等があれば読み取る（A1修復前のシートデータ温存用） */
+function sheetHasKaigoSectionStructure(rows){
+  if(!rows||!rows.length) return false;
+  for(let i=0;i<rows.length;i++){
+    const c0=String(rows[i][0]||'').trim();
+    if(c0===SEC_RES||c0===SEC_REC||c0===SEC_SET||c0===SEC_SUP) return true;
+  }
+  return false;
+}
+function sheetToDbLenient(rows){
+  if(!rows||!rows.length) return sheetToDb(rows);
+  if(sheetHasValidSyncMarker(rows)) return sheetToDb(rows);
+  if(!sheetHasKaigoSectionStructure(rows)) return sheetToDb([]);
+  return sheetToDb([[SYNC_MARKER]].concat(rows));
+}
+function countRecordDaysInDbObj(d){
+  return Object.keys((d&&d.records)||{}).length;
 }
 
 function sheetToDb(rows){
@@ -3171,18 +3189,41 @@ function gasPost(extra){
     headers:{'Content-Type':'text/plain'},
     body: JSON.stringify(Object.assign({}, extra, {token:tok}))
   }).then(r=>{
-    if(!r.ok) return r.text().then(t=>{ throw new Error('HTTP '+r.status+': '+t.slice(0,120)); });
+    if(!r.ok) return r.text().then(t=>{
+      const err='HTTP '+r.status+': '+t.slice(0,200);
+      if(/quota/i.test(t)) throw Object.assign(new Error(err),{quota:true});
+      throw new Error(err);
+    });
     return r.json();
   }).then(j=>{
-    if(!j.ok) throw new Error(j.error||'GAS応答エラー');
+    if(!j.ok){
+      const err=String(j.error||j.message||'GAS応答エラー');
+      if(/quota/i.test(err)) throw Object.assign(new Error(err),{quota:true});
+      throw new Error(err);
+    }
     return j;
   });
 }
 
+function isStorageQuotaError(e){
+  const msg=String(e&&e.message||e||'').toLowerCase();
+  return /quota|exceeded|storage full|disk full|nospace/i.test(msg);
+}
+function writeFacilityDbToLocalStorage(){
+  if(!FAC) return;
+  try{
+    localStorage.setItem(FAC.storageKey, JSON.stringify(db));
+  }catch(e){
+    if(isStorageQuotaError(e)){
+      showBriefToast('保存できません（端末のストレージ容量不足）。データ管理で古い記録削除・墓石整理をしてください。', 8000, true);
+    }
+    throw e;
+  }
+}
 function persistLocalQuiet(){
   window._kaigoGasSaving=true;
   try{
-    localStorage.setItem(FAC.storageKey, JSON.stringify(db));
+    writeFacilityDbToLocalStorage();
   } finally {
     window._kaigoGasSaving=false;
   }
@@ -3371,10 +3412,20 @@ function runGasPushCycle(){
           console.warn('runGasPushCycle: シート「'+FAC.sheetName+'」A1は「'+SYNC_MARKER+'」が必要。実際:', got);
           return Promise.reject(Object.assign(new Error('bad_sheet_marker'),{silent:true,a1:got}));
         }
+        try{
+          localStorage.setItem(sk+'_repair_backup_v1', JSON.stringify({ts:Date.now(),db:cloneDeep(db)}));
+        }catch(_){}
+        const remotePartial=sheetToDbLenient(raw);
+        const remoteDays=countRecordDaysInDbObj(remotePartial);
+        const localDays=countRecordDaysInDbObj(db);
+        if(remoteDays>0){
+          db=mergePulledDb(db, remotePartial);
+          console.warn('A1修復: シートから記録'+remoteDays+'日分をマージ（ローカル'+localDays+'日）');
+        }
         setSyncStatus('シートA1修復中…','#185FA5');
         const fullRows=dbToSheet(db);
         return gasPost({action:'push',sheetName:FAC.sheetName,rows:fullRows})
-          .then(()=>({_sheetRepaired:true}));
+          .then(()=>({_sheetRepaired:true,_mergedRemoteDays:remoteDays}));
       }
       const remote=sheetToDb(raw);
       db=mergePulledDb(db, remote);
@@ -3431,7 +3482,9 @@ function runGasPushCycle(){
       const repaired=!!(meta&&meta._sheetRepaired);
       setSyncStatus(repaired?`A1修復して反映済 ${n.getHours()}:${pad(n.getMinutes())}`:`反映済 ${n.getHours()}:${pad(n.getMinutes())}`,'green');
       if(repaired){
-        showBriefToast('「'+FAC.sheetName+'」シートのA1を修復して同期しました', 3200, false);
+        const md=meta&&meta._mergedRemoteDays!=null?Number(meta._mergedRemoteDays):0;
+        const extra=md>0?`（シートの記録${md}日分を取り込み済）`:'';
+        showBriefToast('「'+FAC.sheetName+'」シートのA1を修復して同期しました'+extra, 4200, false);
       }
       if(hasNewerChanges){
         // 直前push中に追加入力された分を確実に送る（次便）
@@ -3447,7 +3500,13 @@ function runGasPushCycle(){
         return Promise.reject(e);
       }
       console.error(e);
-      setSyncStatus('同期失敗: '+(e.message||''),'orange');
+      const msg=String(e.message||'');
+      if(e&&e.quota||/quota/i.test(msg)){
+        setSyncStatus('同期:容量/回数上限','orange');
+        showBriefToast('Google側の容量または実行回数上限です。しばらく待ってから🔄同期してください。iPadはデータ管理で古い記録削除も検討してください。', 8000, true);
+      }else{
+        setSyncStatus('同期失敗: '+msg.slice(0,80),'orange');
+      }
       return Promise.reject(e);
     });
 }
