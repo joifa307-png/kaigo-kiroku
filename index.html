@@ -1360,8 +1360,7 @@ function saveDB(){
   syncDirty = true;
   syncDirtyVersion++;
   localStorage.setItem(FAC.storageKey+'_dirty','1'); // ページ再読込後も未送信フラグを保持
-  /** 在庫管理への週次消費数同期は集計送信ボタン押下時のみ行う（saveDB内では呼ばない） */
-  if(!window._kaigoGasSaving) scheduleGasSync();
+  /** GAS同期は手動🔄・起動時（取得のみ）・集計送信のみ。saveDB内では呼ばない（GAS実行回数上限対策） */
 }
 function zaikoGasUrl(){ return (localStorage.getItem('kaigo_zaiko_gas_url')||'').trim(); }
 function zaikoGasToken(){ return (localStorage.getItem('kaigo_zaiko_gas_token')||'KAIGO_ZAIKO_2025').trim()||'KAIGO_ZAIKO_2025'; }
@@ -1643,7 +1642,7 @@ const REC = {
 const N_RECORD_COLS = 57;
 
 /** デプロイのたびに上げる（設定→データ管理の「アプリ情報」で表示） */
-const APP_VERSION='1.5.1';
+const APP_VERSION='1.5.2';
 function isStandaloneWebApp(){
   try{
     if(window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches) return true;
