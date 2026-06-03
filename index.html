@@ -1642,7 +1642,7 @@ const REC = {
 const N_RECORD_COLS = 57;
 
 /** デプロイのたびに上げる（設定→データ管理の「アプリ情報」で表示） */
-const APP_VERSION='1.5.3';
+const APP_VERSION='1.5.4';
 function isStandaloneWebApp(){
   try{
     if(window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches) return true;
@@ -3370,8 +3370,36 @@ function finalizePushSuccessState_(storageKey, wantedRids){
   localStorage.setItem(storageKey+KAIGO_PUSH_RIDS_SUFFIX,JSON.stringify(wantedRids));
 }
 
+/** 起動時 pull のクールダウン（スリープ復帰の再読み込み連打対策）。手動🔄は resetSyncPullCooldown_ で解除 */
+var _lastSyncPullAt = 0;
+const SYNC_PULL_COOLDOWN_MS = 5 * 60 * 1000;
+const KAIGO_LAST_PULL_AT_SUFFIX = ':last_pull_at_v1';
+
+function lastSyncPullAt_(){
+  if(!FAC) return _lastSyncPullAt || 0;
+  const stored = _numU(localStorage.getItem(FAC.storageKey + KAIGO_LAST_PULL_AT_SUFFIX));
+  return Math.max(_lastSyncPullAt || 0, stored);
+}
+function markSyncPullAt_(){
+  const t = Date.now();
+  _lastSyncPullAt = t;
+  if(!FAC) return;
+  try{ localStorage.setItem(FAC.storageKey + KAIGO_LAST_PULL_AT_SUFFIX, String(t)); }catch(_){}
+}
+function resetSyncPullCooldown_(){
+  _lastSyncPullAt = 0;
+  if(!FAC) return;
+  try{ localStorage.removeItem(FAC.storageKey + KAIGO_LAST_PULL_AT_SUFFIX); }catch(_){}
+}
+
 function syncPullOnly(){
+  if(!FAC) return Promise.resolve();
   if(!gasConfigured()){ setSyncStatusIfGasMissing(); return Promise.resolve(); }
+  const now = Date.now();
+  if(now - lastSyncPullAt_() < SYNC_PULL_COOLDOWN_MS){
+    return Promise.resolve();
+  }
+  markSyncPullAt_();
   setSyncStatus('取得中...','#185FA5');
   return gasPost({action:'pull', sheetName:FAC.sheetName})
     .then(j=>{
@@ -3437,9 +3465,10 @@ function runGasPushCycle(){
       const useDelta=Array.isArray(prevSnap)&&lastTs>0;
 
       let pushBody=null;
+      let patchTotal=0;
       if(useDelta){
         const d=extractPushDeltaSlices(fullRows,lastTs);
-        const patchTotal=d.recRows.length+d.resRows.length+d.setRows.length+d.supRows.length;
+        patchTotal=d.recRows.length+d.resRows.length+d.setRows.length+d.supRows.length;
         if(patchTotal>KAIGO_DELTA_MAX_PATCH_ROWS||removed.length>KAIGO_DELTA_MAX_REMOVE_RIDS){
           pushBody=null;
         }else if(patchTotal===0&&removed.length===0){
@@ -3458,6 +3487,12 @@ function runGasPushCycle(){
         }
       }
       if(!pushBody){
+        if(useDelta && patchTotal===0 && removed.length===0){
+          return {_skippedPush:true};
+        }
+        if(!syncDirty){
+          return {_skippedPush:true};
+        }
         pushBody={action:'push',sheetName:FAC.sheetName,rows:fullRows};
       }
       return gasPost(pushBody).then(()=>({_sheetRepaired:false}));
@@ -3469,8 +3504,8 @@ function runGasPushCycle(){
       mirrorResidentTypesToLocalStorage();
       // 同期中に新規保存が入った場合は未送信フラグを残し、次便を必ず実行する
       const hasNewerChanges=(syncDirtyVersion!==cycleVersionStart);
+      const skippedPush=!!(meta&&meta._skippedPush);
       if(!hasNewerChanges){
-        // この便で端末状態を全て反映できたときだけ、差分基準時刻を前進
         finalizePushSuccessState_(sk,wantedRids);
       }
       syncDirty=hasNewerChanges;
@@ -3479,7 +3514,10 @@ function runGasPushCycle(){
       renderMain();
       const n=new Date();
       const repaired=!!(meta&&meta._sheetRepaired);
-      setSyncStatus(repaired?`A1修復して反映済 ${n.getHours()}:${pad(n.getMinutes())}`:`反映済 ${n.getHours()}:${pad(n.getMinutes())}`,'green');
+      const statusLabel=skippedPush
+        ?`取得のみ ${n.getHours()}:${pad(n.getMinutes())}`
+        :(repaired?`A1修復して反映済 ${n.getHours()}:${pad(n.getMinutes())}`:`反映済 ${n.getHours()}:${pad(n.getMinutes())}`);
+      setSyncStatus(statusLabel,'green');
       if(repaired){
         const md=meta&&meta._mergedRemoteDays!=null?Number(meta._mergedRemoteDays):0;
         const extra=md>0?`（シートの記録${md}日分を取り込み済）`:'';
@@ -3524,6 +3562,7 @@ function scheduleGasSync(){
 function syncNow(force){
   if(!FAC){ setSyncStatus('施設未選択','orange'); return Promise.resolve(); }
   if(!gasConfigured()){ setSyncStatusIfGasMissing(); return Promise.resolve(); }
+  resetSyncPullCooldown_();
   syncDirty=true;
   return runGasPushCycle();
 }
