@@ -1002,6 +1002,7 @@ function startApp(){
     setTimeout(()=>{
       try{
         loadDB();
+        autoCleanTombstones();
         gasMirrorToCookies();
         setSyncStatus('--','var(--text3)');
         renderDate();
@@ -1641,7 +1642,7 @@ const REC = {
 const N_RECORD_COLS = 57;
 
 /** デプロイのたびに上げる（設定→データ管理の「アプリ情報」で表示） */
-const APP_VERSION='1.5.5';
+const APP_VERSION='1.5.6';
 function isStandaloneWebApp(){
   try{
     if(window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches) return true;
@@ -9298,17 +9299,50 @@ function runStorageCleanupSuppliesBeforeCutKey(cutKey){
   });
   return before-(db.supplies||[]).length;
 }
-/** _recordItemDel の古いエントリ削除（値が ms タイムスタンプ） */
-function runStorageCleanupOldTombstones(maxAgeDays){
-  const days=Math.max(30,Number(maxAgeDays)||180);
-  const lim=Date.now()-days*86400000;
-  const m=db.settings&&db.settings._recordItemDel;
-  if(!m||typeof m!=='object'||Array.isArray(m)) return 0;
+/** 削除墓石の保持期間（毎日の手動同期で全端末に伝わる想定） */
+const TOMBSTONE_KEEP_MS = 24 * 60 * 60 * 1000;
+
+function pruneTombstoneMapByAge_(map, cutoffMs){
+  if(!map||typeof map!=='object'||Array.isArray(map)) return 0;
   let n=0;
-  Object.keys(m).forEach(k=>{
-    if(_numU(m[k])<lim){ delete m[k]; n++; }
+  Object.keys(map).forEach(k=>{
+    if(_numU(map[k])<cutoffMs){ delete map[k]; n++; }
   });
   return n;
+}
+
+/** 墓石マップの古いエントリ削除（値は削除時刻 ms）。maxAgeMs 省略時は24時間 */
+function runStorageCleanupOldTombstones(maxAgeMs){
+  const ageMs=(maxAgeMs!=null&&maxAgeMs>0)?Number(maxAgeMs):TOMBSTONE_KEEP_MS;
+  const lim=Date.now()-ageMs;
+  db.settings=db.settings||{};
+  if(!db.settings._recordItemDel||typeof db.settings._recordItemDel!=='object'||Array.isArray(db.settings._recordItemDel))
+    db.settings._recordItemDel={};
+  if(!db.settings._residentDel||typeof db.settings._residentDel!=='object'||Array.isArray(db.settings._residentDel))
+    db.settings._residentDel={};
+  if(!db.settings._residentRevive||typeof db.settings._residentRevive!=='object'||Array.isArray(db.settings._residentRevive))
+    db.settings._residentRevive={};
+  let n=0;
+  n+=pruneTombstoneMapByAge_(db.settings._recordItemDel, lim);
+  n+=pruneTombstoneMapByAge_(db.settings._residentDel, lim);
+  n+=pruneTombstoneMapByAge_(db.settings._residentRevive, lim);
+  return n;
+}
+
+/** 起動時：24時間より古い墓石を自動削除（GAS同期は行わない） */
+function autoCleanTombstones(){
+  if(!FAC||!db) return 0;
+  try{
+    const n=runStorageCleanupOldTombstones(TOMBSTONE_KEEP_MS);
+    if(n>0){
+      window._kaigoGasSaving=true;
+      try{ persistLocalQuiet(); }finally{ window._kaigoGasSaving=false; }
+    }
+    return n;
+  }catch(e){
+    console.warn('autoCleanTombstones', e);
+    return 0;
+  }
 }
 function runStorageCleanupByMonths(){
   if(!FAC){ alert('施設が未選択です'); return; }
@@ -9386,13 +9420,10 @@ function emergencyClearStorage(){
 
 function runStorageTombstoneCleanup(){
   if(!FAC){ alert('施設が未選択です'); return; }
-  const inp=document.getElementById('stTombstoneDays');
-  const days=Math.max(30,parseInt(inp&&inp.value||'180',10)||180);
-  if(!confirm(`削除墓石（同期で消した行の内部管理）のうち、${days}日より古いエントリを消します。\n通常は容量削減に有効で、記録内容には影響しません。続行しますか？`)) return;
-  const n=runStorageCleanupOldTombstones(days);
-  if(n) touchSetU('_recordItemDel');
+  if(!confirm('削除墓石（同期で消した行・利用者の内部管理）のうち、24時間より古いエントリを消します。\n記録の表示内容には通常影響しません。続行しますか？')) return;
+  const n=runStorageCleanupOldTombstones(TOMBSTONE_KEEP_MS);
   saveDB();
-  alert(n?`${n} 件の墓石を削除しました`:'削除対象の墓石はありませんでした');
+  alert(n?`${n} 件の墓石を削除しました`:'24時間より古い墓石はありませんでした');
   renderSettingsPanel('data');
 }
 
@@ -9495,12 +9526,8 @@ function buildDataSettings(){
         <input type="checkbox" id="stCleanupAlsoSupplies"> 消耗品の納品記録も同じ基準で削除する
       </label>
       <button type="button" class="btn btn-sm" style="background:#fdecea;color:#b71c1c;border:1px solid #b71c1c;" onclick="runStorageCleanupByMonths()">古いデータを削除</button>
-      <div class="fg" style="margin-top:16px;">
-        <label>削除墓石の掃除（日数）</label>
-        <input type="number" id="stTombstoneDays" min="30" max="730" value="180" style="max-width:120px;font-size:16px;padding:8px;">
-      </div>
-      <p style="font-size:12px;color:var(--text3);margin:4px 0 8px;">同期で「削除した行が戻らない」ための内部データです。古いものだけ消して容量を抑えます。</p>
-      <button type="button" class="btn btn-gray btn-sm" onclick="runStorageTombstoneCleanup()">墓石を掃除</button>
+      <p style="font-size:13px;color:var(--text2);margin:12px 0 8px;line-height:1.5;">削除墓石は<strong>24時間</strong>保持します（起動時に自動掃除）。毎日の手動🔄同期で全端末に削除が伝わる運用向けです。</p>
+      <button type="button" class="btn btn-gray btn-sm" onclick="runStorageTombstoneCleanup()">墓石を掃除（24時間より古い分）</button>
     </div>
     <details class="panel-sec" style="margin-top:4px;">
       <summary style="cursor:pointer;font-size:14px;color:var(--text2);user-select:none;">アプリ情報（普段は閉じておいてください）</summary>
