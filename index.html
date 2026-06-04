@@ -1006,7 +1006,6 @@ function startApp(){
         setSyncStatus('--','var(--text3)');
         renderDate();
         renderMain();
-        syncPullOnly();
         startAutoSync();
         startSanteiReminderClock();
       }catch(err){
@@ -1360,7 +1359,7 @@ function saveDB(){
   syncDirty = true;
   syncDirtyVersion++;
   localStorage.setItem(FAC.storageKey+'_dirty','1'); // ページ再読込後も未送信フラグを保持
-  /** GAS同期は手動🔄・起動時（取得のみ）・集計送信のみ。saveDB内では呼ばない（GAS実行回数上限対策） */
+  /** GAS同期は手動🔄のみ（30分クールダウン）・集計送信のみ。saveDB内では呼ばない */
 }
 function zaikoGasUrl(){ return (localStorage.getItem('kaigo_zaiko_gas_url')||'').trim(); }
 function zaikoGasToken(){ return (localStorage.getItem('kaigo_zaiko_gas_token')||'KAIGO_ZAIKO_2025').trim()||'KAIGO_ZAIKO_2025'; }
@@ -1642,7 +1641,7 @@ const REC = {
 const N_RECORD_COLS = 57;
 
 /** デプロイのたびに上げる（設定→データ管理の「アプリ情報」で表示） */
-const APP_VERSION='1.5.4';
+const APP_VERSION='1.5.5';
 function isStandaloneWebApp(){
   try{
     if(window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches) return true;
@@ -3370,36 +3369,40 @@ function finalizePushSuccessState_(storageKey, wantedRids){
   localStorage.setItem(storageKey+KAIGO_PUSH_RIDS_SUFFIX,JSON.stringify(wantedRids));
 }
 
-/** 起動時 pull のクールダウン（スリープ復帰の再読み込み連打対策）。手動🔄は resetSyncPullCooldown_ で解除 */
-var _lastSyncPullAt = 0;
-const SYNC_PULL_COOLDOWN_MS = 5 * 60 * 1000;
-const KAIGO_LAST_PULL_AT_SUFFIX = ':last_pull_at_v1';
+/** 手動🔄のクールダウン（再読み込み後も localStorage で維持） */
+var _lastManualSyncAt = 0;
+const SYNC_MANUAL_COOLDOWN_MS = 30 * 60 * 1000;
+const KAIGO_LAST_SYNC_AT_SUFFIX = ':last_sync_at_v1';
 
-function lastSyncPullAt_(){
-  if(!FAC) return _lastSyncPullAt || 0;
-  const stored = _numU(localStorage.getItem(FAC.storageKey + KAIGO_LAST_PULL_AT_SUFFIX));
-  return Math.max(_lastSyncPullAt || 0, stored);
+function lastManualSyncAt_(){
+  if(!FAC) return _lastManualSyncAt || 0;
+  const stored = _numU(localStorage.getItem(FAC.storageKey + KAIGO_LAST_SYNC_AT_SUFFIX));
+  const legacyPull = _numU(localStorage.getItem(FAC.storageKey + ':last_pull_at_v1'));
+  return Math.max(_lastManualSyncAt || 0, stored, legacyPull);
 }
-function markSyncPullAt_(){
+function markManualSyncAt_(){
   const t = Date.now();
-  _lastSyncPullAt = t;
+  _lastManualSyncAt = t;
   if(!FAC) return;
-  try{ localStorage.setItem(FAC.storageKey + KAIGO_LAST_PULL_AT_SUFFIX, String(t)); }catch(_){}
+  try{ localStorage.setItem(FAC.storageKey + KAIGO_LAST_SYNC_AT_SUFFIX, String(t)); }catch(_){}
 }
-function resetSyncPullCooldown_(){
-  _lastSyncPullAt = 0;
-  if(!FAC) return;
-  try{ localStorage.removeItem(FAC.storageKey + KAIGO_LAST_PULL_AT_SUFFIX); }catch(_){}
+function syncCooldownRemainingMs_(opts){
+  if(opts && opts.skipCooldown) return 0;
+  const elapsed = Date.now() - lastManualSyncAt_();
+  return Math.max(0, SYNC_MANUAL_COOLDOWN_MS - elapsed);
+}
+function canRunGasSyncNow_(opts){
+  return syncCooldownRemainingMs_(opts) <= 0;
 }
 
-function syncPullOnly(){
+/** 取得のみ（診断等から利用可）。通常起動では呼ばない */
+function syncPullOnly(opts){
   if(!FAC) return Promise.resolve();
   if(!gasConfigured()){ setSyncStatusIfGasMissing(); return Promise.resolve(); }
-  const now = Date.now();
-  if(now - lastSyncPullAt_() < SYNC_PULL_COOLDOWN_MS){
+  if(!canRunGasSyncNow_(opts)){
     return Promise.resolve();
   }
-  markSyncPullAt_();
+  markManualSyncAt_();
   setSyncStatus('取得中...','#185FA5');
   return gasPost({action:'pull', sheetName:FAC.sheetName})
     .then(j=>{
@@ -3423,9 +3426,13 @@ function syncPullOnly(){
     });
 }
 
-function runGasPushCycle(){
+function runGasPushCycle(opts){
   if(!gasConfigured()){ setSyncStatusIfGasMissing(); return Promise.resolve(); }
   if(!syncDirty) return Promise.resolve();
+  if(!canRunGasSyncNow_(opts)){
+    return Promise.resolve();
+  }
+  markManualSyncAt_();
   const sk=FAC.storageKey;
   const cycleVersionStart=syncDirtyVersion;
   setSyncStatus('同期中...','#185FA5');
@@ -3555,19 +3562,25 @@ function scheduleGasSync(){
   gasDebounceTimer=setTimeout(()=>{
     gasDebounceTimer=null;
     if(!gasConfigured()) return;
-    runGasPushCycle();
+    runGasPushCycle({skipCooldown:true});
   }, 2500);
 }
 
 function syncNow(force){
   if(!FAC){ setSyncStatus('施設未選択','orange'); return Promise.resolve(); }
   if(!gasConfigured()){ setSyncStatusIfGasMissing(); return Promise.resolve(); }
-  resetSyncPullCooldown_();
+  const opts=force?{skipCooldown:true}:{};
+  if(!canRunGasSyncNow_(opts)){
+    const min=Math.max(1, Math.ceil(syncCooldownRemainingMs_(opts)/60000));
+    setSyncStatus('同期:あと'+min+'分','orange');
+    showBriefToast('前回の同期から30分以内です。あと約'+min+'分お待ちください。', 5200, true);
+    return Promise.resolve();
+  }
   syncDirty=true;
-  return runGasPushCycle();
+  return runGasPushCycle(opts);
 }
 
-/** バックグラウンド自動 pull は行わない（保存時の双方向同期・起動時1回・手動🔄のみ） */
+/** バックグラウンド自動同期なし（手動🔄のみ・30分クールダウン） */
 function startAutoSync(){
   if(syncTimer){
     clearInterval(syncTimer);
@@ -7808,7 +7821,7 @@ function residentMgmtPushSync(){
     return;
   }
   showBriefToast('スプレッドシートへ送信中…', 8000);
-  syncNow(true)
+  syncNow()
     .then(()=>{
       showBriefToast('同期が完了しました', 2600);
       renderSettingsPanel('resident_mgmt');
