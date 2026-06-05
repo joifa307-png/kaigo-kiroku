@@ -1008,6 +1008,7 @@ function startApp(){
         renderDate();
         renderMain();
         startAutoSync();
+        startScheduledSync();
         startSanteiReminderClock();
       }catch(err){
         console.error('startApp',err);
@@ -1360,7 +1361,7 @@ function saveDB(){
   syncDirty = true;
   syncDirtyVersion++;
   localStorage.setItem(FAC.storageKey+'_dirty','1'); // ページ再読込後も未送信フラグを保持
-  /** GAS同期は手動🔄のみ（30分クールダウン）・集計送信のみ。saveDB内では呼ばない */
+  /** GAS同期は手動🔄・定時9/15時（30分クールダウン）・集計送信のみ。saveDB内では呼ばない */
 }
 function zaikoGasUrl(){ return (localStorage.getItem('kaigo_zaiko_gas_url')||'').trim(); }
 function zaikoGasToken(){ return (localStorage.getItem('kaigo_zaiko_gas_token')||'KAIGO_ZAIKO_2025').trim()||'KAIGO_ZAIKO_2025'; }
@@ -1642,7 +1643,7 @@ const REC = {
 const N_RECORD_COLS = 57;
 
 /** デプロイのたびに上げる（設定→データ管理の「アプリ情報」で表示） */
-const APP_VERSION='1.5.6';
+const APP_VERSION='1.5.7';
 function isStandaloneWebApp(){
   try{
     if(window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches) return true;
@@ -3581,7 +3582,7 @@ function syncNow(force){
   return runGasPushCycle(opts);
 }
 
-/** バックグラウンド自動同期なし（手動🔄のみ・30分クールダウン） */
+/** バックグラウンド自動同期なし（手動🔄・定時9/15時・30分クールダウン） */
 function startAutoSync(){
   if(syncTimer){
     clearInterval(syncTimer);
@@ -3591,6 +3592,60 @@ function startAutoSync(){
     document.removeEventListener('visibilitychange', window._kaigoSyncListener);
     window._kaigoSyncListener=null;
   }
+}
+
+function showSyncBanner(msg){
+  let banner=document.getElementById('sync-banner');
+  if(!banner){
+    banner=document.createElement('div');
+    banner.id='sync-banner';
+    banner.style.cssText='position:fixed;top:0;left:0;right:0;background:#E87722;color:#fff;text-align:center;padding:10px;font-size:15px;font-weight:bold;z-index:9999;display:none;';
+    document.body.appendChild(banner);
+  }
+  banner.textContent=msg;
+  banner.style.display='block';
+}
+function hideSyncBanner(){
+  const banner=document.getElementById('sync-banner');
+  if(banner) banner.style.display='none';
+}
+
+/** 定時自動同期（9:00・15:00）。アプリが開いているときのみ */
+let _autoSyncLastHour=-1;
+let _scheduledSyncInterval=null;
+
+function startScheduledSync(){
+  if(_scheduledSyncInterval){
+    clearInterval(_scheduledSyncInterval);
+    _scheduledSyncInterval=null;
+  }
+  _scheduledSyncInterval=setInterval(()=>{
+    if(!FAC||!gasConfigured()) return;
+    const now=new Date();
+    const h=now.getHours();
+    const m=now.getMinutes();
+    const isScheduledTime=(h===9||h===15)&&m===0;
+    if(isScheduledTime&&_autoSyncLastHour!==h){
+      _autoSyncLastHour=h;
+      doScheduledSync();
+    }
+  }, 60*1000);
+}
+
+function doScheduledSync(){
+  showSyncBanner('ただいま同期中です。記録は少々お待ちください。');
+  showBriefToast('ただいま同期中です。記録は少々お待ちください。', 10000);
+  setSyncStatus('自動同期中...','#E87722');
+  syncNow(true)
+    .then(()=>{
+      hideSyncBanner();
+      showBriefToast('自動同期が完了しました。', 3000);
+    })
+    .catch(e=>{
+      hideSyncBanner();
+      if(e&&e.silent) return;
+      showBriefToast('自動同期に失敗しました。手動で🔄同期してください。', 5000, true);
+    });
 }
 
 function diagSync(){
