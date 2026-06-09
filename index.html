@@ -1643,7 +1643,10 @@ const REC = {
 const N_RECORD_COLS = 57;
 
 /** デプロイのたびに上げる（設定→データ管理の「アプリ情報」で表示） */
-const APP_VERSION='1.5.9';
+const APP_VERSION='1.6.0';
+/** pull取得・ローカル整理の記録保持日数（同期） */
+const KAIGO_PULL_LIMIT_DAYS=60;
+const KAIGO_LOCAL_RECORD_KEEP_DAYS=60;
 function isStandaloneWebApp(){
   try{
     if(window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches) return true;
@@ -3180,6 +3183,10 @@ function clearCalcForSync(rec){
 }
 function bumpCalcU(rec){ if(rec) rec._calcU=Date.now(); }
 
+function gasPullBody_(){
+  return {action:'pull', sheetName:FAC.sheetName, limitDays:KAIGO_PULL_LIMIT_DAYS};
+}
+
 function gasPost(extra){
   const url=gasUrl(), tok=gasToken();
   if(!url||!tok) return Promise.reject(new Error('GAS未設定（データ管理でURL・トークンを入力）'));
@@ -3376,7 +3383,7 @@ function syncPullOnly(){
   if(!FAC) return Promise.resolve();
   if(!gasConfigured()){ setSyncStatusIfGasMissing(); return Promise.resolve(); }
   setSyncStatus('取得中...','#185FA5');
-  return gasPost({action:'pull', sheetName:FAC.sheetName})
+  return gasPost(gasPullBody_())
     .then(j=>{
       const raw=j.rows||[];
       if(sheetLooksLikeCorruptMarker(raw)){
@@ -3404,7 +3411,7 @@ function runGasPushCycle(){
   const sk=FAC.storageKey;
   const cycleVersionStart=syncDirtyVersion;
   setSyncStatus('同期中...','#185FA5');
-  return gasPost({action:'pull', sheetName:FAC.sheetName})
+  return gasPost(gasPullBody_())
     .then(j=>{
       const raw=j.rows||[];
       if(sheetLooksLikeCorruptMarker(raw)){
@@ -3611,7 +3618,7 @@ function diagSync(){
   if(!FAC){ alert('施設未選択'); return; }
   if(!gasConfigured()){ alert('データ管理タブで GAS Webアプリ URL とトークンを設定してください。'); return; }
   gasPost({action:'ping', sheetName:FAC.sheetName})
-    .then(()=>gasPost({action:'pull', sheetName:FAC.sheetName}))
+    .then(()=>gasPost(gasPullBody_()))
     .then(j=>{
       const raw=j.rows||[];
       const a1=sheetTopCell(raw)||'(空)';
@@ -9290,19 +9297,19 @@ function formatStorageSize(bytes){
   if(bytes<1048576) return `${(bytes/1024).toFixed(1)} KB`;
   return `${(bytes/1048576).toFixed(2)} MB`;
 }
-/** 1ヶ月前の暦日キー（ローカル・YYYY-MM-DD） */
-function pruneOldRecordsOneMonthCutKey_(){
+/** 保持日数より前の暦日キー（ローカル・YYYY-MM-DD） */
+function pruneOldRecordsKeepCutKey_(){
   const cut=new Date();
   cut.setHours(0,0,0,0);
-  cut.setMonth(cut.getMonth()-1);
+  cut.setDate(cut.getDate()-KAIGO_LOCAL_RECORD_KEEP_DAYS);
   return dk(cut);
 }
 
-/** バックアップ後など：1ヶ月より前の記録を localStorage から削除（GASシートは触らない） */
+/** バックアップ後など：保持日数より前の記録を localStorage から削除（GASシートは触らない） */
 function pruneOldRecordsAfterBackup(){
   if(!FAC||!db||!db.records) return 0;
   try{
-    const cutKey=pruneOldRecordsOneMonthCutKey_();
+    const cutKey=pruneOldRecordsKeepCutKey_();
     const deletedDays=runStorageCleanupRecordsBeforeCutKey(cutKey);
     if(deletedDays>0){
       coalesceAllRecordArrays(db.records||{});
@@ -9315,12 +9322,12 @@ function pruneOldRecordsAfterBackup(){
   }
 }
 
-function runPruneOldRecordsOneMonthManual(){
+function runPruneOldRecordsKeepManual(){
   if(!FAC){ alert('施設が未選択です'); return; }
-  if(!confirm('1ヶ月より前の記録をlocalStorageから削除します。\nGASシートには全期間のデータが残ります。\nバックアップ後に実行してください。\n\n続行しますか？')) return;
+  if(!confirm(KAIGO_LOCAL_RECORD_KEEP_DAYS+'日より前の記録をlocalStorageから削除します。\nGASシートには全期間のデータが残ります。\nバックアップ後に実行してください。\n\n続行しますか？')) return;
   const d=pruneOldRecordsAfterBackup();
   alert(d>0
-    ? `1ヶ月より前の記録（${d}日分）をlocalStorageから削除しました。\nGASには全データが残っています。`
+    ? KAIGO_LOCAL_RECORD_KEEP_DAYS+'日より前の記録（'+d+'日分）をlocalStorageから削除しました。\nGASには全データが残っています。'
     : '削除対象の記録はありませんでした。');
   renderSettingsPanel('data');
 }
@@ -9561,8 +9568,8 @@ function buildDataSettings(){
       </div>
       <p style="font-size:14px;color:var(--text2);margin-bottom:8px;">このユニットのブラウザ保存の<strong>おおよそのサイズ</strong>（主要キーの文字列長から推定）: <strong>${stEst}</strong></p>
       <div style="margin-bottom:12px;">
-        <button type="button" class="btn btn-sm" onclick="runPruneOldRecordsOneMonthManual()">🗑️ 1ヶ月より前の記録を削除</button>
-        <p style="font-size:12px;color:var(--text3);margin:4px 0 0;line-height:1.5;">※GASシートには全期間のデータが残ります<br>※バックアップ後に実行してください（JSONダウンロード後は自動削除）</p>
+        <button type="button" class="btn btn-sm" onclick="runPruneOldRecordsKeepManual()">🗑️ ${KAIGO_LOCAL_RECORD_KEEP_DAYS}日より前の記録を削除</button>
+        <p style="font-size:12px;color:var(--text3);margin:4px 0 0;line-height:1.5;">※GASシートには全期間のデータが残ります（pullも直近${KAIGO_PULL_LIMIT_DAYS}日分のみ）<br>※バックアップ後に実行してください（JSONダウンロード後は自動削除）</p>
       </div>
       <p style="font-size:13px;color:var(--red);margin-bottom:10px;line-height:1.5;">GAS 同期を使っている場合、古い記録を消したあと「🔄同期」で push すると、スプレッドシートも端末の内容で<strong>全面書き換え</strong>され、削除した日の行はシートからも消えます。実行前に必ず月次保存または JSON エクスポートでバックアップを取ってください。</p>
       <div class="fg">
@@ -9680,7 +9687,7 @@ function exportDB(){
   URL.revokeObjectURL(url);
   const deleted=pruneOldRecordsAfterBackup();
   if(deleted>0){
-    showBriefToast('バックアップ完了。1ヶ月より前の記録（'+deleted+'日分）をlocalStorageから削除しました。GASには全データが残っています。', 6000);
+    showBriefToast('バックアップ完了。'+KAIGO_LOCAL_RECORD_KEEP_DAYS+'日より前の記録（'+deleted+'日分）をlocalStorageから削除しました。GASには全データが残っています。', 6000);
   }else{
     showBriefToast('バックアップが完了しました。', 3000);
   }
