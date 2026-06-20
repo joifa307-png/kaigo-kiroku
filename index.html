@@ -847,7 +847,8 @@ input,select,textarea{font-family:inherit;font-size:30px;}
       <div class="sup-sum-toolbar" style="display:flex;align-items:center;gap:12px;margin-bottom:16px;flex-wrap:wrap;">
         <label>対象月</label>
         <input type="month" id="supSumMonth" onchange="renderSupplySummary()">
-        <button type="button" class="btn btn-sm" style="background:#FFF3CD;color:#856404;border:1px solid #856404;" onclick="sendZaikoSummaryNow()">集計結果送信</button>
+        <p style="font-size:12px;color:var(--text3);margin:0;line-height:1.5;">記録・削除時に在庫へ自動送信されます（在庫GAS URL設定時）</p>
+        <button type="button" class="btn btn-sm" style="background:var(--white);color:var(--text2);border:1px solid var(--border2);" onclick="sendZaikoSummaryNow()">手動で再送</button>
       </div>
       <div id="supSummary"></div>
       <button type="button" class="btn-sup-close" style="margin-top:16px;" onclick="closeOv('ovSupply')">閉じる</button>
@@ -1361,7 +1362,7 @@ function saveDB(){
   syncDirty = true;
   syncDirtyVersion++;
   localStorage.setItem(FAC.storageKey+'_dirty','1'); // ページ再読込後も未送信フラグを保持
-  /** GAS同期は手動🔄・定時9/15時・集計送信のみ。saveDB内では呼ばない */
+  /** GAS同期は手動🔄・定時9/15時。在庫GASは卸記録の追加・削除時に自動送信 */
 }
 function zaikoGasUrl(){ return (localStorage.getItem('kaigo_zaiko_gas_url')||'').trim(); }
 function zaikoGasToken(){ return (localStorage.getItem('kaigo_zaiko_gas_token')||'KAIGO_ZAIKO_2025').trim()||'KAIGO_ZAIKO_2025'; }
@@ -1528,6 +1529,39 @@ function postZaikoConsumptionWeeklyMinami(){
   return postZaikoConsumptionWeeklyFor('kaigo_minami',{ sender:'kaigo_minami_auto', field:'minamiConsumedSync' });
 }
 
+function zaikoConsumptionSyncOpts_(overrides){
+  const isMinami=FAC && String(FAC.storageKey||'')==='kaigo_minami';
+  return Object.assign({
+    sender:isMinami?'kaigo_minami_auto':'kaigo_nishi_auto',
+    field:isMinami?'minamiConsumedSync':'nishiConsumedSync',
+    treatFetchErrorAsSuccess:true,
+  }, overrides||{});
+}
+
+function runZaikoConsumptionSync_(opts){
+  const url=zaikoGasUrl();
+  if(!url) return Promise.resolve(false);
+  const sk=FAC ? FAC.storageKey : 'kaigo_nishi';
+  return postZaikoConsumptionWeeklyFor(sk, zaikoConsumptionSyncOpts_(opts));
+}
+
+let zaikoDebounceTimer=null;
+/** 卸記録の追加・削除後、在庫GASへ集計を自動送信（2.5秒デバウンス） */
+function scheduleZaikoConsumptionSync(){
+  if(!zaikoGasUrl()) return;
+  if(zaikoDebounceTimer) clearTimeout(zaikoDebounceTimer);
+  zaikoDebounceTimer=setTimeout(()=>{
+    zaikoDebounceTimer=null;
+    runZaikoConsumptionSync_().then(ok=>{
+      if(ok) showBriefToast('在庫管理側へ記録されました', 3200);
+      else showBriefToast('在庫への自動送信を確認できませんでした（集計タブから再送できます）', 4500, true);
+    }).catch(e=>{
+      console.warn('zaiko auto sync', e);
+      showBriefToast('在庫への自動送信に失敗しました（集計タブから再送できます）', 4500, true);
+    });
+  }, 2500);
+}
+
 function settingsSnapshotKey(){
   return FAC ? (FAC.storageKey+'_settings_snap_v1') : 'kaigo_settings_snap_v1';
 }
@@ -1643,7 +1677,7 @@ const REC = {
 const N_RECORD_COLS = 57;
 
 /** デプロイのたびに上げる（設定→データ管理の「アプリ情報」で表示） */
-const APP_VERSION='1.6.1';
+const APP_VERSION='1.6.3';
 /** pull取得・ローカル整理の記録保持日数（同期） */
 const KAIGO_PULL_LIMIT_DAYS=30;
 const KAIGO_LOCAL_RECORD_KEEP_DAYS=30;
@@ -7654,6 +7688,7 @@ function addSupply(){
   document.getElementById('supQty').value='1';
   renderSupplyList();
   if(typeof curTab!=='undefined'&&curTab==='excretion') refreshPanel('excretion');
+  scheduleZaikoConsumptionSync();
 }
 
 function delSupply(id){
@@ -7663,6 +7698,7 @@ function delSupply(id){
   saveDB();
   renderSupplyList();
   if(typeof curTab!=='undefined'&&curTab==='excretion') refreshPanel('excretion');
+  scheduleZaikoConsumptionSync();
 }
 
 // ========== 設定画面 ==========
@@ -9615,22 +9651,13 @@ function saveZaikoConfig(){
   }
 }
 function sendZaikoSummaryNow(){
-  const url=zaikoGasUrl();
-  if(!url){ alert('GAS URLを設定してください'); return; }
-  const isMinami=FAC && String(FAC.storageKey||'')==='kaigo_minami';
+  if(!zaikoGasUrl()){ alert('在庫管理GAS URLを設定してください'); return; }
   showBriefToast('在庫へ送信中…', 6000);
-  postZaikoConsumptionWeeklyFor(
-    isMinami?'kaigo_minami':'kaigo_nishi',
-    {
-      sender:isMinami?'kaigo_minami_auto':'kaigo_nishi_auto',
-      field:isMinami?'minamiConsumedSync':'nishiConsumedSync',
-      treatFetchErrorAsSuccess:true,
-    }
-  ).then(ok=>{
+  runZaikoConsumptionSync_().then(ok=>{
     if(ok) showBriefToast('送信しました（在庫アプリ側に反映されます）', 3200);
     else showBriefToast('送信結果を確認できませんでした（反映されている可能性があります）', 4500, true);
   }).catch(()=>{
-    showBriefToast('送信結果を確認できませんでした（反映されている可能性があります）', 4500, true);
+    showBriefToast('送信に失敗しました', 4500, true);
   });
 }
 function saveGasConfig(){
