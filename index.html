@@ -1677,7 +1677,7 @@ const REC = {
 const N_RECORD_COLS = 57;
 
 /** デプロイのたびに上げる（設定→データ管理の「アプリ情報」で表示） */
-const APP_VERSION='1.6.4';
+const APP_VERSION='1.6.5';
 /** pull取得・ローカル整理の記録保持日数（同期） */
 const KAIGO_PULL_LIMIT_DAYS=30;
 const KAIGO_LOCAL_RECORD_KEEP_DAYS=30;
@@ -2077,7 +2077,7 @@ function dbToSheet(inDb){
         const a=blankRecRow();
         a[REC.rid]=String(v.id);
         a[REC.k]='vital'; a[REC.dk]=dk; a[REC.nm]=name; a[REC.uu]=String(_numU(v.sheetU||v.u||0));
-        a[REC.seq]=String(idx); a[REC.tm]=v.time||'';
+        a[REC.seq]=String(idx); a[REC.tm]=sheetTimeOut_(v.time);
         a[REC.v0]=normalizeTempValue(v.temp??''); a[REC.v1]=v.sbp??''; a[REC.v2]=v.dbp??''; a[REC.v3]=v.pulse??''; a[REC.v4]=v.spo2??''; a[REC.v5]=v.weight??''; a[REC.v6]=v.staff||'';
         pushR(a);
       });
@@ -2086,7 +2086,7 @@ function dbToSheet(inDb){
         const a=blankRecRow();
         a[REC.rid]=String(v.id);
         a[REC.k]='excretion'; a[REC.dk]=dk; a[REC.nm]=name; a[REC.uu]=String(_numU(v.sheetU||v.u||0));
-        a[REC.seq]=String(idx); a[REC.tm]=v.time||'';
+        a[REC.seq]=String(idx); a[REC.tm]=sheetTimeOut_(v.time);
         a[REC.ex0]=v.urine||''; a[REC.ex1]=v.pad||''; a[REC.ex2]=v.stool||''; a[REC.ex3]=v.writer||'';
         a[REC.ex4]=v.padChange?1:0; a[REC.ex5]=v.rehaChange?1:0; a[REC.ex6]=v.diaperChange?1:0; a[REC.ex7]=v.urineMl||'';
         pushR(a);
@@ -2096,7 +2096,7 @@ function dbToSheet(inDb){
         const a=blankRecRow();
         a[REC.rid]=String(v.id);
         a[REC.k]='bath'; a[REC.dk]=dk; a[REC.nm]=name; a[REC.uu]=String(_numU(v.sheetU||v.u||0));
-        a[REC.seq]=String(idx); a[REC.tm]=v.time||'';
+        a[REC.seq]=String(idx); a[REC.tm]=sheetTimeOut_(v.time);
         a[REC.ba0]=v.type||''; a[REC.ba1]=v.staff||'';
         pushR(a);
       });
@@ -2105,7 +2105,7 @@ function dbToSheet(inDb){
         const a=blankRecRow();
         a[REC.rid]=String(v.id);
         a[REC.k]='care'; a[REC.dk]=dk; a[REC.nm]=name; a[REC.uu]=String(_numU(v.sheetU||v.u||0));
-        a[REC.seq]=String(idx); a[REC.tm]=v.time||'';
+        a[REC.seq]=String(idx); a[REC.tm]=sheetTimeOut_(v.time);
         a[REC.ca0]=v.content||''; a[REC.ca1]=v.staff||'';
         const careExj=buildCareRecordExj(v);
         if(careExj) a[REC.exj]=careExj;
@@ -2116,7 +2116,7 @@ function dbToSheet(inDb){
         const a=blankRecRow();
         a[REC.rid]=String(v.id);
         a[REC.k]='notes'; a[REC.dk]=dk; a[REC.nm]=name; a[REC.uu]=String(_numU(v.sheetU||v.u||0));
-        a[REC.seq]=String(idx); a[REC.tm]=v.time||'';
+        a[REC.seq]=String(idx); a[REC.tm]=sheetTimeOut_(v.time);
         a[REC.nt0]=v.content||''; a[REC.nt1]=v.writer||''; a[REC.nt2]=v.ts||'';
         const noteExj=buildNotesRecordExj(v);
         if(noteExj) a[REC.exj]=noteExj;
@@ -2128,9 +2128,9 @@ function dbToSheet(inDb){
         const a=blankRecRow();
         a[REC.rid]='meal|'+dk+'|'+name; a[REC.k]='meal'; a[REC.dk]=dk; a[REC.nm]=name; a[REC.uu]=String(_numU(m._u||0));
         a[REC.seq]='0'; a[REC.tm]='';
-        a[REC.mbt]=m.bTime||''; a[REC.mbm]=m.bMain??''; a[REC.mbs]=m.bSide??''; a[REC.mbw]=m.bWater??'';
-        a[REC.mlt]=m.time||''; a[REC.mm]=m.menu||''; a[REC.msk]=m.snack||''; a[REC.mlmi]=m.main??''; a[REC.mls]=m.side??''; a[REC.mlw]=m.water??'';
-        a[REC.mdt]=m.dTime||''; a[REC.mdm]=m.dMain??''; a[REC.mds]=m.dSide??''; a[REC.mdw]=m.dWater??'';
+        a[REC.mbt]=sheetTimeOut_(m.bTime); a[REC.mbm]=m.bMain??''; a[REC.mbs]=m.bSide??''; a[REC.mbw]=m.bWater??'';
+        a[REC.mlt]=sheetTimeOut_(m.time); a[REC.mm]=m.menu||''; a[REC.msk]=m.snack||''; a[REC.mlmi]=m.main??''; a[REC.mls]=m.side??''; a[REC.mlw]=m.water??'';
+        a[REC.mdt]=sheetTimeOut_(m.dTime); a[REC.mdm]=m.dMain??''; a[REC.mds]=m.dSide??''; a[REC.mdw]=m.dWater??'';
         const mealMeta={
           bU:_numU(m.bU),lU:_numU(m.lU),dU:_numU(m.dU),
           bDel:!!Number(m.bDel||0),lDel:!!Number(m.lDel||0),dDel:!!Number(m.dDel||0)
@@ -2146,7 +2146,7 @@ function dbToSheet(inDb){
         const a=blankRecRow();
         a[REC.rid]='med|'+dk+'|'+name+'|'+timing; a[REC.k]='med'; a[REC.dk]=dk; a[REC.nm]=name; a[REC.uu]=String(_numU(slot._u||0));
         a[REC.seq]='0'; a[REC.tm]='';
-        a[REC.mt]=timing; a[REC.mtt]=slot.time||''; a[REC.mts]=slot.staff||''; a[REC.mj]=JSON.stringify(slot.items||[]);
+        a[REC.mt]=timing; a[REC.mtt]=sheetTimeOut_(slot.time); a[REC.mts]=slot.staff||''; a[REC.mj]=JSON.stringify(slot.items||[]);
         pushR(a);
       });
 
@@ -2154,7 +2154,7 @@ function dbToSheet(inDb){
       if(rc.content||(rc.chips&&rc.chips.length)||rc.kanken||rc.time||rc.part){
         const a=blankRecRow();
         a[REC.rid]='rec|'+dk+'|'+name; a[REC.k]='rec'; a[REC.dk]=dk; a[REC.nm]=name; a[REC.uu]=String(_numU(rc._u||0));
-        a[REC.seq]='0'; a[REC.tm]=rc.time||'';
+        a[REC.seq]='0'; a[REC.tm]=sheetTimeOut_(rc.time);
         a[REC.rp]=rc.part||''; a[REC.rc]=rc.content||''; a[REC.rk]=rc.kanken?1:0; a[REC.rch]=JSON.stringify(rc.chips||[]);
         pushR(a);
       }
@@ -2264,7 +2264,7 @@ function applyRecordRow(dbOut, row){
   const dk=normalizeDateKey(row[REC.dk]);
   const name=String(row[REC.nm]||'').trim();
   const u=_numU(row[REC.uu]);
-  const tm=normalizeTimeText(row[REC.tm]);
+  const tm=sheetTimeIn_(row[REC.tm]);
   if(!dk||!name||!kind) return;
   const rec=ensureDay(dbOut, dk, name);
   let exj={};
@@ -6020,24 +6020,40 @@ function buildStaffSelect(id, cur){
 function normalizeTimeText(v){
   if(v==null||v==='') return '';
   if(v instanceof Date && !isNaN(v.getTime())){
+    const y=v.getFullYear(), mo=v.getMonth(), da=v.getDate();
+    if(y===1899&&mo===11&&(da===30||da===31)&&v.getHours()===0&&v.getMinutes()===0) return '';
     return `${pad(v.getHours())}:${pad(v.getMinutes())}`;
   }
-  if(typeof v==='number' && isFinite(v) && v>=0 && v<1){
-    const totalMin=Math.round(v*24*60);
-    return `${pad(Math.floor(totalMin/60)%24)}:${pad(totalMin%60)}`;
+  if(typeof v==='number' && isFinite(v)){
+    if(v===0) return '';
+    if(v>0 && v<1){
+      const totalMin=Math.round(v*24*60);
+      const hm=`${pad(Math.floor(totalMin/60)%24)}:${pad(totalMin%60)}`;
+      return hm==='00:00'?'':hm;
+    }
   }
   const s=String(v).trim();
-  if(!s) return '';
+  if(!s||s==='00:00'||s==='0:00') return '';
   const hm=s.match(/^(\d{1,2}):(\d{1,2})(?::\d{1,2})?$/);
-  if(hm) return `${pad(Number(hm[1]))}:${pad(Number(hm[2]))}`;
+  if(hm){
+    const out=`${pad(Number(hm[1]))}:${pad(Number(hm[2]))}`;
+    return out==='00:00'?'':out;
+  }
   if(/^\d{4}-\d{2}-\d{2}$/.test(s)) return '';
   const t=Date.parse(s);
   if(!isNaN(t)){
     const d=new Date(t);
-    return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    const y=d.getFullYear(), mo=d.getMonth(), da=d.getDate();
+    if(y===1899&&mo===11&&(da===30||da===31)&&d.getHours()===0&&d.getMinutes()===0) return '';
+    const out=`${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    return out==='00:00'?'':out;
   }
   return s;
 }
+/** シート G 列(time) へ書き込む用：不正な 00:00 は空文字 */
+function sheetTimeOut_(v){ return normalizeTimeText(v); }
+/** シート G 列(time) から読み込み用 */
+function sheetTimeIn_(v){ return normalizeTimeText(v); }
 /** Chrome 等：innerHTML で作った type=time は attribute の value が効かないことがある */
 function initPanelTimeInputs_(root){
   const scope=root||document;
