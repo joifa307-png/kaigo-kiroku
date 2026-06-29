@@ -1677,7 +1677,7 @@ const REC = {
 const N_RECORD_COLS = 57;
 
 /** デプロイのたびに上げる（設定→データ管理の「アプリ情報」で表示） */
-const APP_VERSION='1.6.3';
+const APP_VERSION='1.6.4';
 /** pull取得・ローカル整理の記録保持日数（同期） */
 const KAIGO_PULL_LIMIT_DAYS=30;
 const KAIGO_LOCAL_RECORD_KEEP_DAYS=30;
@@ -2336,7 +2336,7 @@ function applyRecordRow(dbOut, row){
     const timing=String(row[REC.mt]||'morning');
     let items=[];
     try{ items=JSON.parse(row[REC.mj]||'[]')||[]; }catch(_){ items=[]; }
-    rec.med[timing]={ time:row[REC.mtt]||'', staff:row[REC.mts]||'', items, _u:u };
+    rec.med[timing]={ time:normalizeTimeText(row[REC.mtt])||'', staff:row[REC.mts]||'', items, _u:u };
     return;
   }
   if(kind==='rec'){
@@ -5881,6 +5881,7 @@ function refreshPanel(tab){
     case 'santei':    el.innerHTML=buildSanteiPanel(); break;
     case 'summary':   el.innerHTML=buildSummaryPanel(); break;
   }
+  initPanelTimeInputs_(el);
 }
 
 // ========== 48時間履歴取得（選択日＝「当日」の終わりを基準に72時間以内） ==========
@@ -5896,7 +5897,12 @@ function recordItemTsMs(dkStr, item){
     const x=Date.parse(String(item.ts));
     if(!isNaN(x)) return x;
   }
-  return new Date(dkStr+'T'+(item&&item.time||'00:00')+':00').getTime();
+  const hm=normalizeTimeText(item&&item.time);
+  if(hm){
+    const ts=timestampFromDateKeyAndHm(dkStr, hm);
+    if(!isNaN(ts)) return ts;
+  }
+  return new Date(dkStr+'T12:00:00').getTime();
 }
 function get48h(name, field){
   const refEnd=historyRefEndMs(), limit=72*3600000, all=[];
@@ -6012,17 +6018,36 @@ function buildStaffSelect(id, cur){
   if(el) el.innerHTML=buildStaffOpts(cur);
 }
 function normalizeTimeText(v){
-  const s=String(v||'').trim();
+  if(v==null||v==='') return '';
+  if(v instanceof Date && !isNaN(v.getTime())){
+    return `${pad(v.getHours())}:${pad(v.getMinutes())}`;
+  }
+  if(typeof v==='number' && isFinite(v) && v>=0 && v<1){
+    const totalMin=Math.round(v*24*60);
+    return `${pad(Math.floor(totalMin/60)%24)}:${pad(totalMin%60)}`;
+  }
+  const s=String(v).trim();
   if(!s) return '';
-  /** HH:mm または HH:mm:ss（シート・入力により秒が付く。旧実装は秒付きを素通しし T...:00 と二重になり Safari で Invalid になりやすい） */
   const hm=s.match(/^(\d{1,2}):(\d{1,2})(?::\d{1,2})?$/);
   if(hm) return `${pad(Number(hm[1]))}:${pad(Number(hm[2]))}`;
+  if(/^\d{4}-\d{2}-\d{2}$/.test(s)) return '';
   const t=Date.parse(s);
   if(!isNaN(t)){
     const d=new Date(t);
     return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
   }
   return s;
+}
+/** Chrome 等：innerHTML で作った type=time は attribute の value が効かないことがある */
+function initPanelTimeInputs_(root){
+  const scope=root||document;
+  scope.querySelectorAll('input[type=time]').forEach(inp=>{
+    const attr=inp.getAttribute('value');
+    if(attr!=null&&String(attr).trim()!==''){
+      const nv=normalizeTimeText(attr);
+      if(nv) inp.value=nv;
+    }
+  });
 }
 function normalizeTempValue(v){
   let s=String(v||'').trim()
@@ -6123,7 +6148,7 @@ function buildVitalPanel(){
 }
 function editVital(dkStr,idx){
   const v=getRec(curRes,dkStr).vital[idx];
-  document.getElementById('vTime').value=v.time||'';
+  document.getElementById('vTime').value=normalizeTimeText(v.time)||'';
   document.getElementById('vSbp').value=v.sbp||'';
   document.getElementById('vDbp').value=v.dbp||'';
   document.getElementById('vPulse').value=v.pulse||'';
@@ -6139,7 +6164,7 @@ function editVital(dkStr,idx){
   document.getElementById('vitalForm').scrollIntoView({behavior:'smooth'});
 }
 function saveVital(){
-  const time=document.getElementById('vTime').value||nowTime();
+  const time=normalizeTimeText(document.getElementById('vTime').value)||nowTime();
   const sbp=document.getElementById('vSbp').value;
   const dbp=document.getElementById('vDbp').value;
   const pulse=document.getElementById('vPulse').value;
@@ -6262,7 +6287,7 @@ function editEx(dkStr,idx){
   const e=getRec(curRes,dkStr).excretion[idx];
   const S=db.settings||{};
   const setOpt=(id,val)=>{const el=document.getElementById(id);if(el){[...el.options].forEach(o=>{o.selected=o.value===val||o.text===val;});}};
-  document.getElementById('exTime').value=e.time||'';
+  document.getElementById('exTime').value=normalizeTimeText(e.time)||'';
   setOpt('exUrine',e.urine||'');
   setOpt('exUrineMl',e.urineMl||'');
   setOpt('exPad',e.pad||'');
@@ -6280,7 +6305,7 @@ function editEx(dkStr,idx){
   document.getElementById('exForm').scrollIntoView({behavior:'smooth'});
 }
 function saveEx(){
-  const time=document.getElementById('exTime').value||nowTime();
+  const time=normalizeTimeText(document.getElementById('exTime').value)||nowTime();
   const writer=document.getElementById('exWriter').value;
   const urine=document.getElementById('exUrine').value;
   const urineMl=document.getElementById('exUrineMl').value;
@@ -6337,7 +6362,7 @@ function buildBathPanel(){
 let _editBath=null;
 function editBath(dkStr,idx){
   const b=getRec(curRes,dkStr).bath[idx];
-  document.getElementById('baTime').value=b.time||'';
+  document.getElementById('baTime').value=normalizeTimeText(b.time)||'';
   const sel=document.getElementById('baType');
   if(sel)[...sel.options].forEach(o=>{o.selected=o.text===b.type;});
   buildStaffSelect('baStaff',b.staff);
@@ -6355,7 +6380,7 @@ function _updateBathCalculated(resName, dateKey){
   rec.bathCalculated=hasBath;
 }
 function saveBath(){
-  const time=document.getElementById('baTime').value||nowTime();
+  const time=normalizeTimeText(document.getElementById('baTime').value)||nowTime();
   const type=document.getElementById('baType').value;
   const staff=document.getElementById('baStaff').value;
   if(_editBath){
@@ -6513,7 +6538,7 @@ async function sendLwCareMessage(content, residentName, time){
 let _editCare=null;
 function editCare(dkStr,idx){
   const c=getRec(curRes,dkStr).care[idx];
-  document.getElementById('caTime').value=c.time||'';
+  document.getElementById('caTime').value=normalizeTimeText(c.time)||'';
   document.getElementById('caContent').value=c.content||'';
   const fw=document.getElementById('caForwardChip');
   if(fw) fw.classList.toggle('selected', !!c.forwardToNotes);
@@ -6530,7 +6555,7 @@ function editCare(dkStr,idx){
   document.getElementById('careForm').scrollIntoView({behavior:'smooth'});
 }
 function saveCare(){
-  const time=document.getElementById('caTime').value||nowTime();
+  const time=normalizeTimeText(document.getElementById('caTime').value)||nowTime();
   const staff='';
   const content=document.getElementById('caContent').value.trim();
   const forwardToNotes=!!document.getElementById('caForwardChip')?.classList.contains('selected');
@@ -6690,7 +6715,7 @@ function selectMedTimingChip(timing){
   });
   const targetName=document.querySelector('#medTargetChips .chip.selected')?.getAttribute('data-name')||curRes;
   const m=getRec(targetName).med[timing]||{time:'',staff:'',items:[]};
-  document.getElementById('medFormTime').value=m.time||medDefaultTimeByTiming(timing);
+  document.getElementById('medFormTime').value=normalizeTimeText(m.time)||medDefaultTimeByTiming(timing);
   document.getElementById('medFormStaff').value=m.staff||'';
   const medChipItems=['処方薬','漢方薬','解熱鎮痛薬','点眼薬','服薬なし'];
   document.querySelectorAll('#medFormChips .med-chip').forEach(el=>{
@@ -6715,7 +6740,7 @@ function toggleMedChipForm(el,item){
 function saveMed(){
   const timing=document.getElementById('medFormTiming')?.value;
   if(!timing) return;
-  const time=document.getElementById('medFormTime').value;
+  const time=normalizeTimeText(document.getElementById('medFormTime').value)||'';
   const staff=document.getElementById('medFormStaff').value;
   const chipped=[...document.querySelectorAll('#medFormChips .med-chip.on, #medFormChips .med-chip.none-on')]
     .map(e=>e.dataset.item||e.textContent.trim());
@@ -6776,7 +6801,7 @@ function saveBulkMed(){
     return MED_TIMINGS.find(t=>t.label===label)?.id;
   }).filter(Boolean);
   const staff=document.getElementById('bulkStaff').value;
-  const time=document.getElementById('bulkTime').value||nowTime();
+  const time=normalizeTimeText(document.getElementById('bulkTime').value)||nowTime();
   const names=[...document.querySelectorAll('#bulkRes .chip.selected')].map(e=>e.dataset.name);
   if(!timings.length||!names.length){ alert('服薬区分と対象者を選んでください'); return; }
   names.forEach(name=>{
@@ -6891,7 +6916,7 @@ function selectMealChip(section){
     lunch:    {time:m.time||'11:50', main:m.main||0, side:m.side||0, menu:normalizeMealFreeText(m.menu)||'',water:m.water||'',snack:normalizeMealFreeText(m.snack)||''},
     dinner:   {time:m.dTime||'17:30',main:m.dMain||0,side:m.dSide||0,menu:'',water:m.dWater||'',snack:''}
   }[section];
-  document.getElementById('mealTime').value=data.time;
+  document.getElementById('mealTime').value=normalizeTimeText(data.time)||'';
   document.getElementById('mealMain').value=String(data.main);
   document.getElementById('mealSide').value=String(data.side);
   document.getElementById('mealMenu').value=data.menu;
@@ -6910,7 +6935,7 @@ function _getMealFormData(){
   return{
     section,
     dateKey:document.getElementById('mealEditDate')?.value||dk(),
-    time:document.getElementById('mealTime').value,
+    time:normalizeTimeText(document.getElementById('mealTime').value)||'',
     main:parseInt(document.getElementById('mealMain').value)||0,
     side:parseInt(document.getElementById('mealSide').value)||0,
     menu:document.getElementById('mealMenu').value,
@@ -6921,9 +6946,9 @@ function _getMealFormData(){
 function _applyMealData(resName, d, dateKey){
   const m=getRec(resName,dateKey).meal;
   const ts=Date.now();
-  if(d.section==='breakfast'){ m.bTime=d.time; m.bMain=d.main; m.bSide=d.side; m.bWater=d.water; m.bU=ts; m.bDel=0; }
-  else if(d.section==='lunch'){ m.time=d.time; m.main=d.main; m.side=d.side; m.menu=d.menu; m.water=d.water; m.snack=d.snack; m.lU=ts; m.lDel=0; }
-  else { m.dTime=d.time; m.dMain=d.main; m.dSide=d.side; m.dWater=d.water; m.dU=ts; m.dDel=0; }
+  if(d.section==='breakfast'){ m.bTime=normalizeTimeText(d.time)||'07:30'; m.bMain=d.main; m.bSide=d.side; m.bWater=d.water; m.bU=ts; m.bDel=0; }
+  else if(d.section==='lunch'){ m.time=normalizeTimeText(d.time)||'11:50'; m.main=d.main; m.side=d.side; m.menu=d.menu; m.water=d.water; m.snack=d.snack; m.lU=ts; m.lDel=0; }
+  else { m.dTime=normalizeTimeText(d.time)||'17:30'; m.dMain=d.main; m.dSide=d.side; m.dWater=d.water; m.dU=ts; m.dDel=0; }
   m._u=ts;
 }
 function saveMealSection(){
@@ -7013,7 +7038,7 @@ function toggleRecChip(el,item){
 function toggleKanken(el){ el.classList.toggle('selected'); }
 function _getRecFormData(){
   return{
-    time:document.getElementById('recTime').value,
+    time:normalizeTimeText(document.getElementById('recTime').value)||nowTime(),
     part:'',
     chips:[...document.querySelectorAll('#recChips .chip.selected')].map(e=>e.textContent),
     kanken:document.getElementById('kankenChip')?.classList.contains('selected')||false,
@@ -7076,7 +7101,7 @@ function editNote(dkStr,idx){
   document.getElementById('noteFormTitle')?.scrollIntoView({behavior:'smooth'});
 }
 function saveNote(){
-  const time=document.getElementById('ntTime').value||nowTime();
+  const time=normalizeTimeText(document.getElementById('ntTime').value)||nowTime();
   const writer=document.getElementById('ntWriter').value;
   const content=document.getElementById('ntContent').value.trim();
   if(!content){ alert('内容を入力してください'); return; }
