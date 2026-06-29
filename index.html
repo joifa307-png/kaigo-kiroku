@@ -1677,7 +1677,7 @@ const REC = {
 const N_RECORD_COLS = 57;
 
 /** デプロイのたびに上げる（設定→データ管理の「アプリ情報」で表示） */
-const APP_VERSION='1.6.5';
+const APP_VERSION='1.6.6';
 /** pull取得・ローカル整理の記録保持日数（同期） */
 const KAIGO_PULL_LIMIT_DAYS=30;
 const KAIGO_LOCAL_RECORD_KEEP_DAYS=30;
@@ -9622,10 +9622,11 @@ function buildDataSettings(){
     <div class="panel-sec">
       <h3>📥 データインポート</h3>
       <p style="font-size:14px;color:var(--text2);margin-bottom:8px;">バックアップJSONを読み込んでデータを復元します。</p>
-      <p style="font-size:13px;color:var(--red);margin-bottom:10px;">⚠ 現在のデータは上書きされます</p>
+      <p style="font-size:13px;color:var(--text2);margin-bottom:6px;">「JSONダウンロード」または「月次保存」で出力した .json を選んでください。</p>
+      <p style="font-size:13px;color:var(--red);margin-bottom:10px;">⚠ OK＝バックアップで置き換え（復元向け）／キャンセル＝現在データとマージ</p>
       <label class="btn btn-gray btn-sm" style="cursor:pointer;">
         ファイルを選択
-        <input type="file" accept=".json" style="display:none;" onchange="importDB(this)">
+        <input type="file" accept=".json,application/json,text/json" style="display:none;" onchange="importDB(this)">
       </label>
     </div>
     <div class="panel-sec">
@@ -9793,35 +9794,126 @@ function stampImportedDbForMerge(imported, baseTs){
     });
   });
 }
+function parseImportJsonText_(text){
+  let s=String(text==null?'':text);
+  if(s.charCodeAt(0)===0xFEFF) s=s.slice(1);
+  s=s.trim();
+  if(!s) throw new Error('ファイルが空です');
+  let imported;
+  try{
+    imported=JSON.parse(s);
+  }catch(parseErr){
+    const hint=/unexpected token|position 0/i.test(String(parseErr.message||''))&&/^\s*</.test(s)
+      ? '（HTMLやExcelではなく .json を選んでください）'
+      : '';
+    throw new Error('JSONの解析に失敗しました'+hint+'\n'+(parseErr.message||''));
+  }
+  if(imported&&typeof imported==='object'&&!Array.isArray(imported)){
+    if(imported.db&&typeof imported.db==='object'&&!Array.isArray(imported.db))
+      imported=imported.db;
+    else if(imported.data&&typeof imported.data==='object'&&!Array.isArray(imported.data))
+      imported=imported.data;
+  }
+  if(!imported||typeof imported!=='object'||Array.isArray(imported))
+    throw new Error('介護記録のバックアップJSON形式ではありません（residents / records / settings を含むオブジェクトが必要です）');
+  return imported;
+}
+function normalizeImportedDbShape_(imported){
+  if(!imported.residents) imported.residents=[];
+  if(!imported.records) imported.records={};
+  if(!imported.supplies) imported.supplies=[];
+  if(!imported.settings) imported.settings={};
+  if(!Array.isArray(imported.residents)) throw new Error('residents が配列ではありません');
+  if(typeof imported.records!=='object'||Array.isArray(imported.records)) throw new Error('records の形式が不正です');
+  imported.records=normalizeRecordsMap(imported.records||{});
+  normalizeVitalTempsInRecords(imported.records);
+  imported.settings=Object.assign(cloneDeep(DEFAULT_SETTINGS), imported.settings||{});
+  imported._setU=imported._setU||{};
+  const baseTs=Date.now()-1000;
+  Object.keys(imported.settings).forEach(k=>{
+    if(k==='logoB64') return;
+    if(_numU(imported._setU[k])>0) return;
+    if(settingHasValue(imported.settings[k])) imported._setU[k]=baseTs;
+  });
+  stampImportedDbForMerge(imported, Date.now()+1000);
+  return imported;
+}
+/** インポート保存（容量不足時はロゴを除いて再試行） */
+function persistImportedDb_(imported, mode){
+  const apply=()=>{
+    if(mode==='replace'){
+      db=imported;
+      coalesceAllRecordArrays(db.records||{});
+      (db.residents||[]).forEach(r=>{
+        r.serviceType=getResidentClassification(r.name, db.settings, db.residents)==='inpatient'?'resident':'day';
+      });
+    }else{
+      db=mergePulledDb(db, imported);
+    }
+  };
+  apply();
+  try{
+    saveDB();
+    return {ok:true, logoStripped:false};
+  }catch(e){
+    if(!isStorageQuotaError(e)) throw e;
+    const hadLogo=!!(imported.settings&&imported.settings.logoB64)||!!(db.settings&&db.settings.logoB64);
+    if(imported.settings) delete imported.settings.logoB64;
+    if(db.settings) delete db.settings.logoB64;
+    try{ localStorage.removeItem(FAC.storageKey+'_logo_b64_v1'); }catch(_){}
+    apply();
+    try{
+      saveDB();
+      return {ok:true, logoStripped:hadLogo};
+    }catch(e2){
+      throw new Error(
+        'ストレージ容量不足で保存できませんでした。\n'+
+        'データ管理の「'+KAIGO_LOCAL_RECORD_KEEP_DAYS+'日より前の記録を削除」を実行してから、再度インポートしてください。\n\n'+
+        (e2.message||String(e2))
+      );
+    }
+  }
+}
 function importDB(input){
-  const file=input.files[0]; if(!file) return;
-  if(!confirm('バックアップJSONを読み込みます。\n\n【安全モード】タイムスタンプが新しいデータを優先してマージします。\n（古いデータで新しい記録を上書きしません）\n\n実行しますか？')){ input.value=''; return; }
+  const file=input&&input.files&&input.files[0];
+  if(!file) return;
+  if(!FAC){
+    alert('先に施設（西／南）を選んでからインポートしてください');
+    input.value='';
+    return;
+  }
+  const replace=confirm(
+    'バックアップJSONを読み込みます。\n\n'+
+    '【OK】バックアップの内容でこの端末を置き換え（復元向け・推奨）\n'+
+    '【キャンセル】現在のデータとマージ（新しいタイムスタンプ優先）\n\n'+
+    '続行しますか？'
+  );
+  if(!confirm('選択したファイル:\n'+file.name+'\nサイズ: '+Math.round(file.size/1024)+' KB\n\n読み込みを開始しますか？')){
+    input.value='';
+    return;
+  }
   const reader=new FileReader();
+  reader.onerror=()=>{
+    alert('ファイルを読み込めませんでした（アクセス拒否やファイル移動の可能性があります）');
+    input.value='';
+  };
   reader.onload=e=>{
     try{
-      const imported=JSON.parse(e.target.result);
-      if(!imported||typeof imported!=='object') throw new Error('JSON形式が不正です');
-      if(!imported.residents) imported.residents=[];
-      if(!imported.records) imported.records={};
-      if(!imported.supplies) imported.supplies=[];
-      if(!imported.settings) imported.settings={};
-      imported.records=normalizeRecordsMap(imported.records||{});
-      normalizeVitalTempsInRecords(imported.records);
-      imported.settings=Object.assign(cloneDeep(DEFAULT_SETTINGS), imported.settings||{});
-      imported._setU=imported._setU||{};
-      const baseTs=Date.now()-1000;
-      Object.keys(imported.settings).forEach(k=>{
-        if(k==='logoB64') return;
-        if(_numU(imported._setU[k])>0) return;
-        if(settingHasValue(imported.settings[k])) imported._setU[k]=baseTs;
-      });
-      // 旧アプリJSONは更新時刻が無いことがあり、同時刻(0)比較でローカルが勝って取り込めないため補完する
-      stampImportedDbForMerge(imported, Date.now()+1000);
-      db=mergePulledDb(db, imported);
-      saveDB(); alert('インポート完了しました（新しいデータ優先でマージ）'); startApp();
-    }catch(err){ alert('読み込みエラー: '+err.message); }
+      const imported=normalizeImportedDbShape_(parseImportJsonText_(e.target.result));
+      const mode=replace?'replace':'merge';
+      const res=persistImportedDb_(imported, mode);
+      const modeLabel=mode==='replace'?'置き換え':'マージ';
+      const extra=res.logoStripped?'\n（容量不足のためロゴ画像は除いて保存しました）':'';
+      alert('インポート完了しました（'+modeLabel+'）'+extra);
+      startApp();
+    }catch(err){
+      console.error('[importDB]', err);
+      alert('読み込みエラー:\n'+(err&&err.message?err.message:String(err)));
+    }finally{
+      input.value='';
+    }
   };
-  reader.readAsText(file);
+  reader.readAsText(file, 'UTF-8');
 }
 
 // ========== 旧アプリからのデータ移行 ==========
