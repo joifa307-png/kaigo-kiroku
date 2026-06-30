@@ -1677,7 +1677,7 @@ const REC = {
 const N_RECORD_COLS = 57;
 
 /** デプロイのたびに上げる（設定→データ管理の「アプリ情報」で表示） */
-const APP_VERSION='1.6.6';
+const APP_VERSION='1.6.7';
 /** pull取得・ローカル整理の記録保持日数（同期） */
 const KAIGO_PULL_LIMIT_DAYS=30;
 const KAIGO_LOCAL_RECORD_KEEP_DAYS=30;
@@ -1691,6 +1691,17 @@ function isStandaloneWebApp(){
 function gasToken(){ return (localStorage.getItem('kaigo_gas_token')||'').trim(); }
 function gasUrl(){ return (localStorage.getItem('kaigo_gas_webapp_url')||'').trim(); }
 function gasConfigured(){ return !!(gasUrl() && gasToken() && FAC); }
+/** 同期サイクル開始時に URL/トークンを固定（localStorage 競合・Cookie 復元の影響を避ける） */
+function gasCredentialsPin_(){
+  return {url:gasUrl(), token:gasToken()};
+}
+function gasCredentialsPinValid_(pin){
+  return !!(pin&&pin.url&&pin.token);
+}
+function isGasFetchNetworkError(e){
+  const m=String((e&&e.message)||e||'').toLowerCase();
+  return !m||/failed to fetch|networkerror|network error|load failed|fetch failed|aborted|timeout|cors|http 0/.test(m);
+}
 
 /**
  * iOS「ホーム画面に追加」スタンドアロンは、Safari 本体と localStorage が分離することがある。
@@ -1821,6 +1832,12 @@ function gasCredentialsInit(){
   gasRepairFromCookieMirror();
   if(gasUrl()&&gasToken()) gasMirrorToSession();
   if(gasUrl()||gasToken()||(localStorage.getItem('kaigo_last_facility')||'').trim()) gasMirrorToCookies();
+}
+/** 同期中は Cookie/スナップショット復元で認証情報が書き換わらないようにする */
+function gasRepairCredentialsIfSafe(){
+  if(window._gasSyncActive) return;
+  gasRepairFromCookieMirror();
+  gasSnapshotRepairFromPrimary();
 }
 
 /** iPad等で「GAS未設定」だけだと分かりづらいので、足りない項目を表示 */
@@ -3221,11 +3238,11 @@ function gasPullBody_(){
   return {action:'pull', sheetName:FAC.sheetName, limitDays:KAIGO_PULL_LIMIT_DAYS};
 }
 
-function gasPost(extra){
-  const url=gasUrl(), tok=gasToken();
+function gasPost(extra, credPin, retryLeft){
+  const url=(credPin&&credPin.url)||gasUrl();
+  const tok=(credPin&&credPin.token)||gasToken();
   if(!url||!tok) return Promise.reject(new Error('GAS未設定（データ管理でURL・トークンを入力）'));
-  // charset 付きだと環境によっては CORS のプリフライトが発生し、GAS が OPTIONS に応答できず失敗することがある
-  return fetch(url,{
+  const doFetch=()=>fetch(url,{
     method:'POST',
     headers:{'Content-Type':'text/plain'},
     body: JSON.stringify(Object.assign({}, extra, {token:tok}))
@@ -3243,6 +3260,13 @@ function gasPost(extra){
       throw new Error(err);
     }
     return j;
+  });
+  const left=(retryLeft==null)?0:retryLeft;
+  return doFetch().catch(e=>{
+    if(left>0&&isGasFetchNetworkError(e)&&!/invalid token/i.test(String(e.message||''))){
+      return new Promise(res=>setTimeout(res, 900)).then(()=>gasPost(extra, credPin, left-1));
+    }
+    throw e;
   });
 }
 
@@ -3439,13 +3463,20 @@ function syncPullOnly(){
     });
 }
 
+let _gasSyncInFlight=null;
+
 function runGasPushCycle(){
   if(!gasConfigured()){ setSyncStatusIfGasMissing(); return Promise.resolve(); }
   if(!syncDirty) return Promise.resolve();
+  if(_gasSyncInFlight) return _gasSyncInFlight;
+  const credPin=gasCredentialsPin_();
+  if(!gasCredentialsPinValid_(credPin)){ setSyncStatusIfGasMissing(); return Promise.resolve(); }
   const sk=FAC.storageKey;
   const cycleVersionStart=syncDirtyVersion;
   setSyncStatus('同期中...','#185FA5');
-  return gasPost(gasPullBody_())
+  window._gasSyncActive=true;
+  const gp=(body, retries)=>gasPost(body, credPin, retries==null?1:retries);
+  _gasSyncInFlight=gp(gasPullBody_())
     .then(j=>{
       const raw=j.rows||[];
       if(sheetLooksLikeCorruptMarker(raw)){
@@ -3467,7 +3498,7 @@ function runGasPushCycle(){
         }
         setSyncStatus('シートA1修復中…','#185FA5');
         const fullRows=dbToSheet(db);
-        return gasPost({action:'push',sheetName:FAC.sheetName,rows:fullRows})
+        return gp({action:'push',sheetName:FAC.sheetName,rows:fullRows})
           .then(()=>({_sheetRepaired:true,_mergedRemoteDays:remoteDays}));
       }
       const remote=sheetToDb(raw);
@@ -3511,7 +3542,7 @@ function runGasPushCycle(){
         }
         pushBody={action:'push',sheetName:FAC.sheetName,rows:fullRows};
       }
-      return gasPost(pushBody).then(()=>({_sheetRepaired:false}));
+      return gp(pushBody).then(()=>({_sheetRepaired:false}));
     })
     .then(meta=>{
       const sk=FAC.storageKey;
@@ -3557,11 +3588,22 @@ function runGasPushCycle(){
       if(e&&e.quota||/quota/i.test(msg)){
         setSyncStatus('同期:容量/回数上限','orange');
         showBriefToast('Google側の容量または実行回数上限です。しばらく待ってから🔄同期してください。iPadはデータ管理で古い記録削除も検討してください。', 8000, true);
+      }else if(/invalid token/i.test(msg)){
+        setSyncStatus('同期:トークン不一致','orange');
+        showBriefToast('同期トークンが一致しません。データ管理でトークンを再入力し「保存」→「接続テスト」を押してください。', 7000, true);
+      }else if(isGasFetchNetworkError(e)){
+        setSyncStatus('同期:通信失敗','orange');
+        showBriefToast('通信エラー（load failed）です。Wi‑Fiを確認し、🔄同期を再試行してください。', 6000, true);
       }else{
         setSyncStatus('同期失敗: '+msg.slice(0,80),'orange');
       }
       return Promise.reject(e);
+    })
+    .finally(()=>{
+      window._gasSyncActive=false;
+      _gasSyncInFlight=null;
     });
+  return _gasSyncInFlight;
 }
 
 let gasDebounceTimer=null;
@@ -10672,15 +10714,13 @@ function init(){
 document.addEventListener('DOMContentLoaded', init);
 document.addEventListener('visibilitychange', ()=>{
   if(document.visibilityState!=='visible') return;
-  gasRepairFromCookieMirror();
-  gasSnapshotRepairFromPrimary();
+  gasRepairCredentialsIfSafe();
 });
 /** iOS：戻る／スワイプでキャッシュ復帰したとき Cookie ミラー復元（自動 pull は行わない） */
 window.addEventListener('pageshow', (ev)=>{
   try{
     if(ev.persisted) closeAllOverlays();
-    gasRepairFromCookieMirror();
-    gasSnapshotRepairFromPrimary();
+    gasRepairCredentialsIfSafe();
   }catch(_){}
 });
 </script>
