@@ -1677,10 +1677,10 @@ const REC = {
 const N_RECORD_COLS = 57;
 
 /** デプロイのたびに上げる（設定→データ管理の「アプリ情報」で表示） */
-const APP_VERSION='1.7.0';
+const APP_VERSION='1.7.2';
 /** pull取得・ローカル整理の記録保持日数（同期） */
-const KAIGO_PULL_LIMIT_DAYS=30;
-const KAIGO_LOCAL_RECORD_KEEP_DAYS=30;
+const KAIGO_PULL_LIMIT_DAYS=14;
+const KAIGO_LOCAL_RECORD_KEEP_DAYS=14;
 function isStandaloneWebApp(){
   try{
     if(window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches) return true;
@@ -3279,7 +3279,10 @@ function gasPost(extra, credPin, retryLeft){
   const left=(retryLeft==null)?0:retryLeft;
   const firstUrl=_gasUseAuthUser0?withGasAuthUser0_(baseUrl):baseUrl;
   const attempt=(u, triedAuthUser)=>doFetch(u).catch(e=>{
-    if(!triedAuthUser&&Number(e&&e.httpStatus)===404){
+    // 複数Googleアカウント併用時、POSTが /u/N/ にリダイレクトされ doGet(=tokenなし)に化けて
+    // 「invalid token」や 404 になることがある。authuser=0 で主アカウント固定して1回だけ再試行。
+    const redirectSuspect=Number(e&&e.httpStatus)===404||/invalid token/i.test(String(e&&e.message||''));
+    if(!triedAuthUser&&redirectSuspect){
       const u2=withGasAuthUser0_(u);
       if(u2!==u){
         return attempt(u2, true).then(res=>{ _gasUseAuthUser0=true; return res; });
@@ -6557,10 +6560,7 @@ function toggleLwCareChip(el){
 
 // ========== LINE WORKS Bot送信（GAS経由） ==========
 const LW_BOT_ID      = '12222649';
-// テスト：山口さん個人。本番はGAS側の KAIGO_LW_SEND_TO を 'channel' に変更
-// const LW_CHANNEL_ID  = '6309ae4b-7564-d103-c98e-f5394142157b';
-// テスト：山口さん個人に送信
-// const LW_TEST_USER_ID = 'yamaguchi.hoyichicorporation@works-8846';
+// LW送信先はGAS側で制御（KAIGO_LW_SEND_TO='channel' + 南は KAIGO_LW_COPY_USER_IDS_MINAMI で山口さん個人にもコピー）
 
 /** LINE WORKS送信済み表示（申送り・ケア記録の履歴用） */
 function lwSentBadgeHtml(item){
