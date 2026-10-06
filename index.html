@@ -1677,7 +1677,7 @@ const REC = {
 const N_RECORD_COLS = 57;
 
 /** デプロイのたびに上げる（設定→データ管理の「アプリ情報」で表示） */
-const APP_VERSION='1.7.2';
+const APP_VERSION='1.7.3';
 /** pull取得・ローカル整理の記録保持日数（同期） */
 const KAIGO_PULL_LIMIT_DAYS=14;
 const KAIGO_LOCAL_RECORD_KEEP_DAYS=14;
@@ -6614,6 +6614,21 @@ async function sendLwCareMessage(content, residentName, time){
     }
     if(j&&j.ok===false){
       throw new Error(j.error||j.message||'GAS応答エラー');
+    }
+    // グループ送信失敗でも個人コピー成功だと ok:true / sent:false になる
+    if(j&&j.sent===false){
+      const st=j.primaryStatus!=null?j.primaryStatus:'?';
+      const dest=j.primaryDest||'';
+      const bodyHint=String(j.primaryBody||j.error||'').slice(0,180);
+      alert('LINE WORKSのグループ送信に失敗しました。\n'
+        +'unit='+(j.unit||body.unit)+'\n'
+        +'sendTo='+(j.sendTo||'')+'\n'
+        +'dest='+dest+'\n'
+        +'status='+st+'\n'
+        +(bodyHint?('detail='+bodyHint+'\n'):'')
+        +'\n※山口さん個人へはコピーされている場合があります。\n'
+        +'在庫スプレッドシートの「kaigo_lw_log」シートも確認してください。');
+      return false;
     }
     showBriefToast('LINE WORKSへ送信しました',2200,false);
     return true;
