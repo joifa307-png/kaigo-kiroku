@@ -158,12 +158,6 @@ input,select,textarea{font-family:inherit;font-size:30px;}
 .name-sub{font-size:16px;color:var(--text3);}
 .res-del-btn{border:none;background:none;color:var(--text3);font-size:18px;cursor:pointer;padding:4px 6px;line-height:1;flex-shrink:0;}
 .res-del-btn:active{color:var(--red);}
-.hidden-resident{background:#f5f5f5;color:#999;}
-.hidden-resident .res-info-inp,.hidden-resident .res-info-sel{color:#999;}
-.hidden-badge{display:inline-block;font-size:10px;background:#999;color:#fff;padding:2px 6px;border-radius:3px;margin-right:8px;vertical-align:middle;}
-.res-hide-btn{font-size:12px;padding:3px 8px;border:1px solid var(--text3);border-radius:var(--r1);background:#fff;color:var(--text2);cursor:pointer;white-space:nowrap;}
-.res-hide-btn:active{opacity:.85;}
-.res-unhide-btn{font-size:12px;padding:3px 8px;border:1px solid var(--blue);border-radius:var(--r1);background:var(--blue2);color:var(--blue);cursor:pointer;white-space:nowrap;}
 .res-add-row td{background:var(--white)!important;text-align:center;padding:6px!important;}
 .res-add-btn{border:1px dashed var(--border2);background:none;color:var(--text2);font-size:16px;padding:6px 20px;border-radius:var(--r2);cursor:pointer;}
 /* オーバーレイ中央配置（卸記録など） */
@@ -1009,7 +1003,6 @@ function startApp(){
     setTimeout(()=>{
       try{
         loadDB();
-        migrateResidentTombstonesToHidden();
         autoCleanTombstones();
         gasMirrorToCookies();
         setSyncStatus('--','var(--text3)');
@@ -1684,7 +1677,7 @@ const REC = {
 const N_RECORD_COLS = 57;
 
 /** デプロイのたびに上げる（設定→データ管理の「アプリ情報」で表示） */
-const APP_VERSION='1.8.0';
+const APP_VERSION='1.7.3';
 /** pull取得・ローカル整理の記録保持日数（同期） */
 const KAIGO_PULL_LIMIT_DAYS=14;
 const KAIGO_LOCAL_RECORD_KEEP_DAYS=14;
@@ -1980,7 +1973,6 @@ function buildResidentHeaderRow(){
   h.push('bathSched');         // 51
   h.push('gender');            // 52
   h.push('phone');             // 53
-  h.push('hiddenAt');          // 54
   return h;
 }
 function buildRecordHeaderRow(){
@@ -2090,7 +2082,6 @@ function dbToSheet(inDb){
     row.push(JSON.stringify(r.bathSched||[]));
     row.push(String(r.gender||''));
     row.push(String(r.phone||''));
-    row.push(_numU(r.hiddenAt)||'');
     rows.push(PR(row));
   });
   rows.push(PR([]));
@@ -2459,7 +2450,7 @@ function sheetToDb(rows){
     const sched=[];
     for(let c=3;c<34;c++) sched.push(Number(r[c])===1?1:0);
     while(sched.length<31) sched.push(0);
-    const res={
+    dbOut.residents.push({
       id:id||genId('r'), name, care, sched, _u:_numU(r[34]),
       serviceType:     residentServiceTypeFromSheet(r[35], sched),
       insuredNumber:   String(r[36]||''),
@@ -2483,10 +2474,7 @@ function sheetToDb(rows){
   }catch(e){return new Array(31).fill(0);}}()),
       gender:            String(r[52]||''),
       phone:             String(r[53]||''),
-      hiddenAt:          _numU(r[54])||undefined,
-    };
-    if(!res.hiddenAt) delete res.hiddenAt;
-    dbOut.residents.push(res);
+    });
     i++;
   }
   while(i<rows.length && String(rows[i][0])!==SEC_REC) i++;
@@ -2586,22 +2574,6 @@ function compareResidentsStable(a,b){
   const c=normalizeResidentName((a&&a.name)||'').localeCompare(normalizeResidentName((b&&b.name)||''),'ja');
   if(c!==0) return c;
   return String((a&&a.id)||'').localeCompare(String((b&&b.id)||''));
-}
-/** 非表示利用者（hiddenAt あり）。設定画面以外では一覧から除外する */
-function isResidentHidden(r){
-  return _numU(r&&r.hiddenAt)>0;
-}
-function residentsForDisplay(list){
-  return (list||[]).filter(r=>!isResidentHidden(r));
-}
-function allResidentsSorted(){
-  return [...(db.residents||[])].sort(compareResidentsStable);
-}
-function visibleResidentsSorted(){
-  return residentsForDisplay(db.residents).slice().sort(compareResidentsStable);
-}
-function residentIndexById(rid){
-  return (db.residents||[]).findIndex(x=>String(x.id)===String(rid));
 }
 /** チップ data-name 等と db.residents の突き合わせ（空白差で find 失敗→誤って入所扱いになるのを防ぐ） */
 function dbResidentByNameLoose(name){
@@ -3123,7 +3095,7 @@ function mergeResidentsLoc(a, b, resDel, resRevive){
   const groups=new Map();
   const add=(list)=>{
     (list||[]).forEach(r=>{
-      if(!r) return;
+      if(residentDroppedByTombstone(r,resDel,resRevive)) return;
       const key=String(r.name||r.id||'');
       if(!groups.has(key)) groups.set(key,[]);
       groups.get(key).push(r);
@@ -4170,7 +4142,7 @@ function renderJissekiCalendar(){
   const [yS,mS]=ym.split('-');
   const y=parseInt(yS,10), m=parseInt(mS,10);
   const days=new Date(y,m,0).getDate();
-  const resList=visibleResidentsSorted();
+  const resList=[...(db.residents||[])].sort(compareResidentsStable);
   const ths=[...Array.from({length:days},(_,i)=>`<th style="min-width:26px;">${i+1}</th>`),'<th style="min-width:60px;">算定日数</th>'].join('');
   const rows=resList.map(r=>{
     let cnt=0;
@@ -4211,7 +4183,7 @@ function openScheduleScreen(preferredResName){
   schedYear=curDate.getFullYear();
   schedMonth=curDate.getMonth();
   const sel=document.getElementById('schedResSelect');
-  const list=visibleResidentsSorted();
+  const list=[...(db.residents||[])].sort(compareResidentsStable);
   const prefer=(preferredResName!=null&&String(preferredResName).trim()!=='')
     ?preferredResName
     :curRes;
@@ -4844,7 +4816,7 @@ function renderScheduleScreen(){
 }
 
 function openCSVExportDialog(){
-  const list=visibleResidentsSorted();
+  const list=[...(db.residents||[])].sort(compareResidentsStable);
   const rows=list.map(r=>{
     return `<label style="display:flex;align-items:center;gap:8px;padding:6px 0;cursor:pointer;">
       <input type="checkbox" class="csv-export-chk"
@@ -5239,7 +5211,7 @@ function execJissekiCSV(){
   const targetYm=_ymNoDash(new Date(y,m-1,1));
   const days=new Date(y,m,0).getDate();
 
-  const resList=visibleResidentsSorted();
+  const resList=[...(db.residents||[])].sort(compareResidentsStable);
   // ケアマネ事業所番号ごとに分割
   const groups=new Map(); // key: careManagerOffice
   resList.forEach(r=>{
@@ -5529,9 +5501,8 @@ function recordDayHasMainListData(rec){
  */
 function residentsOnDaySorted(dayIdx, opts){
   const fromSched=(db.residents||[]).filter(r=>
-    !isResidentHidden(r)&&(
     (r.sched&&r.sched[dayIdx]===1)||
-    getResidentClassification(r.name)==='inpatient')
+    getResidentClassification(r.name)==='inpatient'
   );
   if(!opts||!opts.forMainTable){
     return fromSched.slice().sort(compareResidentsStable);
@@ -5553,7 +5524,6 @@ function residentsOnDaySorted(dayIdx, opts){
     const rec=dayRec[rawName];
     if(!recordDayHasMainListData(rec)) return;
     const rr=(db.residents||[]).find(x=>normalizeResidentName(x.name)===nm);
-    if(rr&&isResidentHidden(rr)) return;
     if(rr) byName.set(nm,Object.assign({},rr,{_mainGhost:false}));
     else byName.set(nm,{id:'',name:String(rawName).trim(),care:'',sched:[],_u:0,_mainGhost:true});
   });
@@ -5780,11 +5750,12 @@ function getResidentsForCurrentDate(){
     const has=list.some(r=>normalizeResidentName(r.name)===normalizeResidentName(curRes));
     if(!has){
       const row=(db.residents||[]).find(r=>normalizeResidentName(r.name)===normalizeResidentName(curRes));
-      if(row&&!isResidentHidden(row)) list.push(Object.assign({},row));
-      else if(!row) list.push({name:curRes,care:'',sched:[],_u:0});
+      if(row) list.push(Object.assign({},row));
+      else list.push({name:curRes,care:'',sched:[],_u:0});
     }
   }
-  return residentsForDisplay(list).slice().sort(compareResidentsStable);
+  list.sort(compareResidentsStable);
+  return list;
 }
 
 function renderResidentTabs(){
@@ -7669,7 +7640,7 @@ function openSupplyRecord(initResName){
   // 日付
   document.getElementById('supDate').value = dk();
   // 利用者セレクト（全利用者）
-  const resOpts = visibleResidentsSorted().map(r=>`<option value="${r.name}">${r.name}</option>`).join('');
+  const resOpts = [...db.residents].sort(compareResidentsStable).map(r=>`<option value="${r.name}">${r.name}</option>`).join('');
   document.getElementById('supRes').innerHTML = resOpts;
   // 呼び出し元の利用者名があれば初期選択
   if(initResName){
@@ -7973,20 +7944,15 @@ function clearLogo(){
 }
 
 function buildResidentMgmtSettings(){
-  const list=allResidentsSorted();
+  const list=[...(db.residents||[])].sort(compareResidentsStable);
   const tableBody=list.length?list.map(r=>{
     const checked=getResidentClassification(r.name)==='inpatient'?' checked':'';
     const ridEsc=escapeAttr(String(r.id));
-    const hidden=isResidentHidden(r);
     const delTd=r._mainGhost
       ?'<td class="resident-mgmt-td-del"></td>'
-      :hidden
-        ?`<td class="resident-mgmt-td-del"><button type="button" class="res-unhide-btn no-print" onclick="unhideResidentById('${ridEsc}','resident_mgmt')">表示に戻す</button></td>`
-        :`<td class="resident-mgmt-td-del"><button type="button" class="res-hide-btn no-print" title="一覧から非表示" onclick="hideResidentById('${ridEsc}','resident_mgmt')">非表示</button></td>`;
-    const trCls=hidden?' class="hidden-resident"':'';
-    const nameCell=hidden?`<span class="hidden-badge">非表示</span>${escapeHtml(r.name)}`:escapeHtml(r.name);
-    return `<tr${trCls}>
-      <td class="resident-mgmt-td-name">${nameCell}</td>
+      :`<td class="resident-mgmt-td-del"><button type="button" class="res-del-btn no-print" title="この利用者を一覧から削除" aria-label="削除" onclick="delResidentFromMgmtById('${ridEsc}')">×</button></td>`;
+    return `<tr>
+      <td class="resident-mgmt-td-name">${escapeHtml(r.name)}</td>
       <td class="resident-mgmt-td-in"><label><input type="checkbox" data-resident-id="${ridEsc}"${checked} onchange="onResidentInpatientCheckbox(this)"><span>入所者</span></label></td>
       ${delTd}
     </tr>`;
@@ -7998,7 +7964,7 @@ function buildResidentMgmtSettings(){
             <tr>
               <th scope="col" class="resident-mgmt-th-name">氏名</th>
               <th scope="col" class="resident-mgmt-th-in">入所者</th>
-              <th scope="col" class="resident-mgmt-th-del">非表示</th>
+              <th scope="col" class="resident-mgmt-th-del">削除</th>
             </tr>
           </thead>
           <tbody>${tableBody}</tbody>
@@ -8030,9 +7996,11 @@ function onResidentInpatientCheckbox(el){
   touchSetU('residentTypes');
   saveDB();
 }
-/** @deprecated hideResidentById を使用 */
+/** 利用者管理タブ：メイン表の×と同じ削除（確認・墓石・記録は残す） */
 function delResidentFromMgmtById(rid){
-  hideResidentById(rid,'resident_mgmt');
+  const r=(db.residents||[]).find(x=>String(x.id)===String(rid));
+  if(!r) return;
+  delResidentByName(r.name,{refreshResidentMgmt:true});
 }
 function residentMgmtPushSync(){
   mirrorResidentTypesToLocalStorage();
@@ -8157,7 +8125,7 @@ function buildBillingSettings(){
   const basics=(sv.basic||[]);
   const addons=(sv.addons||[]);
   const shogus=(sv.shogu||[]);
-  const resList=visibleResidentsSorted();
+  const resList=[...(db.residents||[])].sort(compareResidentsStable);
   const shoguOpts=`<option value="">（なし）</option>` + shogus.map(m=>{
     const c=escapeAttr(String(m.code||''));
     const lbl=escapeHtml(`${m.code||''} ${m.name||''}`);
@@ -8565,7 +8533,7 @@ function buildResidentInfoSettings(){
     const lbl=escapeHtml(`${o.officeName||''}（${o.officeCode||''}）`);
     return `<option value="${i}">${lbl}</option>`;
   }).join('');
-  const resList=allResidentsSorted();
+  const resList=[...(db.residents||[])].sort(compareResidentsStable);
 
   const careOpts=[
     '要支援１','要支援２','要介護１','要介護２','要介護３','要介護４','要介護５'
@@ -8575,20 +8543,15 @@ function buildResidentInfoSettings(){
     _ensureResidentBillingFields(r);
     const checked=getResidentClassification(r.name)==='inpatient'?' checked':'';
     const rid=escapeAttr(String(r.id));
-    const hidden=isResidentHidden(r);
-    const delBtn=r._mainGhost?'':hidden
-      ?`<button type="button" class="res-unhide-btn no-print" onclick="unhideResidentById('${rid}','resident_info')">表示に戻す</button>`
-      :`<button type="button" class="res-hide-btn no-print" onclick="hideResidentById('${rid}','resident_info')">非表示</button>`;
-    const trCls=hidden?' class="hidden-resident"':'';
-    const nameCell=hidden?`<span class="hidden-badge">非表示</span>${escapeHtml(r.name||'')}`:escapeHtml(r.name||'');
+    const delBtn=r._mainGhost?'':`<button type="button" class="res-del-btn no-print" onclick="delResidentFromMgmtById('${rid}')">×</button>`;
     const officeIdx=offices.findIndex(o=>String(o.officeCode||'')===String(r.careManagerOffice||''));
     const cmIdx=cmList.findIndex(cm=>String(cm.officeCode||'')===String(r.careManagerOffice||'') && String(cm.name||'')===String(r.careManagerName||''));
     const cmOptsForRow=buildCareManagerOptionsForOffice(cmList, r.careManagerOffice, cmIdx);
     const isSameBuilding=!!r.sameBuilding;
     const transportAttrs=isSameBuilding?'disabled style="opacity:0.4;"':'';
     const transportNote=`<span class="transport-note" style="font-size:11px;color:var(--text3);display:${isSameBuilding?'inline':'none'};">（同一建物のため不要）</span>`;
-    return `<tr${trCls}>
-      <td style="white-space:nowrap;">${nameCell}</td>
+    return `<tr>
+      <td style="white-space:nowrap;">${escapeHtml(r.name||'')}</td>
       <td style="text-align:center;"><input type="checkbox" data-resident-id="${rid}"${checked} onchange="onResidentInpatientCheckbox(this)"></td>
       <td><input type="text" class="res-info-inp" list="timeOptions30min" data-res-id="${rid}" data-field="startTime" value="${escapeAttr(String(r.startTime||facilityDefaultStartTime()))}" style="width:80px;font-size:13px;"></td>
       <td><input type="text" class="res-info-inp" list="timeOptions30min" data-res-id="${rid}" data-field="endTime" value="${escapeAttr(String(r.endTime||facilityDefaultEndTime()))}" style="width:80px;font-size:13px;"></td>
@@ -8644,7 +8607,7 @@ function buildResidentInfoSettings(){
         <table class="resident-mgmt-table">
           <thead>
             <tr>
-              <th>氏名</th><th>入所者</th><th>標準開始</th><th>標準終了</th><th style="white-space:nowrap;">同一建物</th><th style="white-space:nowrap;">送迎区分</th><th>生年月日</th><th>性別</th><th>要介護度</th><th>被保険者番号</th><th>認定終了日</th><th>負担割合</th><th>居宅介護支援事業所</th><th>ケアマネ</th><th>連絡先</th><th>非表示</th>
+              <th>氏名</th><th>入所者</th><th>標準開始</th><th>標準終了</th><th style="white-space:nowrap;">同一建物</th><th style="white-space:nowrap;">送迎区分</th><th>生年月日</th><th>性別</th><th>要介護度</th><th>被保険者番号</th><th>認定終了日</th><th>負担割合</th><th>居宅介護支援事業所</th><th>ケアマネ</th><th>連絡先</th><th>削除</th>
             </tr>
           </thead>
           <tbody>${rows||''}</tbody>
@@ -8959,24 +8922,17 @@ function applyResidentInfoImport(){
 }
 
 function buildResidentSettings(){
-  const list=allResidentsSorted();
-  const items=list.map(r=>{
-    const i=residentIndexById(r.id);
+  const list=db.residents;
+  const items=list.map((r,i)=>{
     const onDays=(r.sched||[]).filter(v=>v===1).length;
-    const hidden=isResidentHidden(r);
-    const rowStyle=hidden?' style="background:#f5f5f5;color:#999;"':'';
-    const badge=hidden?'<span class="hidden-badge">非表示</span>':'';
-    const hideBtn=hidden
-      ?`<button type="button" class="res-unhide-btn" onclick="unhideResident(${i})">表示に戻す</button>`
-      :`<button type="button" class="res-hide-btn" onclick="hideResident(${i})">非表示</button>`;
-    return `<div class="settings-list-item"${rowStyle}>
-      <div class="item-name">${badge}${r.name} <span class="text-gray" style="font-size:12px;">${r.care||''}</span>
+    return `<div class="settings-list-item">
+      <div class="item-name">${r.name} <span class="text-gray" style="font-size:12px;">${r.care||''}</span>
         <span style="font-size:12px;color:var(--blue);margin-left:6px;">(月${onDays}日)</span></div>
       <div class="settings-list-actions">
-        <button type="button" class="item-move" onclick="moveResident(${i},-1)" ${i<=0?'disabled':''} title="上へ">↑</button>
-        <button type="button" class="item-move" onclick="moveResident(${i},1)" ${i>=db.residents.length-1?'disabled':''} title="下へ">↓</button>
+        <button type="button" class="item-move" onclick="moveResident(${i},-1)" ${i===0?'disabled':''} title="上へ">↑</button>
+        <button type="button" class="item-move" onclick="moveResident(${i},1)" ${i===list.length-1?'disabled':''} title="下へ">↓</button>
         <button style="font-size:12px;padding:3px 8px;border:1px solid var(--blue);border-radius:var(--r1);background:none;color:var(--blue);cursor:pointer;" onclick="openSchedEditor(${i})">予定</button>
-        ${hideBtn}
+        <button class="item-del" onclick="delResident(${i})">削除</button>
       </div>
     </div>`;
   }).join('');
@@ -9009,92 +8965,28 @@ function addResident(){
   db.residents.push(rec);
   saveDB(); renderSettingsPanel('residents');
 }
-/** 起動時：墓石 _residentDel を hiddenAt へ移行（同期後も端末ローカルに残っていた分） */
-function migrateResidentTombstonesToHidden(){
-  const del=db.settings&&db.settings._residentDel;
-  if(!del||typeof del!=='object'||Array.isArray(del)) return;
-  let migrated=0;
-  (db.residents||[]).forEach(r=>{
-    const sid=String(r.id||'').trim();
-    const nm=normalizeResidentName(r.name||'');
-    let ts=0;
-    if(sid&&del['id:'+sid]) ts=Math.max(ts,_numU(del['id:'+sid]));
-    if(sid&&del[sid]) ts=Math.max(ts,_numU(del[sid]));
-    if(nm&&del['name:'+nm]) ts=Math.max(ts,_numU(del['name:'+nm]));
-    if(ts>0&&!isResidentHidden(r)){
-      r.hiddenAt=ts;
-      touchResidentUForSync(r);
-      migrated++;
-    }
-  });
-  if(migrated>0){
-    db.settings._residentDel={};
-    touchSetU('_residentDel');
-    saveDB();
-    console.log('[migrate] Converted '+migrated+' tombstones to hiddenAt');
-  }
-}
-/** 旧 API：新規非表示は hiddenAt のみ（墓石は書かない） */
 function markResidentTombstone(resident){
-  if(!resident) return;
-  if(!isResidentHidden(resident)) resident.hiddenAt=Date.now();
+  const sid=String(resident&&resident.id||'').trim();
+  const nm=normalizeResidentName(resident&&resident.name||'');
+  if(!sid&&!nm) return;
+  db.settings=db.settings||{};
+  if(!db.settings._residentDel||typeof db.settings._residentDel!=='object'||Array.isArray(db.settings._residentDel))
+    db.settings._residentDel={};
+  const ts=Date.now();
+  if(sid){
+    db.settings._residentDel[sid]=ts; // 旧形式を維持
+    db.settings._residentDel['id:'+sid]=ts;
+  }
+  if(nm) db.settings._residentDel['name:'+nm]=ts;
+  touchSetU('_residentDel');
 }
-function applyHideResidentAtIdx(idx){
+function delResident(idx){
+  if(!confirm(`「${db.residents[idx].name}」を削除しますか？\n記録データは残ります`)) return;
   const target=db.residents[idx];
-  if(!target) return false;
-  saveSettingsSnapshot();
-  target.hiddenAt=Date.now();
-  touchResidentUForSync(target, idx);
-  clearResidentTombstone(target);
-  markResidentRevive(target);
-  saveDB();
-  renderMain();
-  return true;
+  markResidentTombstone(target);
+  db.residents.splice(idx,1);
+  saveDB(); renderSettingsPanel('residents');
 }
-function hideResident(idx){
-  const target=db.residents[idx];
-  if(!target) return;
-  if(!confirm(`「${target.name}」を非表示にしますか？\n記録データと利用者情報は残ります。設定画面で表示に戻せます。`)) return;
-  if(!applyHideResidentAtIdx(idx)) return;
-  renderSettingsPanel('residents');
-}
-function unhideResident(idx){
-  const target=db.residents[idx];
-  if(!target) return;
-  delete target.hiddenAt;
-  touchResidentUForSync(target, idx);
-  markResidentRevive(target);
-  saveDB();
-  renderMain();
-  renderSettingsPanel('residents');
-}
-function hideResidentById(rid, settingsPanelKey){
-  const idx=residentIndexById(rid);
-  if(idx<0) return;
-  const target=db.residents[idx];
-  if(!confirm(`「${target.name}」を非表示にしますか？\n記録データと利用者情報は残ります。設定画面で表示に戻せます。`)) return;
-  saveSettingsSnapshot();
-  target.hiddenAt=Date.now();
-  touchResidentUForSync(target, idx);
-  clearResidentTombstone(target);
-  markResidentRevive(target);
-  saveDB();
-  renderMain();
-  if(settingsPanelKey) renderSettingsPanel(settingsPanelKey);
-}
-function unhideResidentById(rid, settingsPanelKey){
-  const idx=residentIndexById(rid);
-  if(idx<0) return;
-  const target=db.residents[idx];
-  delete target.hiddenAt;
-  touchResidentUForSync(target, idx);
-  markResidentRevive(target);
-  saveDB();
-  renderMain();
-  if(settingsPanelKey) renderSettingsPanel(settingsPanelKey);
-}
-/** @deprecated hideResident を使用 */
-function delResident(idx){ hideResident(idx); }
 /** メイン表の×：この日の予定から外すだけ（利用者そのものは削除しない） */
 function removeResidentFromMainDay(name){
   const dayIdx=curDate.getDate()-1;
@@ -9102,7 +8994,7 @@ function removeResidentFromMainDay(name){
   const r=(db.residents||[]).find(x=>normalizeResidentName(x.name)===nm);
   if(!r) return;
   if(getResidentClassification(r.name)==='inpatient'){
-    alert('入所者はメイン画面から外せません。\n「利用者基本情報」で区分を変更するか、設定の利用者管理で非表示にしてください。');
+    alert('入所者はメイン画面から外せません。\n「利用者基本情報」で区分を変更するか、設定の利用者管理で削除してください。');
     return;
   }
   const dLabel=`${curDate.getMonth()+1}月${curDate.getDate()}日`;
@@ -9114,21 +9006,20 @@ function removeResidentFromMainDay(name){
   saveDB();
   renderMain();
 }
-/** @deprecated hideResidentById / hideResidentByName を使用 */
+// 利用者管理タブから完全削除（opts.refreshResidentMgmt で利用者管理タブを再描画）
 function delResidentByName(name, opts){
-  hideResidentByName(name, opts);
-}
-function hideResidentByName(name, opts){
   opts=opts||{};
   const nm=normalizeResidentName(name);
   const idx=db.residents.findIndex(r=>normalizeResidentName(r.name)===nm);
   if(idx<0) return;
+  if(!confirm(`「${db.residents[idx].name}」を削除しますか？\n記録データは残ります`)) return;
+  saveSettingsSnapshot();
   const target=db.residents[idx];
-  if(!confirm(`「${target.name}」を非表示にしますか？\n記録データと利用者情報は残ります。設定画面で表示に戻せます。`)) return;
-  if(!applyHideResidentAtIdx(idx)) return;
+  markResidentTombstone(target);
+  db.residents.splice(idx,1);
+  saveDB();
+  renderMain();
   if(opts.refreshResidentMgmt) renderSettingsPanel('resident_mgmt');
-  else if(opts.refreshResidentInfo) renderSettingsPanel('resident_info');
-  else renderSettingsPanel('residents');
 }
 function clearResidentTombstone(resident){
   db.settings=db.settings||{};
@@ -9174,7 +9065,7 @@ function ensureResidentUBeatsTombstone(resident){
 // メイン画面の＋ボタンから追加
 function openAddResOv(){
   const dayIdx = curDate.getDate()-1;
-  const notToday = residentsForDisplay(db.residents).filter(r=>!((r.sched||[])[dayIdx]===1)).sort(compareResidentsStable);
+  const notToday = (db.residents||[]).filter(r=>!((r.sched||[])[dayIdx]===1)).sort(compareResidentsStable);
   const sel = document.getElementById('addResSelect');
   if(notToday.length>0){
     sel.innerHTML = '<option value="">-- 選択してください --</option>'
@@ -10224,7 +10115,7 @@ function migrateFromOldApp(){
 
 // ========== 印刷機能 ==========
 function buildPrintSettings(){
-  const resOpts=visibleResidentsSorted().map(r=>`<option value="${r.name}">${r.name}</option>`).join('');
+  const resOpts=[...db.residents].sort(compareResidentsStable).map(r=>`<option value="${r.name}">${r.name}</option>`).join('');
   const today=new Date().toISOString().slice(0,10);
   const monthFirst=today.slice(0,8)+'01';
   return `<div class="settings-panel active">
@@ -10337,7 +10228,7 @@ function printVitalRange(){
   const resName=document.getElementById('printVitalRes').value;
   if(!from||!to){ alert('期間を入力してください'); return; }
   const dates=getDatesInRange(from,to);
-  const targets=resName==='__all__'?visibleResidentsSorted():db.residents.filter(r=>r.name===resName&&!isResidentHidden(r));
+  const targets=resName==='__all__'?[...db.residents].sort(compareResidentsStable):db.residents.filter(r=>r.name===resName);
   const out=[];
   targets.forEach(res=>{
     dates.forEach(dk=>{
@@ -10389,7 +10280,7 @@ function printCareRange(){
   if(!from||!to){ alert('期間を入力してください'); return; }
   const dates=getDatesInRange(from,to);
   let html=`<div class="print-title">${FAC.name} ケア記録サマリー ${from} ～ ${to}</div>`;
-  const targets=resName==='__all__'?visibleResidentsSorted():db.residents.filter(r=>r.name===resName&&!isResidentHidden(r));
+  const targets=resName==='__all__'?[...db.residents].sort(compareResidentsStable):db.residents.filter(r=>r.name===resName);
   targets.forEach((res,ri)=>{
     const rawRows=[];
     dates.forEach(dateKey=>{
