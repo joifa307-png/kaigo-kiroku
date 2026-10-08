@@ -1677,7 +1677,7 @@ const REC = {
 const N_RECORD_COLS = 57;
 
 /** デプロイのたびに上げる（設定→データ管理の「アプリ情報」で表示） */
-const APP_VERSION='1.7.3';
+const APP_VERSION='1.7.4';
 /** pull取得・ローカル整理の記録保持日数（同期） */
 const KAIGO_PULL_LIMIT_DAYS=14;
 const KAIGO_LOCAL_RECORD_KEEP_DAYS=14;
@@ -10145,6 +10145,13 @@ function buildPrintSettings(){
           <option value="__all__">全員</option>${resOpts}
         </select>
       </div>
+      <div class="fg" style="margin-top:8px;">
+        <label style="display:flex;align-items:center;gap:8px;font-weight:400;cursor:pointer;">
+          <input type="checkbox" id="printCareLwOnly">
+          <span>LINE WORKS共有済みのケア記録のみ</span>
+        </label>
+        <p style="font-size:12px;color:var(--text3);margin:6px 0 0;line-height:1.45;">ONのときは期間内のケア記録のうち、共有ボタンで送信済み（【LW】）の行だけを印刷します。</p>
+      </div>
       <button class="btn btn-primary btn-sm" onclick="printCareRange()">印刷プレビュー</button>
     </div>
   </div>`;
@@ -10277,15 +10284,34 @@ function printCareRange(){
   const from=document.getElementById('printCareFrom').value;
   const to=document.getElementById('printCareTo').value;
   const resName=document.getElementById('printCareRes')?.value||'__all__';
+  const onlyLw=!!document.getElementById('printCareLwOnly')?.checked;
   if(!from||!to){ alert('期間を入力してください'); return; }
   const dates=getDatesInRange(from,to);
-  let html=`<div class="print-title">${FAC.name} ケア記録サマリー ${from} ～ ${to}</div>`;
+  const titleSuffix=onlyLw?'（LINE WORKS共有済みケアのみ）':'';
+  let html=`<div class="print-title">${FAC.name} ケア記録サマリー ${from} ～ ${to}${titleSuffix}</div>`;
   const targets=resName==='__all__'?[...db.residents].sort(compareResidentsStable):db.residents.filter(r=>r.name===resName);
   targets.forEach((res,ri)=>{
     const rawRows=[];
     dates.forEach(dateKey=>{
       const rec=db.records[dateKey]&&db.records[dateKey][res.name];
       if(!rec) return;
+
+      if(onlyLw){
+        (rec.care||[]).forEach(c=>{
+          if(!c.lwSent) return;
+          const content=getCareContentText(c);
+          if(!content) return;
+          rawRows.push({
+            dk:dateKey,
+            t:normalizeTimeText(c.time)||'',
+            cat:'ケア記録',
+            body:'【LW】'+content,
+            staff:c.staff||'',
+            _key:'c:'+(c.id||(c.time+'|'+content))
+          });
+        });
+        return;
+      }
 
       // バイタル
       (rec.vital||[]).forEach(v=>{
@@ -10429,11 +10455,12 @@ function printCareRange(){
       (rec.care||[]).forEach(c=>{
         const content=getCareContentText(c);
         if(!content) return;
+        const bodyPrefix=c.lwSent?'【LW】':'';
         rawRows.push({
           dk:dateKey,
           t:normalizeTimeText(c.time)||'',
           cat:'ケア記録',
-          body:content,
+          body:bodyPrefix+content,
           staff:c.staff||'',
           _key:'c:'+(c.id||(c.time+'|'+content))
         });
@@ -10454,18 +10481,21 @@ function printCareRange(){
 
     // 行HTML
     const rows=deduped.map(row=>{
-      return `<tr><td>${row.dk}</td><td>${row.t||''}</td><td>${row.cat}</td><td>${row.body||''}</td><td>${row.staff||''}</td></tr>`;
+      return `<tr><td>${row.dk}</td><td>${row.t||''}</td><td>${row.cat}</td><td>${escapeHtml(row.body||'')}</td><td>${escapeHtml(row.staff||'')}</td></tr>`;
     });
 
     if(rows.length>0){
       const pageBreak=ri>0?'style="page-break-before:always;"':'';
-      html+=`<div class="print-subtitle" ${pageBreak}>${res.name}（${res.care||''}）</div>
+      html+=`<div class="print-subtitle" ${pageBreak}>${escapeHtml(res.name)}（${escapeHtml(res.care||'')}）</div>
       <table class="print-table">
         <thead><tr><th>日付</th><th>時刻</th><th>項目</th><th>内容</th><th>担当</th></tr></thead>
         <tbody>${rows.join('')}</tbody>
       </table>`;
     }
   });
+  if(!html.includes('print-table')){
+    html+=`<p style="text-align:center;color:#666;padding:24px;">該当する記録がありません。</p>`;
+  }
   document.getElementById('printArea').innerHTML=html;
   window.print();
 }
