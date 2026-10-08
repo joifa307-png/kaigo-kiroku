@@ -1677,7 +1677,7 @@ const REC = {
 const N_RECORD_COLS = 57;
 
 /** デプロイのたびに上げる（設定→データ管理の「アプリ情報」で表示） */
-const APP_VERSION='1.7.5';
+const APP_VERSION='1.7.7';
 /** pull取得・ローカル整理の記録保持日数（同期） */
 const KAIGO_PULL_LIMIT_DAYS=14;
 const KAIGO_LOCAL_RECORD_KEEP_DAYS=14;
@@ -3245,16 +3245,27 @@ function bumpCalcU(rec){ if(rec) rec._calcU=Date.now(); }
 function gasPullBody_(){
   return {action:'pull', sheetName:FAC.sheetName, limitDays:KAIGO_PULL_LIMIT_DAYS};
 }
-/** 印刷期間の開始日から今日までに必要な pull 日数（上限付き） */
+/**
+ * 印刷開始日を含めるための GAS pull limitDays。
+ * GAS側: cutoff = 今日 - n（0時）、RECORD は日付 >= cutoff の行のみ返す。
+ */
 function pullLimitDaysForPrintFrom_(fromStr){
   const from=normalizeDateKey(fromStr);
   const today=dk(new Date());
   if(!from||!today||from>today) return KAIGO_PULL_LIMIT_DAYS;
   const a=new Date(from+'T12:00:00');
   const b=new Date(today+'T12:00:00');
-  const need=Math.floor((b-a)/86400000)+1;
+  const n=Math.floor((b-a)/86400000);
   const cap=366;
-  return Math.min(cap, Math.max(KAIGO_PULL_LIMIT_DAYS, need));
+  return Math.min(cap, Math.max(KAIGO_PULL_LIMIT_DAYS, n));
+}
+function localPullCutoffDateKey_(limitDays){
+  const n=parseInt(limitDays,10)||0;
+  if(n<=0) return '';
+  const cutoff=new Date();
+  cutoff.setHours(0,0,0,0);
+  cutoff.setDate(cutoff.getDate()-n);
+  return dk(cutoff);
 }
 function oldestRecordDateKeyInDb_(){
   let min='';
@@ -3284,7 +3295,8 @@ async function pullRecordsForPrintRange(from){
     return false;
   }
   const limitDays=pullLimitDaysForPrintFrom_(from);
-  showBriefToast('印刷用に記録を取得中（最大 '+limitDays+' 日分）…', 12000);
+  const expectCutoff=localPullCutoffDateKey_(limitDays);
+  showBriefToast('印刷用に記録を取得中…（'+from+' 以降・limitDays='+limitDays+'）', 12000);
   try{
     const j=await gasPost({action:'pull', sheetName:FAC.sheetName, limitDays:limitDays});
     const raw=j.rows||[];
@@ -3295,6 +3307,10 @@ async function pullRecordsForPrintRange(from){
     const remote=sheetToDb(raw);
     db=mergePulledDb(db, remote);
     persistLocalQuiet();
+    const cutoff=j.cutoffDate||expectCutoff||'';
+    if(cutoff){
+      showBriefToast('記録を取得しました（'+cutoff+' 以降のデータ）', 4000, false);
+    }
     return true;
   }catch(e){
     console.error('pullRecordsForPrintRange', e);
@@ -3411,7 +3427,24 @@ function mergeCareManagerOfficesIntoList(existing, assignments){
 const KAIGO_PUSH_TS_SUFFIX = ':last_push_ts_v1';
 const KAIGO_PUSH_RIDS_SUFFIX = ':rid_snapshot_v1';
 const KAIGO_DELTA_MAX_PATCH_ROWS = 3500;
-const KAIGO_DELTA_MAX_REMOVE_RIDS = 3500;
+/** merge push で全行送るときの sinceTs（extractPushDeltaSlices が全行を含める） */
+const KAIGO_MERGE_PUSH_ALL_SINCE_TS = -9999999999999;
+
+function buildKaigoMergePushBody(slices){
+  return {
+    action:'push',
+    sheetName:FAC.sheetName,
+    merge:true,
+    recordRows:(slices&&slices.recRows)||[],
+    residentRows:(slices&&slices.resRows)||[],
+    settingRows:(slices&&slices.setRows)||[],
+    supplyRows:(slices&&slices.supRows)||[],
+    removeRecRids:[]
+  };
+}
+function extractFullMergePushSlices(fullRows){
+  return extractPushDeltaSlices(fullRows, KAIGO_MERGE_PUSH_ALL_SINCE_TS);
+}
 
 function loadRidSnapshotForPush_(storageKey){
   try{
@@ -3582,17 +3615,14 @@ function runGasPushCycle(){
         }
         setSyncStatus('シートA1修復中…','#185FA5');
         const fullRows=dbToSheet(db);
-        return gp({action:'push',sheetName:FAC.sheetName,rows:fullRows})
+        return gp(buildKaigoMergePushBody(extractFullMergePushSlices(fullRows)))
           .then(()=>({_sheetRepaired:true,_mergedRemoteDays:remoteDays}));
       }
       const remote=sheetToDb(raw);
       db=mergePulledDb(db, remote);
       const fullRows=dbToSheet(db);
-      const wantedRids=extractRecRidsFromSheetRows(fullRows);
       const prevSnap=loadRidSnapshotForPush_(sk);
       const lastTs=_numU(localStorage.getItem(sk+KAIGO_PUSH_TS_SUFFIX));
-      const wantSet=new Set(wantedRids);
-      const removed=Array.isArray(prevSnap)?prevSnap.filter(id=>!wantSet.has(String(id))):[];
       const useDelta=Array.isArray(prevSnap)&&lastTs>0;
 
       let pushBody=null;
@@ -3600,31 +3630,24 @@ function runGasPushCycle(){
       if(useDelta){
         const d=extractPushDeltaSlices(fullRows,lastTs);
         patchTotal=d.recRows.length+d.resRows.length+d.setRows.length+d.supRows.length;
-        if(patchTotal>KAIGO_DELTA_MAX_PATCH_ROWS||removed.length>KAIGO_DELTA_MAX_REMOVE_RIDS){
+        if(patchTotal===0){
           pushBody=null;
-        }else if(patchTotal===0&&removed.length===0){
-          pushBody=null;
+        }else if(patchTotal>KAIGO_DELTA_MAX_PATCH_ROWS){
+          pushBody=buildKaigoMergePushBody(extractFullMergePushSlices(fullRows));
         }else{
-          pushBody={
-            action:'push',
-            sheetName:FAC.sheetName,
-            merge:true,
-            recordRows:d.recRows,
-            residentRows:d.resRows,
-            settingRows:d.setRows,
-            supplyRows:d.supRows,
-            removeRecRids:removed
-          };
+          pushBody=buildKaigoMergePushBody(d);
         }
+      }else if(syncDirty){
+        pushBody=buildKaigoMergePushBody(extractFullMergePushSlices(fullRows));
       }
       if(!pushBody){
-        if(useDelta && patchTotal===0 && removed.length===0){
+        if(useDelta && patchTotal===0){
           return {_skippedPush:true};
         }
         if(!syncDirty){
           return {_skippedPush:true};
         }
-        pushBody={action:'push',sheetName:FAC.sheetName,rows:fullRows};
+        pushBody=buildKaigoMergePushBody(extractFullMergePushSlices(fullRows));
       }
       return gp(pushBody).then(()=>({_sheetRepaired:false}));
     })
