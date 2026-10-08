@@ -1677,7 +1677,7 @@ const REC = {
 const N_RECORD_COLS = 57;
 
 /** デプロイのたびに上げる（設定→データ管理の「アプリ情報」で表示） */
-const APP_VERSION='1.7.4';
+const APP_VERSION='1.7.5';
 /** pull取得・ローカル整理の記録保持日数（同期） */
 const KAIGO_PULL_LIMIT_DAYS=14;
 const KAIGO_LOCAL_RECORD_KEEP_DAYS=14;
@@ -3244,6 +3244,63 @@ function bumpCalcU(rec){ if(rec) rec._calcU=Date.now(); }
 
 function gasPullBody_(){
   return {action:'pull', sheetName:FAC.sheetName, limitDays:KAIGO_PULL_LIMIT_DAYS};
+}
+/** 印刷期間の開始日から今日までに必要な pull 日数（上限付き） */
+function pullLimitDaysForPrintFrom_(fromStr){
+  const from=normalizeDateKey(fromStr);
+  const today=dk(new Date());
+  if(!from||!today||from>today) return KAIGO_PULL_LIMIT_DAYS;
+  const a=new Date(from+'T12:00:00');
+  const b=new Date(today+'T12:00:00');
+  const need=Math.floor((b-a)/86400000)+1;
+  const cap=366;
+  return Math.min(cap, Math.max(KAIGO_PULL_LIMIT_DAYS, need));
+}
+function oldestRecordDateKeyInDb_(){
+  let min='';
+  Object.keys(db.records||{}).forEach(k=>{
+    const nk=normalizeDateKey(k);
+    if(!nk) return;
+    if(!min||nk<min) min=nk;
+  });
+  return min;
+}
+/** 指定期間の印刷に、ローカルに無い古い日付の記録が必要か */
+function printRangeNeedsExtendedPull_(from){
+  const fromN=normalizeDateKey(from);
+  if(!fromN) return false;
+  const needDays=pullLimitDaysForPrintFrom_(from);
+  if(needDays>KAIGO_PULL_LIMIT_DAYS) return true;
+  const oldest=oldestRecordDateKeyInDb_();
+  return !oldest||fromN<oldest;
+}
+/** 印刷前：必要なら GAS から指定期間分の RECORD を追加取得してマージ */
+async function pullRecordsForPrintRange(from){
+  if(!printRangeNeedsExtendedPull_(from)) return true;
+  if(!FAC||!gasConfigured()){
+    alert('指定した開始日の記録は、この端末には保存されていません。\n'
+      +'通常の🔄同期は直近 '+KAIGO_PULL_LIMIT_DAYS+' 日分のみ取得します。\n\n'
+      +'データ管理で GAS を設定し、同期できる状態にしてから、もう一度印刷してください。');
+    return false;
+  }
+  const limitDays=pullLimitDaysForPrintFrom_(from);
+  showBriefToast('印刷用に記録を取得中（最大 '+limitDays+' 日分）…', 12000);
+  try{
+    const j=await gasPost({action:'pull', sheetName:FAC.sheetName, limitDays:limitDays});
+    const raw=j.rows||[];
+    if(sheetLooksLikeCorruptMarker(raw)){
+      alert('スプレッドシートの形式エラーのため記録を取得できませんでした。');
+      return false;
+    }
+    const remote=sheetToDb(raw);
+    db=mergePulledDb(db, remote);
+    persistLocalQuiet();
+    return true;
+  }catch(e){
+    console.error('pullRecordsForPrintRange', e);
+    alert('指定期間の記録を取得できませんでした。\n'+String(e&&e.message||e)+'\n\n🔄同期後にもう一度印刷してください。');
+    return false;
+  }
 }
 
 /** 複数Googleアカウントの /u/N/ 自動リダイレクト404対策。authuser=0 を付けて主アカウントに固定 */
@@ -10151,6 +10208,7 @@ function buildPrintSettings(){
           <span>LINE WORKS共有済みのケア記録のみ</span>
         </label>
         <p style="font-size:12px;color:var(--text3);margin:6px 0 0;line-height:1.45;">ONのときは期間内のケア記録のうち、共有ボタンで送信済み（【LW】）の行だけを印刷します。</p>
+        <p style="font-size:12px;color:var(--text3);margin:6px 0 0;line-height:1.45;">※端末には通常 ${KAIGO_PULL_LIMIT_DAYS} 日分のみ保持します。長い期間を指定した場合、印刷前に GAS から不足分を自動取得します。</p>
       </div>
       <button class="btn btn-primary btn-sm" onclick="printCareRange()">印刷プレビュー</button>
     </div>
@@ -10159,8 +10217,8 @@ function buildPrintSettings(){
 
 function getDatesInRange(from,to){
   const dates=[];
-  const d=new Date(from+'T00:00:00');
-  const end=new Date(to+'T00:00:00');
+  const d=new Date(from+'T12:00:00');
+  const end=new Date(to+'T12:00:00');
   while(d<=end){ dates.push(dk(d)); d.setDate(d.getDate()+1); }
   return dates;
 }
@@ -10229,11 +10287,12 @@ function getRecSummaryText(rc){
   return lines.join('\n').trim();
 }
 
-function printVitalRange(){
+async function printVitalRange(){
   const from=document.getElementById('printVitalFrom').value;
   const to=document.getElementById('printVitalTo').value;
   const resName=document.getElementById('printVitalRes').value;
   if(!from||!to){ alert('期間を入力してください'); return; }
+  if(!(await pullRecordsForPrintRange(from))) return;
   const dates=getDatesInRange(from,to);
   const targets=resName==='__all__'?[...db.residents].sort(compareResidentsStable):db.residents.filter(r=>r.name===resName);
   const out=[];
@@ -10280,12 +10339,13 @@ function printVitalRange(){
   window.print();
 }
 
-function printCareRange(){
+async function printCareRange(){
   const from=document.getElementById('printCareFrom').value;
   const to=document.getElementById('printCareTo').value;
   const resName=document.getElementById('printCareRes')?.value||'__all__';
   const onlyLw=!!document.getElementById('printCareLwOnly')?.checked;
   if(!from||!to){ alert('期間を入力してください'); return; }
+  if(!(await pullRecordsForPrintRange(from))) return;
   const dates=getDatesInRange(from,to);
   const titleSuffix=onlyLw?'（LINE WORKS共有済みケアのみ）':'';
   let html=`<div class="print-title">${FAC.name} ケア記録サマリー ${from} ～ ${to}${titleSuffix}</div>`;
