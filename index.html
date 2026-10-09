@@ -1677,10 +1677,12 @@ const REC = {
 const N_RECORD_COLS = 57;
 
 /** デプロイのたびに上げる（設定→データ管理の「アプリ情報」で表示） */
-const APP_VERSION='1.7.7';
+const APP_VERSION='1.7.9';
 /** pull取得・ローカル整理の記録保持日数（同期） */
 const KAIGO_PULL_LIMIT_DAYS=14;
 const KAIGO_LOCAL_RECORD_KEEP_DAYS=14;
+/** 復元送信（管理者用）：merge push の1リクエストあたりの RECORD 行数 */
+const KAIGO_RESTORE_PUSH_CHUNK=1000;
 function isStandaloneWebApp(){
   try{
     if(window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches) return true;
@@ -3444,6 +3446,264 @@ function buildKaigoMergePushBody(slices){
 }
 function extractFullMergePushSlices(fullRows){
   return extractPushDeltaSlices(fullRows, KAIGO_MERGE_PUSH_ALL_SINCE_TS);
+}
+
+/** dbToSheet 出力から RECORD データ行のみ（SEC_REC 見出し・ヘッダ除く） */
+function extractRecordDataRowsFromSheet_(fullRows){
+  const recRows=[];
+  let i=0;
+  while(i<fullRows.length && String(fullRows[i][0])!==SEC_REC) i++;
+  if(i>=fullRows.length) return recRows;
+  i+=2;
+  while(i<fullRows.length){
+    const r=fullRows[i];
+    if(!r||!r.length){ i++; continue; }
+    const c0=String(r[0]||'');
+    if(c0===SEC_SET||c0===SEC_SUP) break;
+    recRows.push(r.slice());
+    i++;
+  }
+  return recRows;
+}
+
+/** バックアップ JSON の records マップ → merge push 用 RECORD 行（dbToSheet と同一形式） */
+function recordsMapToSheetRecordRows_(recordsMap){
+  const norm=normalizeRecordsMap(cloneDeep(recordsMap||{}));
+  normalizeVitalTempsInRecords(norm);
+  const full=dbToSheet({records:norm, residents:[], settings:{}, supplies:[]});
+  return extractRecordDataRowsFromSheet_(full);
+}
+
+function dateRangeLabelFromRecordRows_(rows){
+  let min='', max='';
+  (rows||[]).forEach(r=>{
+    const dk=String(r[REC.dk]||'').trim();
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(dk)) return;
+    if(!min||dk<min) min=dk;
+    if(!max||dk>max) max=dk;
+  });
+  if(!min) return '（日付なし）';
+  return min===max?min:(min+' ～ '+max);
+}
+
+function dateRangeShortMdFromRecordRows_(rows){
+  let min='', max='';
+  (rows||[]).forEach(r=>{
+    const dk=String(r[REC.dk]||'').trim();
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(dk)) return;
+    if(!min||dk<min) min=dk;
+    if(!max||dk>max) max=dk;
+  });
+  if(!min) return '（日付なし）';
+  const fmt=dk=>{
+    const p=dk.split('-');
+    return parseInt(p[1],10)+'/'+parseInt(p[2],10);
+  };
+  return min===max?fmt(min):(fmt(min)+'〜'+fmt(max));
+}
+
+function normalizeRestoreUnit_(v){
+  const s=String(v==null?'':v).trim();
+  if(s==='西'||s==='nishi'||s==='NISHI') return '西';
+  if(s==='南'||s==='minami'||s==='MINAMI') return '南';
+  return '';
+}
+
+/** 復元送信用：restoreUnit と records 本体を JSON から取得 */
+function parseRestorePushJson_(text){
+  const imported=parseImportJsonText_(text);
+  let s=String(text==null?'':text);
+  if(s.charCodeAt(0)===0xFEFF) s=s.slice(1);
+  s=s.trim();
+  let root;
+  try{ root=JSON.parse(s); }catch(_){ root=null; }
+  let restoreUnit='';
+  if(root&&typeof root==='object'){
+    restoreUnit=normalizeRestoreUnit_(root.restoreUnit);
+    if(!restoreUnit&&root.db) restoreUnit=normalizeRestoreUnit_(root.db.restoreUnit);
+    if(!restoreUnit&&root.data) restoreUnit=normalizeRestoreUnit_(root.data.restoreUnit);
+  }
+  if(!restoreUnit) restoreUnit=normalizeRestoreUnit_(imported.restoreUnit);
+  return { imported, restoreUnit };
+}
+
+function uniqueResidentNamesFromRecordsMap_(recordsMap){
+  const names=new Set();
+  const recs=normalizeRecordsMap(recordsMap||{});
+  Object.keys(recs).forEach(dk=>{
+    Object.keys(recs[dk]||{}).forEach(nm=>{
+      const n=normalizeResidentName(nm);
+      if(n) names.add(n);
+    });
+  });
+  return names;
+}
+
+function residentNameSetFromSheetPullRows_(rows){
+  const set=new Set();
+  const remote=sheetToDbLenient(rows||[]);
+  (remote.residents||[]).forEach(r=>{
+    const n=normalizeResidentName(r&&r.name);
+    if(n) set.add(n);
+  });
+  return set;
+}
+
+/**
+ * 記録の利用者名が送り先名簿にどれだけ含まれるか。
+ * 不一致が過半数を超える場合 ok:false
+ */
+function restorePushResidentNameCheck_(recordNamesSet, sheetNamesSet){
+  const names=[...recordNamesSet];
+  if(!names.length) return { ok:true, unmatched:[], matched:0, total:0 };
+  const unmatched=[];
+  let matched=0;
+  names.forEach(n=>{
+    if(sheetNamesSet.has(n)) matched++;
+    else unmatched.push(n);
+  });
+  const ok=unmatched.length<=names.length/2;
+  return { ok, unmatched, matched, total:names.length };
+}
+
+let _restorePushInFlight=null;
+
+function setRestorePushProgress_(text){
+  const el=document.getElementById('restorePushProgress');
+  if(el) el.textContent=text||'';
+}
+
+/** バックアップ JSON の records のみ GAS シートへ merge push（localStorage は変更しない） */
+function adminRestorePushFromJson(input){
+  const file=input&&input.files&&input.files[0];
+  if(input) input.value='';
+  if(!file) return;
+  if(!gasConfigured()){
+    alert('データ管理で GAS Webアプリ URL とトークンを設定してください');
+    return;
+  }
+  if(_gasSyncInFlight){
+    alert('通常の同期が実行中です。完了してから再度お試しください');
+    return;
+  }
+  if(_restorePushInFlight){
+    alert('復元送信が実行中です');
+    return;
+  }
+
+  const reader=new FileReader();
+  reader.onerror=()=>alert('ファイルを読み込めませんでした');
+  reader.onload=e=>{
+    (async()=>{
+      let sentRows=0;
+      let totalBatches=0;
+      let dateRange='';
+      let completedBatches=0;
+      let restoreUnit='';
+      try{
+        const parsed=parseRestorePushJson_(e.target.result);
+        restoreUnit=parsed.restoreUnit;
+        if(!restoreUnit){
+          alert('この JSON に restoreUnit（「西」または「南」）がありません。\n送信を中止しました。\n\n月次保存・JSONダウンロード（v1.7.9以降）には restoreUnit が含まれます。');
+          return;
+        }
+        const imported=parsed.imported;
+        if(!imported.records||typeof imported.records!=='object'||Array.isArray(imported.records)){
+          throw new Error('JSON に records オブジェクトがありません');
+        }
+        const recordRows=recordsMapToSheetRecordRows_(imported.records);
+        if(!recordRows.length){
+          alert('送る記録行がありません');
+          return;
+        }
+        totalBatches=Math.ceil(recordRows.length/KAIGO_RESTORE_PUSH_CHUNK);
+        dateRange=dateRangeLabelFromRecordRows_(recordRows);
+        const periodShort=dateRangeShortMdFromRecordRows_(recordRows);
+        const rowApprox=recordRows.length;
+
+        const credPin=gasCredentialsPin_();
+        if(!gasCredentialsPinValid_(credPin)){
+          alert('GAS URL・トークンを設定してください');
+          return;
+        }
+
+        setRestorePushProgress_('名簿照合のためシートを取得中…');
+        const pullRes=await gasPost({ action:'pull', sheetName:restoreUnit, limitDays:0 }, credPin, 2);
+        const sheetNames=residentNameSetFromSheetPullRows_(pullRes.rows||[]);
+        const recordNames=uniqueResidentNamesFromRecordsMap_(imported.records);
+        const nameCheck=restorePushResidentNameCheck_(recordNames, sheetNames);
+        if(!nameCheck.ok){
+          setRestorePushProgress_('');
+          const sample=nameCheck.unmatched.slice(0,8).join('、');
+          const more=nameCheck.unmatched.length>8?' 他'+(nameCheck.unmatched.length-8)+'名':'';
+          alert(
+            '送り先タブ「'+restoreUnit+'」の利用者名簿と、ファイル内の記録の利用者名が一致しません。\n'+
+            '（一致 '+nameCheck.matched+' / '+nameCheck.total+' 名・不一致が過半数のため中止）\n\n'+
+            '名簿にない名前の例: '+sample+more+'\n\n'+
+            'restoreUnit の誤り、または別ユニットのバックアップの可能性があります。'
+          );
+          return;
+        }
+
+        if(!confirm(
+          '【復元送信（管理者用）】\n\n'+
+          'ファイル: '+file.name+'\n'+
+          '送り先: '+restoreUnit+'タブ\n'+
+          '期間: '+periodShort+'\n'+
+          '約 '+rowApprox+' 行（'+totalBatches+' 回に分割送信）\n\n'+
+          'records のみ merge push します。端末の localStorage には保存しません。\n\n'+
+          '送信を開始しますか？'
+        )) return;
+
+        _restorePushInFlight=true;
+        setRestorePushProgress_('0/'+totalBatches+' 準備中…');
+        for(let b=0;b<totalBatches;b++){
+          const chunk=recordRows.slice(b*KAIGO_RESTORE_PUSH_CHUNK,(b+1)*KAIGO_RESTORE_PUSH_CHUNK);
+          setRestorePushProgress_((b+1)+'/'+totalBatches+' 送信中…（'+sentRows+' 行済）');
+          try{
+            await gasPost({
+              action:'push',
+              sheetName:restoreUnit,
+              merge:true,
+              recordRows:chunk,
+              residentRows:[],
+              settingRows:[],
+              supplyRows:[],
+              removeRecRids:[]
+            }, credPin, 2);
+          }catch(batchErr){
+            console.error('[adminRestorePushFromJson] batch', b+1, batchErr);
+            setRestorePushProgress_('');
+            alert(
+              '復元送信を中断しました。\n\n'+
+              '成功: '+completedBatches+'/'+totalBatches+' バッチ（'+sentRows+' 行）\n'+
+              '失敗: バッチ '+(b+1)+'/'+totalBatches+'\n'+
+              'エラー: '+(batchErr&&batchErr.message?batchErr.message:String(batchErr))+'\n\n'+
+              'ファイル全体の日付範囲: '+dateRange
+            );
+            return;
+          }
+          sentRows+=chunk.length;
+          completedBatches++;
+        }
+        setRestorePushProgress_('完了');
+        alert(
+          '復元送信が完了しました。\n\n'+
+          '送信行数: '+sentRows+' 行\n'+
+          '日付範囲: '+dateRange+'\n'+
+          '送り先: '+restoreUnit+'タブ'
+        );
+      }catch(err){
+        console.error('[adminRestorePushFromJson]', err);
+        setRestorePushProgress_('');
+        alert('復元送信エラー:\n'+(err&&err.message?err.message:String(err)));
+      }finally{
+        _restorePushInFlight=null;
+        setTimeout(()=>setRestorePushProgress_(''), 4000);
+      }
+    })();
+  };
+  reader.readAsText(file,'UTF-8');
 }
 
 function loadRidSnapshotForPush_(storageKey){
@@ -9800,6 +10060,22 @@ function buildDataSettings(){
         <input type="file" accept=".json,application/json,text/json" style="display:none;" onchange="importDB(this)">
       </label>
     </div>
+    <div class="panel-sec" style="border:1px solid #856404;border-radius:10px;padding:14px;background:#FFF8E6;">
+      <h3 style="color:#856404;">📡 復元送信（管理者用）</h3>
+      <p style="font-size:14px;color:var(--text2);margin-bottom:8px;line-height:1.5;">
+        月次バックアップ等の JSON から <strong>records のみ</strong>を読み取り、GAS シートへ merge push します。
+        送り先は JSON の <code>restoreUnit</code>（西／南）で決まり、<strong>端末で選んでいるユニットは使いません</strong>。
+        端末の localStorage には保存しません。
+      </p>
+      <p style="font-size:13px;color:var(--text2);margin-bottom:10px;">
+        約 ${KAIGO_RESTORE_PUSH_CHUNK} 行ずつ送信。送信前に送り先タブの利用者名簿と記録の名前を照合します。
+      </p>
+      <label class="btn btn-sm" style="cursor:pointer;background:#856404;color:#fff;border-color:#856404;">
+        バックアップ JSON を選んで送信
+        <input type="file" accept=".json,application/json,text/json" style="display:none;" onchange="adminRestorePushFromJson(this)">
+      </label>
+      <p id="restorePushProgress" style="font-size:14px;color:var(--blue);margin:10px 0 0;font-weight:600;min-height:1.2em;"></p>
+    </div>
     <div class="panel-sec">
       <h3>🗄 ストレージ整理</h3>
       <div style="background:#fdecea;border:1px solid #b71c1c;border-radius:8px;padding:12px;margin-bottom:16px;">
@@ -9918,8 +10194,10 @@ function testGasConnection(){
     .catch(e=>alert('接続失敗: '+e.message));
 }
 function exportDB(){
+  if(!FAC){ alert('施設が未選択です'); return; }
   const today=new Date().toISOString().slice(0,10).replace(/-/g,'');
-  const blob=new Blob([JSON.stringify(db,null,2)],{type:'application/json'});
+  const payload={ restoreUnit:FAC.sheetName, db:cloneDeep(db) };
+  const blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'});
   const url=URL.createObjectURL(blob);
   const a=document.createElement('a');
   a.href=url; a.download=`kaigo_${FAC.name}_${today}.json`;
@@ -10802,7 +11080,8 @@ function saveMonthlyBackup(){
   const now=new Date();
   const ym=`${now.getFullYear()}${pad(now.getMonth()+1)}`;
   const fname=`kaigo_${FAC.name}_${ym}.json`;
-  const json=JSON.stringify(db,null,2);
+  const payload={ restoreUnit:FAC.sheetName, db:cloneDeep(db) };
+  const json=JSON.stringify(payload,null,2);
   const blob=new Blob([json],{type:'application/json'});
   const file=new File([blob],fname,{type:'application/json'});
   function fallbackDownload(){
