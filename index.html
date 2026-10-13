@@ -654,6 +654,7 @@ input,select,textarea{font-family:inherit;font-size:30px;}
     <button class="hdr-btn no-print" onclick="openSettings()">⚙️</button>
   </div>
   <div class="main-scroll">
+    <div id="storageCapacityBanner" class="no-print" style="display:none;margin:0 8px 8px;padding:10px 12px;border-radius:8px;font-size:14px;line-height:1.45;font-weight:600;"></div>
     <table class="res-table" id="resTable">
       <thead>
         <tr>
@@ -1004,6 +1005,7 @@ function startApp(){
       try{
         loadDB();
         autoCleanTombstones();
+        cleanupObsoleteLocalStorageKeys_();
         gasMirrorToCookies();
         setSyncStatus('--','var(--text3)');
         renderDate();
@@ -1677,10 +1679,15 @@ const REC = {
 const N_RECORD_COLS = 57;
 
 /** デプロイのたびに上げる（設定→データ管理の「アプリ情報」で表示） */
-const APP_VERSION='1.7.9';
+const APP_VERSION='1.7.10';
 /** pull取得・ローカル整理の記録保持日数（同期） */
 const KAIGO_PULL_LIMIT_DAYS=14;
 const KAIGO_LOCAL_RECORD_KEEP_DAYS=14;
+/** localStorage 目安（同一オリジン全体・西/南共有） */
+const KAIGO_STORAGE_GUIDE_BYTES=5*1024*1024;
+const KAIGO_STORAGE_WARN_BYTES=4*1024*1024;
+const KAIGO_STORAGE_CRIT_BYTES=4.5*1024*1024;
+const KAIGO_AUTO_PRUNE_AFTER_SYNC_SUFFIX=':last_auto_prune_day_v1';
 /** 復元送信（管理者用）：merge push の1リクエストあたりの RECORD 行数 */
 const KAIGO_RESTORE_PUSH_CHUNK=1000;
 function isStandaloneWebApp(){
@@ -3706,13 +3713,18 @@ function adminRestorePushFromJson(input){
   reader.readAsText(file,'UTF-8');
 }
 
-function loadRidSnapshotForPush_(storageKey){
-  try{
-    const raw=localStorage.getItem(storageKey+KAIGO_PUSH_RIDS_SUFFIX);
-    if(raw==null) return null;
-    const j=JSON.parse(raw);
-    return Array.isArray(j)?j:null;
-  }catch(_){ return null; }
+/** removeRecRids 廃止後の rid スナップショット（容量肥大の原因になり得る） */
+function removeLegacyPushRidSnapshots_(){
+  ['kaigo_nishi','kaigo_minami'].forEach(sk=>{
+    try{ localStorage.removeItem(sk+KAIGO_PUSH_RIDS_SUFFIX); }catch(_){}
+  });
+}
+
+function cleanupObsoleteLocalStorageKeys_(){
+  removeLegacyPushRidSnapshots_();
+  ['kaigo_nishi','kaigo_minami'].forEach(sk=>{
+    try{ localStorage.removeItem(sk+'_repair_backup_v1'); }catch(_){}
+  });
 }
 
 function sheetSupplyRowUpdatedAt_(row){
@@ -3808,9 +3820,9 @@ function extractPushDeltaSlices(fullRows, sinceTs){
   return {recRows,resRows,setRows,supRows};
 }
 
-function finalizePushSuccessState_(storageKey, wantedRids){
+function finalizePushSuccessState_(storageKey){
   localStorage.setItem(storageKey+KAIGO_PUSH_TS_SUFFIX,String(Date.now()));
-  localStorage.setItem(storageKey+KAIGO_PUSH_RIDS_SUFFIX,JSON.stringify(wantedRids));
+  try{ localStorage.removeItem(storageKey+KAIGO_PUSH_RIDS_SUFFIX); }catch(_){}
 }
 
 /** 取得のみ（診断等から利用可）。通常起動では呼ばない */
@@ -3881,9 +3893,8 @@ function runGasPushCycle(){
       const remote=sheetToDb(raw);
       db=mergePulledDb(db, remote);
       const fullRows=dbToSheet(db);
-      const prevSnap=loadRidSnapshotForPush_(sk);
       const lastTs=_numU(localStorage.getItem(sk+KAIGO_PUSH_TS_SUFFIX));
-      const useDelta=Array.isArray(prevSnap)&&lastTs>0;
+      const useDelta=lastTs>0;
 
       let pushBody=null;
       let patchTotal=0;
@@ -3913,18 +3924,20 @@ function runGasPushCycle(){
     })
     .then(meta=>{
       const sk=FAC.storageKey;
-      const wantedRids=extractRecRidsFromSheetRows(dbToSheet(db));
       persistLocalQuiet();
       mirrorResidentTypesToLocalStorage();
       // 同期中に新規保存が入った場合は未送信フラグを残し、次便を必ず実行する
       const hasNewerChanges=(syncDirtyVersion!==cycleVersionStart);
       const skippedPush=!!(meta&&meta._skippedPush);
       if(!hasNewerChanges){
-        finalizePushSuccessState_(sk,wantedRids);
+        finalizePushSuccessState_(sk);
       }
       syncDirty=hasNewerChanges;
       if(syncDirty) localStorage.setItem(sk+'_dirty','1');
       else localStorage.removeItem(sk+'_dirty');
+      if(!hasNewerChanges&&!syncDirty){
+        maybeAutoPruneAfterSyncSuccess_();
+      }
       renderMain();
       const n=new Date();
       const repaired=!!(meta&&meta._sheetRepaired);
@@ -6065,6 +6078,7 @@ function renderFacilityHeader(){
   const verEl=document.getElementById('hdrAppVer');
   if(verEl) verEl.textContent='v'+APP_VERSION;
   document.title = S.facilityName||FAC.name;
+  updateMainStorageWarningBanner_();
 }
 
 // ========== 詳細画面 ==========
@@ -9786,24 +9800,124 @@ function saveResidentSched(){
 }
 
 // ========== データ管理 ==========
-/** このユニットの localStorage 主要キーの概算バイト数（文字列長×2 近似） */
-function estimateFacilityLocalStorageBytes(){
-  if(!FAC) return 0;
-  let sum=0;
-  const keys=[FAC.storageKey,FAC.storageKey+'_dirty',FAC.storageKey+'_logo_b64_v1',FAC.storageKey+'_settings_snap_v1',FAC.storageKey+'_resident_types'];
-  keys.forEach(k=>{
-    try{
-      const v=localStorage.getItem(k);
-      if(v) sum+=v.length;
-    }catch(_){}
-  });
-  return sum*2;
+function localStorageValueSizeBytes_(v){
+  if(v==null) return 0;
+  return String(v).length*2;
 }
+
+/** 同一オリジンの localStorage 全キー（西・南・写真等を含む） */
+function listAllLocalStorageKeySizes_(){
+  const out=[];
+  try{
+    for(let i=0;i<localStorage.length;i++){
+      const key=localStorage.key(i);
+      if(!key) continue;
+      let v='';
+      try{ v=localStorage.getItem(key); }catch(_){ v=''; }
+      out.push({ key, bytes: localStorageValueSizeBytes_(v) });
+    }
+  }catch(_){}
+  out.sort((a,b)=>b.bytes-a.bytes);
+  return out;
+}
+
+function estimateAllLocalStorageBytes_(){
+  return listAllLocalStorageKeySizes_().reduce((s,o)=>s+o.bytes,0);
+}
+
+/** @deprecated 互換。表示は estimateAllLocalStorageBytes_ を使用 */
+function estimateFacilityLocalStorageBytes(){
+  return estimateAllLocalStorageBytes_();
+}
+
+function storageKeyCategoryLabel_(key){
+  if(key==='kaigo_nishi'||key==='kaigo_minami') return 'DB本体（記録・名簿・設定）';
+  if(key.endsWith(KAIGO_PUSH_RIDS_SUFFIX)) return '廃止: ridスナップ（削除推奨）';
+  if(key.endsWith(KAIGO_PUSH_TS_SUFFIX)) return '同期メタ';
+  if(key.endsWith('_repair_backup_v1')) return 'A1修復バックアップ（削除可）';
+  if(key.endsWith('_settings_snap_v1')) return '設定スナップショット';
+  if(key.endsWith('_logo_b64_v1')) return 'ロゴ画像';
+  if(key.endsWith('_resident_types')) return '利用者区分';
+  if(key.startsWith('kaigo_photos_')) return '写真';
+  if(key.indexOf('zaiko_debug')===0) return '在庫デバッグ';
+  if(key.indexOf('kaigo_gas')===0||key===KAIGO_GAS_SNAP_KEY) return 'GAS設定';
+  return 'その他';
+}
+
+function buildStorageBreakdownHtml_(){
+  const rows=listAllLocalStorageKeySizes_();
+  const total=rows.reduce((s,o)=>s+o.bytes,0);
+  if(!rows.length) return '<p style="font-size:13px;color:var(--text3);">キーがありません</p>';
+  const top=rows.slice(0,25).map(r=>{
+    const pct=total>0?((r.bytes/total)*100).toFixed(1):'0';
+    const cat=storageKeyCategoryLabel_(r.key);
+    const kEsc=String(r.key).replace(/&/g,'&amp;').replace(/</g,'&lt;');
+    return `<tr><td style="font-size:12px;word-break:break-all;">${kEsc}</td><td style="font-size:12px;">${cat}</td><td style="text-align:right;font-size:12px;white-space:nowrap;">${formatStorageSize(r.bytes)}</td><td style="text-align:right;font-size:12px;">${pct}%</td></tr>`;
+  }).join('');
+  return `<table style="width:100%;border-collapse:collapse;margin-top:8px;"><thead><tr>
+    <th style="text-align:left;font-size:12px;">キー</th><th style="text-align:left;font-size:12px;">種別</th><th style="text-align:right;font-size:12px;">サイズ</th><th style="text-align:right;font-size:12px;">割合</th>
+  </tr></thead><tbody>${top}</tbody></table>`;
+}
+
+function storageCapacityDisplayStyle_(bytes){
+  if(bytes>=KAIGO_STORAGE_CRIT_BYTES) return { color:'#b71c1c', bg:'#fdecea', border:'#b71c1c' };
+  if(bytes>=KAIGO_STORAGE_WARN_BYTES) return { color:'#856404', bg:'#FFF8E6', border:'#E8D4A8' };
+  return { color:'var(--text2)', bg:'transparent', border:'var(--border2)' };
+}
+
+function updateMainStorageWarningBanner_(){
+  const el=document.getElementById('storageCapacityBanner');
+  if(!el) return;
+  const bytes=estimateAllLocalStorageBytes_();
+  if(bytes<KAIGO_STORAGE_CRIT_BYTES){
+    el.style.display='none';
+    return;
+  }
+  const st=storageCapacityDisplayStyle_(bytes);
+  el.style.display='block';
+  el.style.background=st.bg;
+  el.style.color=st.color;
+  el.style.border='1px solid '+st.border;
+  el.textContent='⚠ ブラウザ保存が '+formatStorageSize(bytes)+' です（目安上限 約'+formatStorageSize(KAIGO_STORAGE_GUIDE_BYTES)+'）。データ管理で内訳を確認し、🔄同期が成功すると古い記録は1日1回自動整理されます。';
+}
+
 function formatStorageSize(bytes){
   if(bytes<=0) return '0 B';
   if(bytes<1024) return `${bytes} B`;
   if(bytes<1048576) return `${(bytes/1024).toFixed(1)} KB`;
   return `${(bytes/1048576).toFixed(2)} MB`;
+}
+
+/**
+ * 同期サイクル成功後（pull 成功・未送信なし）：1日1回、14日より前の記録を削除。
+ * push が skippedPush（送る差分なし）でも実行する。syncDirty 時は何もしない。
+ * saveDB は使わず persistLocalQuiet（syncDirty を立てない）。
+ */
+function maybeAutoPruneAfterSyncSuccess_(){
+  if(!FAC||!db) return;
+  if(syncDirty) return;
+  const lastPush=_numU(localStorage.getItem(FAC.storageKey+KAIGO_PUSH_TS_SUFFIX));
+  if(!lastPush) return;
+  const todayKey=dk(new Date());
+  const lastDay=localStorage.getItem(FAC.storageKey+KAIGO_AUTO_PRUNE_AFTER_SYNC_SUFFIX)||'';
+  if(lastDay===todayKey) return;
+  try{
+    const cutKey=pruneOldRecordsKeepCutKey_();
+    const deletedDays=runStorageCleanupRecordsBeforeCutKey(cutKey);
+    const tomb=runStorageCleanupOldTombstones(TOMBSTONE_KEEP_MS);
+    if(deletedDays>0||tomb>0){
+      coalesceAllRecordArrays(db.records||{});
+      window._kaigoGasSaving=true;
+      try{ persistLocalQuiet(); }finally{ window._kaigoGasSaving=false; }
+    }
+    cleanupObsoleteLocalStorageKeys_();
+    localStorage.setItem(FAC.storageKey+KAIGO_AUTO_PRUNE_AFTER_SYNC_SUFFIX,todayKey);
+    if(deletedDays>0){
+      console.log('[autoPrune] removed record days before '+cutKey+': '+deletedDays);
+    }
+  }catch(e){
+    console.warn('maybeAutoPruneAfterSyncSuccess_', e);
+  }
 }
 /** 保持日数より前の暦日キー（ローカル・YYYY-MM-DD） */
 function pruneOldRecordsKeepCutKey_(){
@@ -9832,10 +9946,18 @@ function pruneOldRecordsAfterBackup(){
 
 function runPruneOldRecordsKeepManual(){
   if(!FAC){ alert('施設が未選択です'); return; }
-  if(!confirm(KAIGO_LOCAL_RECORD_KEEP_DAYS+'日より前の記録をlocalStorageから削除します。\nGASシートには全期間のデータが残ります。\nバックアップ後に実行してください。\n\n続行しますか？')) return;
+  if(syncDirty){
+    alert('未同期の変更があります。先に🔄同期してから実行してください。');
+    return;
+  }
+  if(!confirm(
+    KAIGO_LOCAL_RECORD_KEEP_DAYS+'日より前の記録をこの端末（localStorage）から削除します。\n\n'+
+    'GAS v3.11以降、シート上の記録は削除されません（端末だけ軽くなります）。\n'+
+    '未送信の記録がある場合は実行できません。\n\n続行しますか？'
+  )) return;
   const d=pruneOldRecordsAfterBackup();
   alert(d>0
-    ? KAIGO_LOCAL_RECORD_KEEP_DAYS+'日より前の記録（'+d+'日分）をlocalStorageから削除しました。\nGASには全データが残っています。'
+    ? KAIGO_LOCAL_RECORD_KEEP_DAYS+'日より前の記録（'+d+'日分）を端末から削除しました。\nシートのデータはそのまま残ります。'
     : '削除対象の記録はありませんでした。');
   renderSettingsPanel('data');
 }
@@ -9993,7 +10115,11 @@ function runStorageTombstoneCleanup(){
 
 function buildDataSettings(){
   const hasOldData = !!localStorage.getItem('kaigo3');
-  const stEst=FAC?formatStorageSize(estimateFacilityLocalStorageBytes()):'—';
+  const stBytes=FAC?estimateAllLocalStorageBytes_():0;
+  const stEst=FAC?formatStorageSize(stBytes):'—';
+  const stGuide=formatStorageSize(KAIGO_STORAGE_GUIDE_BYTES);
+  const stStyle=storageCapacityDisplayStyle_(stBytes);
+  const stBreakdown=buildStorageBreakdownHtml_();
   const gUrl=(typeof localStorage!=='undefined'&&localStorage.getItem('kaigo_gas_webapp_url'))||'';
   const gUrlEsc=String(gUrl).replace(/&/g,'&amp;').replace(/"/g,'&quot;');
   const hasTok=!!(typeof localStorage!=='undefined'&&localStorage.getItem('kaigo_gas_token'));
@@ -10046,14 +10172,9 @@ function buildDataSettings(){
       <button class="btn btn-primary btn-sm" onclick="exportDB()">JSONダウンロード</button>
     </div>
     <div class="panel-sec">
-      <h3>📅 月次バックアップ</h3>
-      <p style="font-size:14px;color:var(--text2);margin-bottom:12px;">当月の全データをファイルとして保存します（JSON・共有シートに保存）。</p>
-      <button type="button" class="btn btn-primary btn-sm" style="background:var(--blue2);color:var(--blue);border-color:var(--blue);" onclick="saveMonthlyBackup()">月次保存</button>
-    </div>
-    <div class="panel-sec">
       <h3>📥 データインポート</h3>
       <p style="font-size:14px;color:var(--text2);margin-bottom:8px;">バックアップJSONを読み込んでデータを復元します。</p>
-      <p style="font-size:13px;color:var(--text2);margin-bottom:6px;">「JSONダウンロード」または「月次保存」で出力した .json を選んでください。</p>
+      <p style="font-size:13px;color:var(--text2);margin-bottom:6px;">「JSONダウンロード」で出力した .json を選んでください。</p>
       <p style="font-size:13px;color:var(--red);margin-bottom:10px;">⚠ OK＝バックアップで置き換え（復元向け）／キャンセル＝現在データとマージ</p>
       <label class="btn btn-gray btn-sm" style="cursor:pointer;">
         ファイルを選択
@@ -10091,12 +10212,18 @@ function buildDataSettings(){
           🚨 ストレージを初期化してGASから再取得
         </button>
       </div>
-      <p style="font-size:14px;color:var(--text2);margin-bottom:8px;">このユニットのブラウザ保存の<strong>おおよそのサイズ</strong>（主要キーの文字列長から推定）: <strong>${stEst}</strong></p>
+      <p style="font-size:14px;margin-bottom:8px;padding:10px;border-radius:8px;background:${stStyle.bg};color:${stStyle.color};border:1px solid ${stStyle.border};line-height:1.5;">
+        このブラウザの保存（西・南共通）: <strong>${stEst}</strong> ／ 目安上限 約 <strong>${stGuide}</strong>
+        ${stBytes>=KAIGO_STORAGE_CRIT_BYTES?'（容量逼迫）':stBytes>=KAIGO_STORAGE_WARN_BYTES?'（注意）':''}
+      </p>
+      <details style="margin-bottom:12px;">
+        <summary style="cursor:pointer;font-size:14px;color:var(--text2);">キーごとの容量内訳（概算）</summary>
+        ${stBreakdown}
+      </details>
       <div style="margin-bottom:12px;">
         <button type="button" class="btn btn-sm" onclick="runPruneOldRecordsKeepManual()">🗑️ ${KAIGO_LOCAL_RECORD_KEEP_DAYS}日より前の記録を削除</button>
-        <p style="font-size:12px;color:var(--text3);margin:4px 0 0;line-height:1.5;">※GASシートには全期間のデータが残ります（pullも直近${KAIGO_PULL_LIMIT_DAYS}日分のみ）<br>※バックアップ後に実行してください（JSONダウンロード後は自動削除）</p>
+        <p style="font-size:12px;color:var(--text3);margin:4px 0 0;line-height:1.5;">※端末（localStorage）だけ削除。GAS v3.11以降、<strong>シートの記録は削除されません</strong>。<br>※🔄同期成功後も1日1回、同条件で自動整理します（未送信時は消しません）。pullは直近${KAIGO_PULL_LIMIT_DAYS}日分のみ。</p>
       </div>
-      <p style="font-size:13px;color:var(--red);margin-bottom:10px;line-height:1.5;">GAS 同期を使っている場合、古い記録を消したあと「🔄同期」で push すると、スプレッドシートも端末の内容で<strong>全面書き換え</strong>され、削除した日の行はシートからも消えます。実行前に必ず月次保存または JSON エクスポートでバックアップを取ってください。</p>
       <div class="fg">
         <label>記録データ・消耗品の基準（この日より<strong>前</strong>を削除）</label>
         <select id="stCleanupMonths" style="font-size:16px;padding:8px;">
@@ -10203,12 +10330,7 @@ function exportDB(){
   a.href=url; a.download=`kaigo_${FAC.name}_${today}.json`;
   document.body.appendChild(a); a.click(); document.body.removeChild(a);
   URL.revokeObjectURL(url);
-  const deleted=pruneOldRecordsAfterBackup();
-  if(deleted>0){
-    showBriefToast('バックアップ完了。'+KAIGO_LOCAL_RECORD_KEEP_DAYS+'日より前の記録（'+deleted+'日分）をlocalStorageから削除しました。GASには全データが残っています。', 6000);
-  }else{
-    showBriefToast('バックアップが完了しました。', 3000);
-  }
+  showBriefToast('JSONをダウンロードしました（端末の記録は削除していません）。', 3500);
 }
 function stampImportedDbForMerge(imported, baseTs){
   let ts=Math.max(_numU(baseTs), Date.now());
