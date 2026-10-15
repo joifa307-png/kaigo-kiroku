@@ -429,15 +429,25 @@ input,select,textarea{font-family:inherit;font-size:30px;}
 .med-chip.none-on{background:var(--text3);color:#fff;border-color:var(--text3);}
 
 /* ===== 設定画面 ===== */
+#settingsScreen.screen.active{
+  display:flex;flex-direction:column;
+  height:100dvh;max-height:100dvh;overflow:hidden;
+}
+#settingsScreen .hdr{flex-shrink:0;}
 .settings-tabs{
   display:flex;overflow-x:auto;background:var(--white);
   border-bottom:1px solid var(--border2);
   -webkit-overflow-scrolling:touch;
+  flex-shrink:0;touch-action:pan-x manipulation;
+}
+#settingsBody{
+  flex:1;min-height:0;overflow:auto;-webkit-overflow-scrolling:touch;
+  overscroll-behavior:contain;
 }
 .settings-tab{
   padding:10px 16px;font-size:13px;white-space:nowrap;
   color:var(--text3);cursor:pointer;border-bottom:3px solid transparent;
-  flex-shrink:0;
+  flex-shrink:0;touch-action:manipulation;user-select:none;
 }
 .settings-tab.active{color:var(--orange);border-bottom-color:var(--orange);font-weight:700;}
 .settings-panel{display:none;padding:14px;}
@@ -8335,8 +8345,8 @@ const SETTINGS_TABS=[
   {id:'rec_opts',  label:'レク項目'},
   {id:'care_opts', label:'ケア記録項目'},
   {id:'day_opts',  label:'1日の様子'},
-  {id:'data',      label:'データ管理'},
   {id:'print',     label:'印刷'},
+  {id:'data',      label:'データ管理'},
 ];
 let curSettingsTab='facility';
 
@@ -8352,16 +8362,44 @@ function closeSettings(){
 }
 function renderSettingsTabs(){
   document.getElementById('settingsTabs').innerHTML=SETTINGS_TABS.map(t=>
-    `<div class="settings-tab${curSettingsTab===t.id?' active':''}" onclick="switchSettingsTab('${t.id}')">${t.label}</div>`
+    `<div class="settings-tab${curSettingsTab===t.id?' active':''}" data-settings-tab="${t.id}" role="tab">${t.label}</div>`
   ).join('');
+  scrollSettingsTabIntoView_(curSettingsTab);
+}
+/** 設定タブ：sticky 見出し環境でインライン onclick が効かない端末向け */
+function bindSettingsTabsDelegation(){
+  const bar=document.getElementById('settingsTabs');
+  if(!bar||bar.dataset.clickDeleg==='1') return;
+  bar.dataset.clickDeleg='1';
+  bar.addEventListener('click', function(ev){
+    const tab=ev.target.closest('.settings-tab');
+    if(!tab||!bar.contains(tab)) return;
+    const id=tab.getAttribute('data-settings-tab');
+    if(id) switchSettingsTab(id);
+  });
+}
+function scrollSettingsTabIntoView_(tabId){
+  const bar=document.getElementById('settingsTabs');
+  if(!bar||!tabId) return;
+  const tab=bar.querySelector('.settings-tab[data-settings-tab="'+tabId+'"]');
+  if(!tab||typeof tab.scrollIntoView!=='function') return;
+  try{
+    tab.scrollIntoView({block:'nearest',inline:'nearest',behavior:'smooth'});
+  }catch(_e){
+    tab.scrollIntoView(false);
+  }
 }
 function switchSettingsTab(id){
   curSettingsTab=id;
   renderSettingsTabs();
   renderSettingsPanel(id);
+  const body=document.getElementById('settingsBody');
+  if(body) body.scrollTop=0;
 }
 function renderSettingsPanel(id){
   const el=document.getElementById('settingsBody');
+  if(!el) return;
+  try{
   switch(id){
     case 'facility':  el.innerHTML=buildFacilitySettings(); break;
     case 'resident_mgmt': el.innerHTML=buildResidentMgmtSettings(); break;
@@ -8376,6 +8414,13 @@ function renderSettingsPanel(id){
     case 'day_opts':  el.innerHTML=buildSingleListSettings('1日の様子項目','dayItems'); break;
     case 'data':      el.innerHTML=buildDataSettings(); break;
     case 'print':     el.innerHTML=buildPrintSettings(); break;
+    default: el.innerHTML='<p style="padding:14px;color:var(--text3);">このタブは未実装です。</p>';
+  }
+  }catch(err){
+    console.error('renderSettingsPanel', id, err);
+    el.innerHTML='<div style="padding:14px;border:2px solid var(--red);background:var(--red2);border-radius:8px;">'
+      +'<p style="font-weight:700;color:var(--red);margin:0 0 8px;">タブの表示に失敗しました</p>'
+      +'<p style="font-size:14px;margin:0;">'+escapeHtml(String(err&&err.message||err))+'</p></div>';
   }
 }
 
@@ -10733,7 +10778,10 @@ function migrateFromOldApp(){
 
 // ========== 印刷機能 ==========
 function buildPrintSettings(){
-  const resOpts=[...db.residents].sort(compareResidentsStable).map(r=>`<option value="${r.name}">${r.name}</option>`).join('');
+  const resOpts=[...(db.residents||[])].sort(compareResidentsStable).map(r=>{
+    const nm=String(r.name||'');
+    return `<option value="${escapeAttr(nm)}">${escapeHtml(nm)}</option>`;
+  }).join('');
   const today=new Date().toISOString().slice(0,10);
   const monthFirst=today.slice(0,8)+'01';
   const lostNote=lostRecordNoticeScreenHtml_(monthFirst, today);
@@ -11413,6 +11461,7 @@ function showSavedToast(){
 function init(){
   closeAllOverlays();
   bindMainResTableDelegation();
+  bindSettingsTabsDelegation();
   gasCredentialsInit();
   const params=new URLSearchParams(location.search);
   const savedFac=normalizeFacilityId(params.get('f'))||normalizeFacilityId(localStorage.getItem('kaigo_last_facility'));
