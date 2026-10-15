@@ -1689,7 +1689,7 @@ const REC = {
 const N_RECORD_COLS = 57;
 
 /** デプロイのたびに上げる（設定→データ管理の「アプリ情報」で表示） */
-const APP_VERSION='1.7.11';
+const APP_VERSION='1.7.12';
 /** pull取得・ローカル整理の記録保持日数（同期） */
 const KAIGO_PULL_LIMIT_DAYS=14;
 /** 運営指導用：印刷時に「記録が失われた期間」の注記（後から追加・修正可） */
@@ -3411,7 +3411,10 @@ async function fetchPrintPullRange(manual){
       endDate:to
     };
     if(names.length) body.residentNames=names;
+    const tFetch0=(typeof performance!=='undefined'&&performance.now)?performance.now():Date.now();
     const j=await gasPost(body);
+    const roundTripMs=Math.round(((typeof performance!=='undefined'&&performance.now)?performance.now():Date.now())-tFetch0);
+    const pullTiming=normalizeGasTimingFromResponse_(j);
     const raw=j.rows||[];
     if(sheetLooksLikeCorruptMarker(raw)){
       alert('スプレッドシートの形式エラーのため取得できませんでした');
@@ -3425,13 +3428,14 @@ async function fetchPrintPullRange(manual){
       resKey,
       records:remote.records||{},
       recordRowCount:j.recordRowCount||0,
-      elapsedMs:j.elapsedMs||0
+      elapsedMs:j.elapsedMs||0,
+      roundTripMs,
+      timing:pullTiming
     };
     const n=_printPullOverlay.recordRowCount;
-    const msg='取り寄せ完了：RECORD '+n+' 行（'+from+'〜'+to+'）'
-      +(_printPullOverlay.elapsedMs?(' · '+Math.round(_printPullOverlay.elapsedMs/100)/10+'秒'):'');
+    const msg=formatPrintPullRangeStatusMsg_(from, to, n, roundTripMs, pullTiming);
     if(statusEl) statusEl.textContent=msg;
-    showBriefToast(msg, 5000);
+    showBriefToast('取り寄せ完了：RECORD '+n+' 行', 5000);
     const vf=document.getElementById('printVitalFrom');
     const vt=document.getElementById('printVitalTo');
     const cf=document.getElementById('printCareFrom');
@@ -3524,6 +3528,90 @@ function gasPost(extra, credPin, retryLeft){
     throw e;
   });
   return attempt(firstUrl, _gasUseAuthUser0);
+}
+
+function normalizeGasTimingFromResponse_(j){
+  const t=(j&&j.timing)||{};
+  return {
+    lockWaitMs:Number(t.lockWaitMs)||0,
+    sheetReadMs:Number(t.sheetReadMs)||0,
+    computeMs:Number(t.computeMs)||0,
+    sheetWriteMs:Number(t.sheetWriteMs)||0,
+    totalMs:Number(t.totalMs)||Number(j&&j.elapsedMs)||0
+  };
+}
+
+function formatGasTimingSec1_(ms){
+  return (Math.round(Number(ms||0)/100)/10).toFixed(1);
+}
+
+/** GAS 内訳1行（例: 合計 28.1秒（ロック待ち 0.0 / 読込 26.5 / …）） */
+function formatGasTimingBreakdownJa_(timing, totalLabel){
+  const t=timing||{};
+  const label=totalLabel||'合計';
+  return label+' '+formatGasTimingSec1_(t.totalMs)+'秒（ロック待ち '+formatGasTimingSec1_(t.lockWaitMs)
+    +' / 読込 '+formatGasTimingSec1_(t.sheetReadMs)
+    +' / 計算 '+formatGasTimingSec1_(t.computeMs)
+    +' / 書込 '+formatGasTimingSec1_(t.sheetWriteMs)+'）';
+}
+
+function lastSyncTimingLsKey_(){
+  return FAC?(FAC.storageKey+'_last_sync_timing_v1'):'';
+}
+
+function saveLastSyncTimingReport_(report){
+  if(!FAC||!report) return;
+  try{
+    localStorage.setItem(lastSyncTimingLsKey_(), JSON.stringify(report));
+  }catch(_){}
+}
+
+function loadLastSyncTimingReport_(){
+  const k=lastSyncTimingLsKey_();
+  if(!k) return null;
+  try{
+    const raw=localStorage.getItem(k);
+    return raw?JSON.parse(raw):null;
+  }catch(_){
+    return null;
+  }
+}
+
+function formatSyncTimingActionLine_(actionLabel, part){
+  if(!part) return '';
+  const rt=formatGasTimingSec1_(part.roundTripMs);
+  const gas=formatGasTimingBreakdownJa_(part.timing, 'GAS');
+  return actionLabel+' 端末往復 '+rt+'秒 · '+gas;
+}
+
+function buildLastSyncTimingSettingsHtml_(){
+  const r=loadLastSyncTimingReport_();
+  if(!r){
+    return '<p style="font-size:13px;color:var(--text3);margin:0;line-height:1.5;">まだ同期の計測がありません。🔄 同期後に表示されます（GAS v3.15 以降）。</p>';
+  }
+  const when=r.at?new Date(r.at).toLocaleString('ja-JP'):'—';
+  const lines=[];
+  if(r.cycleRoundTripMs!=null){
+    lines.push('<strong>端末↔GAS 往復（同期サイクル全体）</strong> '+formatGasTimingSec1_(r.cycleRoundTripMs)+'秒');
+  }
+  if(r.pull) lines.push(formatSyncTimingActionLine_('受信（pull）', r.pull));
+  if(r.pushSkipped){
+    lines.push('送信（push） スキップ（変更なし）');
+  }else if(r.push){
+    lines.push(formatSyncTimingActionLine_('送信（push）', r.push));
+  }
+  const body=lines.map(l=>'<p style="font-size:14px;margin:6px 0 0;line-height:1.55;color:var(--text1);">'+l+'</p>').join('');
+  return '<p style="font-size:12px;color:var(--text3);margin:0 0 8px;">最終更新: '+escapeHtml(when)+'</p>'+body
+    +'<p style="font-size:12px;color:var(--text3);margin:10px 0 0;line-height:1.45;">※「端末往復」は通信・GAS起動を含みます。GAS の合計と差が大きいときはネットワークやコールドスタートを疑ってください。</p>';
+}
+
+function formatPrintPullRangeStatusMsg_(from, to, recordRowCount, roundTripMs, timing){
+  const lines=[
+    '取り寄せ完了：RECORD '+recordRowCount+' 行（'+from+'〜'+to+'）',
+    '端末↔GAS 往復 '+formatGasTimingSec1_(roundTripMs)+'秒',
+    formatGasTimingBreakdownJa_(timing, '取り寄せ（pullRange）')
+  ];
+  return lines.join('\n');
 }
 
 function isStorageQuotaError(e){
@@ -4012,8 +4100,25 @@ function runGasPushCycle(){
   setSyncStatus('同期中...','#185FA5');
   window._gasSyncActive=true;
   const gp=(body, retries)=>gasPost(body, credPin, retries==null?2:retries);
-  _gasSyncInFlight=gp(gasPullBody_())
-    .then(j=>{
+  const syncTimingReport={at:Date.now(), pull:null, push:null, pushSkipped:false, cycleRoundTripMs:0};
+  const cycleT0=(typeof performance!=='undefined'&&performance.now)?performance.now():Date.now();
+  const gpTimed=(body)=>{
+    const t0=(typeof performance!=='undefined'&&performance.now)?performance.now():Date.now();
+    return gp(body).then(j=>{
+      const roundTripMs=Math.round(((typeof performance!=='undefined'&&performance.now)?performance.now():Date.now())-t0);
+      return {
+        j,
+        part:{
+          action:body&&body.action,
+          roundTripMs,
+          timing:normalizeGasTimingFromResponse_(j)
+        }
+      };
+    });
+  };
+  _gasSyncInFlight=gpTimed(gasPullBody_())
+    .then(({j, part})=>{
+      syncTimingReport.pull=part;
       const raw=j.rows||[];
       if(sheetLooksLikeCorruptMarker(raw)){
         const got=sheetTopCell(raw)||'(空)';
@@ -4034,8 +4139,11 @@ function runGasPushCycle(){
         }
         setSyncStatus('シートA1修復中…','#185FA5');
         const fullRows=dbToSheet(db);
-        return gp(buildKaigoMergePushBody(extractFullMergePushSlices(fullRows)))
-          .then(()=>({_sheetRepaired:true,_mergedRemoteDays:remoteDays}));
+        return gpTimed(buildKaigoMergePushBody(extractFullMergePushSlices(fullRows)))
+          .then(({part:pushPart})=>{
+            syncTimingReport.push=pushPart;
+            return {_sheetRepaired:true,_mergedRemoteDays:remoteDays};
+          });
       }
       const remote=sheetToDb(raw);
       db=mergePulledDb(db, remote);
@@ -4060,16 +4168,27 @@ function runGasPushCycle(){
       }
       if(!pushBody){
         if(useDelta && patchTotal===0){
+          syncTimingReport.pushSkipped=true;
           return {_skippedPush:true};
         }
         if(!syncDirty){
+          syncTimingReport.pushSkipped=true;
           return {_skippedPush:true};
         }
         pushBody=buildKaigoMergePushBody(extractFullMergePushSlices(fullRows));
       }
-      return gp(pushBody).then(()=>({_sheetRepaired:false}));
+      return gpTimed(pushBody).then(({part:pushPart})=>{
+        syncTimingReport.push=pushPart;
+        return {_sheetRepaired:false};
+      });
     })
     .then(meta=>{
+      syncTimingReport.cycleRoundTripMs=Math.round(((typeof performance!=='undefined'&&performance.now)?performance.now():Date.now())-cycleT0);
+      saveLastSyncTimingReport_(syncTimingReport);
+      if(curSettingsTab==='data'){
+        const ss=document.getElementById('settingsScreen');
+        if(ss&&ss.classList.contains('active')) renderSettingsPanel('data');
+      }
       const sk=FAC.storageKey;
       persistLocalQuiet();
       mirrorResidentTypesToLocalStorage();
@@ -10334,6 +10453,10 @@ function buildDataSettings(){
       </div>
       <p style="font-size:13px;color:var(--text3);margin-top:10px;">シート名は「${FAC?FAC.sheetName:'西'}」（${FAC?FAC.name:'西ユニット'}）です。南ユニット利用時は「南」シートに書き込まれます。</p>
     </div>
+    <div class="panel-sec" style="border:1px solid var(--blue);border-radius:10px;padding:14px;background:#E8F4FD;">
+      <h3 style="color:#185FA5;">⏱ 最後の同期の処理時間</h3>
+      ${buildLastSyncTimingSettingsHtml_()}
+    </div>
     <div class="panel-sec">
       <h3>📦 在庫管理アプリ連携</h3>
       <p style="font-size:14px;color:var(--text2);margin-bottom:10px;">在庫の週次送信に加え、ケア記録・申送りの「LINE WORKSで共有」もこのGAS（action: <code>kaigo_lw</code>）経由です。介護記録の同期GAS URLとは別デプロイを指定してください。</p>
@@ -10798,7 +10921,7 @@ function buildPrintSettings(){
         <select id="printFetchRes" multiple size="6" style="font-size:16px;padding:6px;width:100%;max-width:420px;">${resOpts}</select>
       </div>
       <button type="button" class="btn btn-primary btn-sm" style="background:#185FA5;color:#fff;border-color:#185FA5;" onclick="fetchPrintPullRange(true)">取り寄せ</button>
-      <p id="printFetchStatus" style="font-size:14px;color:var(--blue);margin:10px 0 0;font-weight:600;min-height:1.2em;"></p>
+      <p id="printFetchStatus" style="font-size:14px;color:var(--blue);margin:10px 0 0;font-weight:600;min-height:1.2em;white-space:pre-line;line-height:1.5;"></p>
       <p style="font-size:12px;color:var(--text3);margin:8px 0 0;">最大3か月。GAS v3.14 の pullRange が必要です。</p>
     </div>
     <div id="printLostNoticeScreen">${lostNote}</div>
