@@ -1679,9 +1679,18 @@ const REC = {
 const N_RECORD_COLS = 57;
 
 /** デプロイのたびに上げる（設定→データ管理の「アプリ情報」で表示） */
-const APP_VERSION='1.7.10';
+const APP_VERSION='1.7.11';
 /** pull取得・ローカル整理の記録保持日数（同期） */
 const KAIGO_PULL_LIMIT_DAYS=14;
+/** 運営指導用：印刷時に「記録が失われた期間」の注記（後から追加・修正可） */
+const KAIGO_LOST_RECORD_PERIODS={
+  nishi:[{from:'2026-08-02',to:'2026-08-19'}],
+  minami:[
+    {from:'2026-06-30',to:'2026-07-27'},
+    {from:'2026-08-15',to:'2026-08-16'}
+  ]
+};
+const KAIGO_PRINT_PULL_MAX_DAYS=93;
 const KAIGO_LOCAL_RECORD_KEEP_DAYS=14;
 /** localStorage 目安（同一オリジン全体・西/南共有） */
 const KAIGO_STORAGE_GUIDE_BYTES=5*1024*1024;
@@ -3294,38 +3303,166 @@ function printRangeNeedsExtendedPull_(from){
   const oldest=oldestRecordDateKeyInDb_();
   return !oldest||fromN<oldest;
 }
-/** 印刷前：必要なら GAS から指定期間分の RECORD を追加取得してマージ */
-async function pullRecordsForPrintRange(from){
-  if(!printRangeNeedsExtendedPull_(from)) return true;
+/** 印刷専用：pullRange で取得した records（localStorage 非保存） */
+let _printPullOverlay=null;
+
+function clearPrintPullOverlay_(){
+  _printPullOverlay=null;
+  const st=document.getElementById('printFetchStatus');
+  if(st) st.textContent='';
+}
+
+function printPullResidentFilterKey_(names){
+  if(!names||!names.length) return '__all__';
+  return names.map(n=>normalizeResidentName(n)).filter(Boolean).sort().join('|');
+}
+
+function printPullOverlayCovers_(from, to, resKey){
+  if(!_printPullOverlay) return false;
+  if(from<_printPullOverlay.from||to>_printPullOverlay.to) return false;
+  if(_printPullOverlay.resKey!==resKey) return false;
+  return true;
+}
+
+function printRecordForRead_(dateKey, resName){
+  const useOv=_printPullOverlay
+    &&dateKey>=_printPullOverlay.from
+    &&dateKey<=_printPullOverlay.to;
+  const recs=useOv?_printPullOverlay.records:(db.records||{});
+  return recs[dateKey]&&recs[dateKey][resName];
+}
+
+function printRangeDaysInclusive_(from, to){
+  const a=new Date(from+'T12:00:00');
+  const b=new Date(to+'T12:00:00');
+  if(isNaN(a)||isNaN(b)) return 0;
+  return Math.floor((b-a)/86400000)+1;
+}
+
+function formatMdJa_(ymd){
+  const p=String(ymd||'').split('-');
+  if(p.length<3) return ymd;
+  return parseInt(p[1],10)+'/'+parseInt(p[2],10);
+}
+
+function lostRecordNoticeHtml_(from, to){
+  const unitKey=isMinamiUnit()?'minami':'nishi';
+  const list=KAIGO_LOST_RECORD_PERIODS[unitKey]||[];
+  const hits=list.filter(p=>{
+    const pf=normalizeDateKey(p.from), pt=normalizeDateKey(p.to);
+    if(!pf||!pt) return false;
+    return !(pt<from||pf>to);
+  });
+  if(!hits.length) return '';
+  const parts=hits.map(p=>formatMdJa_(p.from)+'〜'+formatMdJa_(p.to)).join('、');
+  return `<div class="print-lost-notice" style="margin:0 0 12px;padding:10px 12px;border:2px solid #b71c1c;background:#fdecea;color:#b71c1c;font-size:14px;line-height:1.5;font-weight:600;">
+    この期間の一部（${parts}）は、システム障害により記録が失われています。
+  </div>`;
+}
+
+function lostRecordNoticeScreenHtml_(from, to){
+  const inner=lostRecordNoticeHtml_(from, to);
+  if(!inner) return '';
+  return inner.replace('print-lost-notice','print-lost-notice-screen').replace('margin:0 0 12px','margin:8px 0 12px');
+}
+
+function getPrintFetchSelectedResidents_(){
+  const sel=document.getElementById('printFetchRes');
+  if(!sel) return [];
+  return Array.from(sel.selectedOptions||[]).map(o=>String(o.value||'').trim()).filter(Boolean);
+}
+
+async function fetchPrintPullRange(manual){
   if(!FAC||!gasConfigured()){
-    alert('指定した開始日の記録は、この端末には保存されていません。\n'
-      +'通常の🔄同期は直近 '+KAIGO_PULL_LIMIT_DAYS+' 日分のみ取得します。\n\n'
-      +'データ管理で GAS を設定し、同期できる状態にしてから、もう一度印刷してください。');
+    alert('データ管理で GAS URL・トークンを設定してください');
     return false;
   }
-  const limitDays=pullLimitDaysForPrintFrom_(from);
-  const expectCutoff=localPullCutoffDateKey_(limitDays);
-  showBriefToast('印刷用に記録を取得中…（'+from+' 以降・limitDays='+limitDays+'）', 12000);
+  const fromEl=document.getElementById('printFetchFrom');
+  const toEl=document.getElementById('printFetchTo');
+  const from=normalizeDateKey(fromEl&&fromEl.value);
+  const to=normalizeDateKey(toEl&&toEl.value);
+  if(!from||!to){ alert('開始日・終了日を入力してください'); return false; }
+  if(from>to){ alert('開始日が終了日より後です'); return false; }
+  const days=printRangeDaysInclusive_(from, to);
+  if(days>KAIGO_PRINT_PULL_MAX_DAYS){
+    alert('期間は最大3か月（'+KAIGO_PRINT_PULL_MAX_DAYS+'日）までです');
+    return false;
+  }
+  const names=getPrintFetchSelectedResidents_();
+  const resKey=printPullResidentFilterKey_(names);
+  const statusEl=document.getElementById('printFetchStatus');
+  if(statusEl) statusEl.textContent='取り寄せ中…（本番＋アーカイブ）';
+  showBriefToast('記録を取り寄せ中…', 15000);
   try{
-    const j=await gasPost({action:'pull', sheetName:FAC.sheetName, limitDays:limitDays});
+    const body={
+      action:'pullRange',
+      sheetName:FAC.sheetName,
+      startDate:from,
+      endDate:to
+    };
+    if(names.length) body.residentNames=names;
+    const j=await gasPost(body);
     const raw=j.rows||[];
     if(sheetLooksLikeCorruptMarker(raw)){
-      alert('スプレッドシートの形式エラーのため記録を取得できませんでした。');
+      alert('スプレッドシートの形式エラーのため取得できませんでした');
+      if(statusEl) statusEl.textContent='';
       return false;
     }
     const remote=sheetToDb(raw);
-    db=mergePulledDb(db, remote);
-    persistLocalQuiet();
-    const cutoff=j.cutoffDate||expectCutoff||'';
-    if(cutoff){
-      showBriefToast('記録を取得しました（'+cutoff+' 以降のデータ）', 4000, false);
-    }
+    _printPullOverlay={
+      from,
+      to,
+      resKey,
+      records:remote.records||{},
+      recordRowCount:j.recordRowCount||0,
+      elapsedMs:j.elapsedMs||0
+    };
+    const n=_printPullOverlay.recordRowCount;
+    const msg='取り寄せ完了：RECORD '+n+' 行（'+from+'〜'+to+'）'
+      +(_printPullOverlay.elapsedMs?(' · '+Math.round(_printPullOverlay.elapsedMs/100)/10+'秒'):'');
+    if(statusEl) statusEl.textContent=msg;
+    showBriefToast(msg, 5000);
+    const vf=document.getElementById('printVitalFrom');
+    const vt=document.getElementById('printVitalTo');
+    const cf=document.getElementById('printCareFrom');
+    const ct=document.getElementById('printCareTo');
+    if(vf) vf.value=from;
+    if(vt) vt.value=to;
+    if(cf) cf.value=from;
+    if(ct) ct.value=to;
     return true;
   }catch(e){
-    console.error('pullRecordsForPrintRange', e);
-    alert('指定期間の記録を取得できませんでした。\n'+String(e&&e.message||e)+'\n\n🔄同期後にもう一度印刷してください。');
+    console.error('fetchPrintPullRange', e);
+    if(statusEl) statusEl.textContent='取り寄せ失敗';
+    alert('取り寄せに失敗しました。\n'+String(e&&e.message||e));
     return false;
   }
+}
+
+async function ensurePrintPullRangeData_(from, to, singleResName){
+  const names=singleResName&&singleResName!=='__all__'?[singleResName]:[];
+  const resKey=printPullResidentFilterKey_(names);
+  if(printPullOverlayCovers_(from, to, resKey)) return true;
+  if(_printPullOverlay){
+    const ok=confirm(
+      '印刷期間が、取り寄せ済みの範囲外か利用者条件が異なります。\n'+
+      '取り寄せ済み: '+_printPullOverlay.from+'〜'+_printPullOverlay.to+'\n'+
+      '印刷指定: '+from+'〜'+to+'\n\n'+
+      'いまの条件で再取り寄せしますか？'
+    );
+    if(!ok) return false;
+  }
+  const ff=document.getElementById('printFetchFrom');
+  const ft=document.getElementById('printFetchTo');
+  if(ff) ff.value=from;
+  if(ft) ft.value=to;
+  if(singleResName&&singleResName!=='__all__'){
+    const sel=document.getElementById('printFetchRes');
+    if(sel){
+      Array.from(sel.options).forEach(o=>{ o.selected=(o.value===singleResName); });
+    }
+  }
+  return fetchPrintPullRange(false);
 }
 
 /** 複数Googleアカウントの /u/N/ 自動リダイレクト404対策。authuser=0 を付けて主アカウントに固定 */
@@ -8209,6 +8346,7 @@ function openSettings(){
   showScreen('settingsScreen');
 }
 function closeSettings(){
+  clearPrintPullOverlay_();
   showScreen('mainScreen');
   renderMain();
 }
@@ -10598,7 +10736,24 @@ function buildPrintSettings(){
   const resOpts=[...db.residents].sort(compareResidentsStable).map(r=>`<option value="${r.name}">${r.name}</option>`).join('');
   const today=new Date().toISOString().slice(0,10);
   const monthFirst=today.slice(0,8)+'01';
+  const lostNote=lostRecordNoticeScreenHtml_(monthFirst, today);
   return `<div class="settings-panel active">
+    <div class="panel-sec" style="border:1px solid var(--blue);border-radius:10px;padding:14px;background:#E8F4FD;">
+      <h3 style="color:#185FA5;">📡 期間を指定して取り寄せ（本番＋アーカイブ）</h3>
+      <p style="font-size:13px;color:var(--text2);margin:0 0 10px;line-height:1.5;">運営指導・過去期間の印刷向け。取得データは<strong>メモリのみ</strong>（localStorage・同期には保存しません）。設定を閉じると破棄されます。</p>
+      <div class="fg-row">
+        <div class="fg"><label>開始日</label><input type="date" id="printFetchFrom" value="${monthFirst}"></div>
+        <div class="fg"><label>終了日</label><input type="date" id="printFetchTo" value="${today}"></div>
+      </div>
+      <div class="fg">
+        <label>利用者（Ctrl/⌘で複数選択・未選択=全員）</label>
+        <select id="printFetchRes" multiple size="6" style="font-size:16px;padding:6px;width:100%;max-width:420px;">${resOpts}</select>
+      </div>
+      <button type="button" class="btn btn-primary btn-sm" style="background:#185FA5;color:#fff;border-color:#185FA5;" onclick="fetchPrintPullRange(true)">取り寄せ</button>
+      <p id="printFetchStatus" style="font-size:14px;color:var(--blue);margin:10px 0 0;font-weight:600;min-height:1.2em;"></p>
+      <p style="font-size:12px;color:var(--text3);margin:8px 0 0;">最大3か月。GAS v3.14 の pullRange が必要です。</p>
+    </div>
+    <div id="printLostNoticeScreen">${lostNote}</div>
     <div class="panel-sec">
       <h3>📋 バイタル期間印刷</h3>
       <div class="fg-row">
@@ -10631,7 +10786,7 @@ function buildPrintSettings(){
           <span>LINE WORKS共有済みのケア記録のみ</span>
         </label>
         <p style="font-size:12px;color:var(--text3);margin:6px 0 0;line-height:1.45;">ONのときは期間内のケア記録のうち、共有ボタンで送信済み（【LW】）の行だけを印刷します。</p>
-        <p style="font-size:12px;color:var(--text3);margin:6px 0 0;line-height:1.45;">※端末には通常 ${KAIGO_PULL_LIMIT_DAYS} 日分のみ保持します。長い期間を指定した場合、印刷前に GAS から不足分を自動取得します。</p>
+        <p style="font-size:12px;color:var(--text3);margin:6px 0 0;line-height:1.45;">※長い期間・過去分は上の「取り寄せ」で本番＋アーカイブから取得するか、印刷時に範囲外なら再取り寄せを確認します（localStorage には保存しません）。</p>
       </div>
       <button class="btn btn-primary btn-sm" onclick="printCareRange()">印刷プレビュー</button>
     </div>
@@ -10715,13 +10870,13 @@ async function printVitalRange(){
   const to=document.getElementById('printVitalTo').value;
   const resName=document.getElementById('printVitalRes').value;
   if(!from||!to){ alert('期間を入力してください'); return; }
-  if(!(await pullRecordsForPrintRange(from))) return;
+  if(!(await ensurePrintPullRangeData_(from, to, resName))) return;
   const dates=getDatesInRange(from,to);
   const targets=resName==='__all__'?[...db.residents].sort(compareResidentsStable):db.residents.filter(r=>r.name===resName);
   const out=[];
   targets.forEach(res=>{
     dates.forEach(dk=>{
-      const rec=db.records[dk]&&db.records[dk][res.name];
+      const rec=printRecordForRead_(dk, res.name);
       if(!rec) return;
       (rec.vital||[]).forEach(v=>{
         out.push({dk,name:res.name,v});
@@ -10748,6 +10903,7 @@ async function printVitalRange(){
         </tr>`;
   }).join('');
   const html=`
+    ${lostRecordNoticeHtml_(from, to)}
     <div class="print-title">あったかホームおひさま バイタル記録 ${from} ～ ${to}</div>
     <table class="print-table print-table-vital">
       <colgroup>
@@ -10768,15 +10924,15 @@ async function printCareRange(){
   const resName=document.getElementById('printCareRes')?.value||'__all__';
   const onlyLw=!!document.getElementById('printCareLwOnly')?.checked;
   if(!from||!to){ alert('期間を入力してください'); return; }
-  if(!(await pullRecordsForPrintRange(from))) return;
+  if(!(await ensurePrintPullRangeData_(from, to, resName))) return;
   const dates=getDatesInRange(from,to);
   const titleSuffix=onlyLw?'（LINE WORKS共有済みケアのみ）':'';
-  let html=`<div class="print-title">${FAC.name} ケア記録サマリー ${from} ～ ${to}${titleSuffix}</div>`;
+  let html=`${lostRecordNoticeHtml_(from, to)}<div class="print-title">${FAC.name} ケア記録サマリー ${from} ～ ${to}${titleSuffix}</div>`;
   const targets=resName==='__all__'?[...db.residents].sort(compareResidentsStable):db.residents.filter(r=>r.name===resName);
   targets.forEach((res,ri)=>{
     const rawRows=[];
     dates.forEach(dateKey=>{
-      const rec=db.records[dateKey]&&db.records[dateKey][res.name];
+      const rec=printRecordForRead_(dateKey, res.name);
       if(!rec) return;
 
       if(onlyLw){
