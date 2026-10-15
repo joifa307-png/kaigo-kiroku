@@ -1689,7 +1689,7 @@ const REC = {
 const N_RECORD_COLS = 57;
 
 /** デプロイのたびに上げる（設定→データ管理の「アプリ情報」で表示） */
-const APP_VERSION='1.7.12';
+const APP_VERSION='1.7.13';
 /** pull取得・ローカル整理の記録保持日数（同期） */
 const KAIGO_PULL_LIMIT_DAYS=14;
 /** 運営指導用：印刷時に「記録が失われた期間」の注記（後から追加・修正可） */
@@ -3537,7 +3537,8 @@ function normalizeGasTimingFromResponse_(j){
     sheetReadMs:Number(t.sheetReadMs)||0,
     computeMs:Number(t.computeMs)||0,
     sheetWriteMs:Number(t.sheetWriteMs)||0,
-    totalMs:Number(t.totalMs)||Number(j&&j.elapsedMs)||0
+    totalMs:Number(t.totalMs)||Number(j&&j.elapsedMs)||0,
+    extra:(t&&t.extra)||{}
   };
 }
 
@@ -3581,7 +3582,30 @@ function formatSyncTimingActionLine_(actionLabel, part){
   if(!part) return '';
   const rt=formatGasTimingSec1_(part.roundTripMs);
   const gas=formatGasTimingBreakdownJa_(part.timing, 'GAS');
-  return actionLabel+' 端末往復 '+rt+'秒 · '+gas;
+  let line=actionLabel+' 端末往復 '+rt+'秒 · '+gas;
+  const ex=(part.timing&&part.timing.extra)||{};
+  if(actionLabel.indexOf('pull')>=0||actionLabel.indexOf('受信')>=0){
+    if(ex.sheetMaxRows||ex.responseRecRows!=null){
+      line+='<br><span style="font-size:12px;font-weight:400;color:var(--text2);">'
+        +'シート枠 '+Number(ex.sheetMaxRows||0).toLocaleString()+'×'+Number(ex.sheetMaxCols||0).toLocaleString()
+        +' 行（データ末尾 '+Number(ex.sheetLastRow||0).toLocaleString()+'）'
+        +' · 応答 RECORD '+Number(ex.responseRecRows||0).toLocaleString()+' 行'
+        +(ex.contentEndRow?(' · 有効末尾行 '+Number(ex.contentEndRow).toLocaleString()):'')
+        +'</span>';
+    }
+  }
+  if(actionLabel.indexOf('push')>=0||actionLabel.indexOf('送信')>=0){
+    if(ex.sheetMaxRows||ex.writes){
+      const w=ex.writes||{};
+      line+='<br><span style="font-size:12px;font-weight:400;color:var(--text2);">'
+        +'シート枠 '+Number(ex.sheetMaxRows||0).toLocaleString()+'×'+Number(ex.sheetMaxCols||0).toLocaleString()
+        +' · 書込 RECORD '+Number(w.recordRows||0)+' 行'
+        +(w.settingRows?(' SETTINGS '+w.settingRows):'')
+        +(w.supplyRows?(' SUPPLIES '+w.supplyRows):'')
+        +'</span>';
+    }
+  }
+  return line;
 }
 
 function buildLastSyncTimingSettingsHtml_(){
