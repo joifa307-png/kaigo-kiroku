@@ -3356,7 +3356,7 @@ function formatMdJa_(ymd){
 }
 
 function lostRecordNoticeHtml_(from, to){
-  const unitKey=isMinamiUnit()?'minami':'nishi';
+  const unitKey=isMinamiFacility()?'minami':'nishi';
   const list=KAIGO_LOST_RECORD_PERIODS[unitKey]||[];
   const hits=list.filter(p=>{
     const pf=normalizeDateKey(p.from), pt=normalizeDateKey(p.to);
