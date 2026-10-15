@@ -1689,7 +1689,7 @@ const REC = {
 const N_RECORD_COLS = 57;
 
 /** デプロイのたびに上げる（設定→データ管理の「アプリ情報」で表示） */
-const APP_VERSION='1.7.13';
+const APP_VERSION='1.7.14';
 /** pull取得・ローカル整理の記録保持日数（同期） */
 const KAIGO_PULL_LIMIT_DAYS=14;
 /** 運営指導用：印刷時に「記録が失われた期間」の注記（後から追加・修正可） */
@@ -3593,6 +3593,21 @@ function formatSyncTimingActionLine_(actionLabel, part){
         +(ex.contentEndRow?(' · 有効末尾行 '+Number(ex.contentEndRow).toLocaleString()):'')
         +'</span>';
     }
+    const ph=ex.pullPhases;
+    if(ph&&typeof ph==='object'){
+      const fmtP=(k)=>formatGasTimingSec1_(ph[k]||0);
+      line+='<br><span style="font-size:11px;font-weight:400;color:var(--text2);">'
+        +'pull内訳: レイアウト '+fmtP('msLayoutScan')
+        +' / 日付列読込 '+fmtP('msDateColRead')
+        +' / 日付判定 '+fmtP('msDateKeyScan')
+        +' / 記録読込 '+fmtP('msRecBlockRead')
+        +' / 記録filter '+fmtP('msRecFilter')
+        +' / 先頭読込 '+fmtP('msHeadRead')
+        +' / 末尾読込 '+fmtP('msTailRead')
+        +' / 正規化(日付) '+fmtP('msNormalizeDates')
+        +' / 正規化(時刻) '+fmtP('msNormalizeTimes')
+        +'秒</span>';
+    }
   }
   if(actionLabel.indexOf('push')>=0||actionLabel.indexOf('送信')>=0){
     if(ex.sheetMaxRows||ex.writes){
@@ -4040,14 +4055,7 @@ function extractPushDeltaSlices(fullRows, sinceTs){
     if(!r||!r.length){ i++; continue; }
     const c0=String(r[0]||'');
     if(c0===SEC_SET||c0===SEC_SUP) break;
-    const kind=String(r[REC.k]||'');
     let includeRec=_numU(r[REC.uu])>sinceTs;
-    if(kind==='calc'){
-      try{
-        const ej=JSON.parse(r[REC.exj]||'{}');
-        if(!!ej.calculated) includeRec=true;
-      }catch(_){}
-    }
     if(includeRec) recRows.push(r.slice());
     i++;
   }
