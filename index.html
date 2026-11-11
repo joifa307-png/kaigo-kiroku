@@ -1689,7 +1689,7 @@ const REC = {
 const N_RECORD_COLS = 57;
 
 /** デプロイのたびに上げる（設定→データ管理の「アプリ情報」で表示） */
-const APP_VERSION='1.7.14';
+const APP_VERSION='1.7.15';
 /** pull取得・ローカル整理の記録保持日数（同期） */
 const KAIGO_PULL_LIMIT_DAYS=14;
 /** 運営指導用：印刷時に「記録が失われた期間」の注記（後から追加・修正可） */
@@ -3709,6 +3709,34 @@ function mergeCareManagerOfficesIntoList(existing, assignments){
   return list;
 }
 const KAIGO_PUSH_TS_SUFFIX = ':last_push_ts_v1';
+/** pull 後にシート上の利用者 id 一覧（差分 push で「シートにない id」を必ず送る） */
+const KAIGO_SHEET_RES_IDS_SUFFIX = ':sheet_res_ids_v1';
+
+function sheetResidentIdSetLsKey_(){
+  return FAC?(FAC.storageKey+KAIGO_SHEET_RES_IDS_SUFFIX):'';
+}
+
+function loadSheetResidentIdSet_(){
+  const k=sheetResidentIdSetLsKey_();
+  if(!k) return null;
+  try{
+    const raw=localStorage.getItem(k);
+    if(!raw) return new Set();
+    const arr=JSON.parse(raw);
+    return new Set(Array.isArray(arr)?arr.filter(Boolean):[]);
+  }catch(_){
+    return new Set();
+  }
+}
+
+function updateSheetResidentIdSnapshotFromDb_(residents){
+  const k=sheetResidentIdSetLsKey_();
+  if(!k) return;
+  const ids=(residents||[]).map(r=>String(r&&r.id||'').trim()).filter(Boolean);
+  try{
+    localStorage.setItem(k, JSON.stringify(ids));
+  }catch(_){}
+}
 const KAIGO_PUSH_RIDS_SUFFIX = ':rid_snapshot_v1';
 const KAIGO_DELTA_MAX_PATCH_ROWS = 3500;
 /** merge push で全行送るときの sinceTs（extractPushDeltaSlices が全行を含める） */
@@ -4028,7 +4056,29 @@ function extractRecRidsFromSheetRows(fullRows){
  * 直近のプッシュ時刻より新しいシート行だけを抽出（GAS で既存シートへマージする差分）。
  * fullRows は dbToSheet(db) と同じ並びであること。
  */
-function extractPushDeltaSlices(fullRows, sinceTs){
+function extractAllResidentPushRows_(fullRows){
+  const resRows=[];
+  let i=0;
+  while(i<fullRows.length && String(fullRows[i][0])!==SEC_RES) i++;
+  if(i>=fullRows.length) return resRows;
+  i+=2;
+  while(i<fullRows.length){
+    const r=fullRows[i];
+    if(!r||!r.length){ i++; continue; }
+    if(String(r[0])===SEC_REC) break;
+    const id=String(r[0]||'').trim();
+    const nm=String(r[1]||'').trim();
+    if(!id&&!nm){ i++; continue; }
+    resRows.push(r.slice());
+    i++;
+  }
+  return resRows;
+}
+
+function extractPushDeltaSlices(fullRows, sinceTs, opts){
+  opts=opts||{};
+  const forceAllResidents=!!opts.forceAllResidents;
+  const sheetResIds=forceAllResidents?null:loadSheetResidentIdSet_();
   const recRows=[], resRows=[], setRows=[], supRows=[];
   let i;
   i=0;
@@ -4043,7 +4093,11 @@ function extractPushDeltaSlices(fullRows, sinceTs){
       const nm=String(r[1]||'').trim();
       const id=String(r[0]||'').trim();
       if(!nm&&!id){ i++; continue; }
-      if(_numU(r[KAIGO_RESIDENT_U_COL])>sinceTs) resRows.push(r.slice());
+      const uFresh=_numU(r[KAIGO_RESIDENT_U_COL])>sinceTs;
+      const missingOnSheet=!!(
+        id&&sheetResIds&&sheetResIds.size>0&&!sheetResIds.has(id)
+      );
+      if(forceAllResidents||uFresh||missingOnSheet) resRows.push(r.slice());
       i++;
     }
   }
@@ -4093,6 +4147,38 @@ function finalizePushSuccessState_(storageKey){
   try{ localStorage.removeItem(storageKey+KAIGO_PUSH_RIDS_SUFFIX); }catch(_){}
 }
 
+function pushAllResidentsToSheetAdmin(){
+  if(!FAC){ alert('施設が未選択です'); return; }
+  if(!gasConfigured()){ alert('データ管理で GAS URL・トークンを設定してください'); return; }
+  const credPin=gasCredentialsPin_();
+  if(!gasCredentialsPinValid_(credPin)){ alert('トークンが未設定です'); return; }
+  const list=db.residents||[];
+  if(!list.length){ alert('この端末に利用者がいません'); return; }
+  const msg='シート「'+FAC.sheetName+'」の名簿へ、利用者 '+list.length+' 名を送信します。\n'
+    +'・既存の利用者IDは更新\n・シートにないIDは追加\n\n続行しますか？';
+  if(!confirm(msg)) return;
+  list.forEach(r=>{ if(r) r._u=Math.max(_numU(r._u), Date.now()); });
+  const fullRows=dbToSheet(db);
+  const resRows=extractAllResidentPushRows_(fullRows);
+  if(!resRows.length){ alert('名簿行の組み立てに失敗しました'); return; }
+  setSyncStatus('名簿送信中...','#185FA5');
+  gasPost(buildKaigoMergePushBody({recRows:[], resRows, setRows:[], supRows:[]}), credPin)
+    .then(j=>{
+      if(!j||!j.ok) throw new Error((j&&j.error)||'送信失敗');
+      updateSheetResidentIdSnapshotFromDb_(db.residents);
+      syncDirty=true;
+      localStorage.setItem(FAC.storageKey+'_dirty','1');
+      setSyncStatus('名簿送信済','green');
+      showBriefToast('名簿 '+resRows.length+' 行をシートへ送信しました', 4500, false);
+      if(curSettingsTab==='data') renderSettingsPanel('data');
+    })
+    .catch(e=>{
+      console.error(e);
+      setSyncStatus('名簿送信失敗','orange');
+      alert('名簿送信に失敗しました: '+(e.message||e));
+    });
+}
+
 /** 取得のみ（診断等から利用可）。通常起動では呼ばない */
 function syncPullOnly(){
   if(!FAC) return Promise.resolve();
@@ -4109,6 +4195,7 @@ function syncPullOnly(){
       }
       const remote=sheetToDb(raw);
       db=mergePulledDb(db, remote);
+      updateSheetResidentIdSnapshotFromDb_(db.residents);
       persistLocalQuiet();
       renderMain();
       const n=new Date();
@@ -4180,6 +4267,7 @@ function runGasPushCycle(){
       }
       const remote=sheetToDb(raw);
       db=mergePulledDb(db, remote);
+      updateSheetResidentIdSnapshotFromDb_(db.residents);
       const fullRows=dbToSheet(db);
       const lastTs=_numU(localStorage.getItem(sk+KAIGO_PUSH_TS_SUFFIX));
       const useDelta=lastTs>0;
@@ -10519,6 +10607,15 @@ function buildDataSettings(){
         ファイルを選択
         <input type="file" accept=".json,application/json,text/json" style="display:none;" onchange="importDB(this)">
       </label>
+    </div>
+    <div class="panel-sec" style="border:1px solid var(--blue);border-radius:10px;padding:14px;background:#E8F4FD;">
+      <h3 style="color:#185FA5;">👥 名簿をシートへ送信（管理者用）</h3>
+      <p style="font-size:14px;color:var(--text2);margin-bottom:10px;line-height:1.5;">
+        この端末の利用者名簿を GAS の RESIDENTS へ <strong>全員分</strong>送ります（既存 ID は更新・未登録 ID は RECORDS 見出しの直前に追加）。通常同期で名簿が届かないときの救済用です。
+      </p>
+      <button type="button" class="btn btn-sm" style="background:#185FA5;color:#fff;border-color:#185FA5;"
+        onclick="pushAllResidentsToSheetAdmin()">名簿をシートへ送信</button>
+      <p style="font-size:12px;color:var(--text3);margin-top:8px;">現在の利用者: ${(db.residents||[]).length} 名（シート「${FAC?FAC.sheetName:''}」）</p>
     </div>
     <div class="panel-sec" style="border:1px solid #856404;border-radius:10px;padding:14px;background:#FFF8E6;">
       <h3 style="color:#856404;">📡 復元送信（管理者用）</h3>
