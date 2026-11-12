@@ -1689,7 +1689,7 @@ const REC = {
 const N_RECORD_COLS = 57;
 
 /** デプロイのたびに上げる（設定→データ管理の「アプリ情報」で表示） */
-const APP_VERSION='1.7.19';
+const APP_VERSION='1.7.20';
 /** pull取得・ローカル整理の記録保持日数（同期） */
 const KAIGO_PULL_LIMIT_DAYS=14;
 /** 運営指導用：印刷時に「記録が失われた期間」の注記（後から追加・修正可） */
@@ -2639,6 +2639,16 @@ function normalizeResidentNameForMatch_(name){
   return out;
 }
 
+const _printResidentNameKeyCache=new Map();
+/** 印刷マージ用：異体字＋空白除去（「渡邉 泉」と「渡邊泉」を同一視） */
+function printResidentNameMatchKey_(name){
+  const raw=String(name==null?'':name);
+  if(_printResidentNameKeyCache.has(raw)) return _printResidentNameKeyCache.get(raw);
+  const k=String(normalizeResidentNameForMatch_(raw)||'').replace(/\s+/g,'');
+  _printResidentNameKeyCache.set(raw,k);
+  return k;
+}
+
 function dbResidentByNameForPrint_(name){
   const want=normalizeResidentNameForMatch_(name);
   if(!want) return null;
@@ -2651,14 +2661,90 @@ function officialDisplayNameForPrint_(name){
   return (r&&r.name)?r.name:String(name||'').trim();
 }
 
+/** 印刷用：同一人物とみなす氏名キーをすべて収集（表記ゆれ・異体字） */
+function collectAllRecordDaysMatchingPrintName_(day, resName){
+  if(!day||!resName) return [];
+  const want=printResidentNameMatchKey_(resName);
+  if(!want) return [];
+  return Object.keys(day)
+    .filter(k=>{
+      const rec=day[k];
+      return k&&rec&&typeof rec==='object'&&printResidentNameMatchKey_(k)===want;
+    })
+    .map(k=>day[k]);
+}
+
+function printPickByContentAndU_(a, b, hasContentFn, uFn){
+  const au=uFn(a), bu=uFn(b);
+  const aH=!!(hasContentFn&&hasContentFn(a));
+  const bH=!!(hasContentFn&&hasContentFn(b));
+  if(aH&&!bH) return cloneDeep(a||{});
+  if(bH&&!aH) return cloneDeep(b||{});
+  if(!aH&&!bH) return cloneDeep(bu>au?(b||{}):(a||{}));
+  return cloneDeep(bu>au?(b||{}):(a||{}));
+}
+
+function printRecordDayMealHasContent_(m){
+  if(!m||typeof m!=='object') return false;
+  return mealSectionExplicitlyRecorded(m,'breakfast')
+    ||mealSectionExplicitlyRecorded(m,'lunch')
+    ||mealSectionExplicitlyRecorded(m,'dinner');
+}
+
+function printRecordDayRecHasContent_(rc){
+  if(!rc||typeof rc!=='object') return false;
+  return !!getRecSummaryText(rc)||!!String(rc.time||'').trim();
+}
+
+function printRecordDayDiaryHasContent_(rec){
+  return !!String(rec&&rec.day||'').trim();
+}
+
+function printMedSlotHasContent_(m){
+  if(!m) return false;
+  const items=(m.items||[]).filter(Boolean);
+  return items.length>0
+    ||!!String(m.time||'').trim()
+    ||!!String(m.staff||'').trim();
+}
+
+/** 印刷専用：同日・別名キーの記録を1日分にマージ（同期ロジックは触らない） */
+function mergeRecordDayForPrint_(L, R){
+  if(!L&&!R) return null;
+  if(!L) return cloneDeep(R);
+  if(!R) return cloneDeep(L);
+  const out=cloneDeep(L);
+  out.vital=coalesceSameKindItems([...(L.vital||[]),...(R.vital||[])], vitalFingerprint, 'v', 'v');
+  out.excretion=coalesceSameKindItems([...(L.excretion||[]),...(R.excretion||[])], excretionFingerprint, 'e', 'e');
+  out.bath=coalesceSameKindItems([...(L.bath||[]),...(R.bath||[])], bathFingerprint, 'b', 'b');
+  out.care=coalesceSameKindItems([...(L.care||[]),...(R.care||[])], careFingerprint, 'c', 'c');
+  out.notes=coalesceSameKindItems([...(L.notes||[]),...(R.notes||[])], notesFingerprint, 'n', null);
+  out.meal=printPickByContentAndU_(L.meal||{}, R.meal||{}, printRecordDayMealHasContent_, m=>_numU(m&&m._u));
+  out.med={ morning:{time:'',staff:'',items:[]}, lunch:{time:'',staff:'',items:[]}, dinner:{time:'',staff:'',items:[]}, bedtime:{time:'',staff:'',items:[]}, };
+  ['morning','lunch','dinner','bedtime'].forEach(t=>{
+    const a=L.med&&L.med[t], b=R.med&&R.med[t];
+    out.med[t]=printPickByContentAndU_(a||{time:'',staff:'',items:[]}, b||{time:'',staff:'',items:[]}, printMedSlotHasContent_, m=>_numU(m&&m._u));
+    if(!out.med[t].items) out.med[t].items=[];
+  });
+  out.rec=printPickByContentAndU_(L.rec||{}, R.rec||{}, printRecordDayRecHasContent_, m=>_numU(m&&m._u));
+  const dayPick=printPickByContentAndU_(
+    {day:L.day||'',dayWriter:L.dayWriter||'',_dayU:_numU(L._dayU)},
+    {day:R.day||'',dayWriter:R.dayWriter||'',_dayU:_numU(R._dayU)},
+    d=>printRecordDayDiaryHasContent_(d),
+    d=>_numU(d&&d._dayU)
+  );
+  out.day=dayPick.day||'';
+  out.dayWriter=dayPick.dayWriter||'';
+  out._dayU=_numU(dayPick._dayU);
+  return out;
+}
+
 function getRecordInDayByResidentNamePrint_(day, resName){
-  if(!day||!resName) return null;
-  if(Object.prototype.hasOwnProperty.call(day,resName)) return day[resName]||null;
-  const want=normalizeResidentNameForMatch_(resName);
-  for(const k of Object.keys(day)){
-    if(normalizeResidentNameForMatch_(k)===want) return day[k];
-  }
-  return null;
+  const parts=collectAllRecordDaysMatchingPrintName_(day, resName);
+  if(!parts.length) return null;
+  let merged=null;
+  parts.forEach(p=>{ merged=mergeRecordDayForPrint_(merged, p); });
+  return merged;
 }
 
 function collectRecordResidentNamesInRange_(records, from, to){
@@ -11619,6 +11705,21 @@ async function printCareRange(){
         });
       });
 
+      // 申し送り
+      (rec.notes||[]).forEach(n=>{
+        if(!isActiveNote(n)) return;
+        const content=String(n.content||'').trim();
+        if(!content) return;
+        rawRows.push({
+          dk:dateKey,
+          t:normalizeTimeText(n.time)||'',
+          cat:'申し送り',
+          body:content,
+          staff:n.writer||'',
+          _key:'n:'+(n.id||(n.time+'|'+content))
+        });
+      });
+
       // レクリエーション（1日1件・時刻／チップ／部位／内容）
       if(printCareRecRowHasContent_(rec)){
         const rc=rec.rec;
@@ -11651,7 +11752,7 @@ async function printCareRange(){
     const deduped=dedupePrintRows(rawRows, row=>[dispName,row.dk,row._key,row.cat,row.t,row.body,row.staff].join('|'));
 
     // 日付→時刻→項目順にソート
-    const catOrder={'バイタル':1,'排泄':2,'入浴':3,'朝食':4,'昼食':5,'夕食':6,'服薬':7,'ケア記録':8,'レク':9,'1日の様子':10};
+    const catOrder={'バイタル':1,'排泄':2,'入浴':3,'朝食':4,'昼食':5,'夕食':6,'服薬':7,'ケア記録':8,'申し送り':85,'レク':9,'1日の様子':10};
     deduped.sort((a,b)=>{
       if(a.dk!==b.dk) return a.dk<b.dk?-1:1;
       const at=a.t||'99:99', bt=b.t||'99:99';
