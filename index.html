@@ -1689,7 +1689,7 @@ const REC = {
 const N_RECORD_COLS = 57;
 
 /** デプロイのたびに上げる（設定→データ管理の「アプリ情報」で表示） */
-const APP_VERSION='1.7.15';
+const APP_VERSION='1.7.16';
 /** pull取得・ローカル整理の記録保持日数（同期） */
 const KAIGO_PULL_LIMIT_DAYS=14;
 /** 運営指導用：印刷時に「記録が失われた期間」の注記（後から追加・修正可） */
@@ -2598,6 +2598,149 @@ function normalizeVitalTempsInRecords(records){
 function normalizeResidentName(name){
   return String(name||'').replace(/[\s\u3000]+/g,' ').trim();
 }
+
+/** 印刷・取り寄せ用の異体字グループ（同一グループは同一人物扱い）。settings.residentNameVariantGroups で上書き可 */
+const DEFAULT_RESIDENT_NAME_VARIANT_GROUPS=[
+  ['渡邊','渡邉','渡边']
+];
+
+function residentNameVariantGroups_(){
+  const g=db&&db.settings&&db.settings.residentNameVariantGroups;
+  if(Array.isArray(g)&&g.length) return g;
+  return DEFAULT_RESIDENT_NAME_VARIANT_GROUPS;
+}
+
+let _residentNameVariantCanonCache=null;
+function residentNameVariantCanonMap_(){
+  if(_residentNameVariantCanonCache) return _residentNameVariantCanonCache;
+  const map={};
+  residentNameVariantGroups_().forEach(grp=>{
+    if(!Array.isArray(grp)||!grp.length) return;
+    const canon=normalizeResidentName(grp[0]);
+    grp.forEach(alias=>{
+      const k=normalizeResidentName(alias);
+      if(k) map[k]=canon;
+    });
+  });
+  _residentNameVariantCanonCache=map;
+  return map;
+}
+
+/** 半角/全角空白統一一＋NFKC＋異体字正規化（印刷照合専用） */
+function normalizeResidentNameForMatch_(name){
+  let s=normalizeResidentName(name);
+  try{ if(s&&s.normalize) s=s.normalize('NFKC'); }catch(_){}
+  const map=residentNameVariantCanonMap_();
+  return map[s]||s;
+}
+
+function dbResidentByNameForPrint_(name){
+  const want=normalizeResidentNameForMatch_(name);
+  if(!want) return null;
+  return (db.residents||[]).find(x=>normalizeResidentNameForMatch_(x.name)===want)||null;
+}
+
+/** 印刷物の氏名欄：名簿にいれば名簿表記、なければ記録上の名前 */
+function officialDisplayNameForPrint_(name){
+  const r=dbResidentByNameForPrint_(name);
+  return (r&&r.name)?r.name:String(name||'').trim();
+}
+
+function getRecordInDayByResidentNamePrint_(day, resName){
+  if(!day||!resName) return null;
+  if(Object.prototype.hasOwnProperty.call(day,resName)) return day[resName]||null;
+  const want=normalizeResidentNameForMatch_(resName);
+  for(const k of Object.keys(day)){
+    if(normalizeResidentNameForMatch_(k)===want) return day[k];
+  }
+  return null;
+}
+
+function collectRecordResidentNamesInRange_(records, from, to){
+  const set=new Set();
+  Object.keys(records||{}).forEach(dk=>{
+    if(from&&dk<from) return;
+    if(to&&dk>to) return;
+    const day=records[dk];
+    if(!day||typeof day!=='object') return;
+    Object.keys(day).forEach(nm=>{
+      if(nm&&String(nm).trim()) set.add(nm);
+    });
+  });
+  return Array.from(set).sort((a,b)=>
+    normalizeResidentNameForMatch_(a).localeCompare(normalizeResidentNameForMatch_(b),'ja')
+  );
+}
+
+function mergePrintResidentOptionList_(recordNames){
+  const map=new Map();
+  (db.residents||[]).forEach(r=>{
+    const k=normalizeResidentNameForMatch_(r.name);
+    if(!k) return;
+    map.set(k,{ lookup:r.name, display:officialDisplayNameForPrint_(r.name), inRoster:true });
+  });
+  (recordNames||[]).forEach(nm=>{
+    const k=normalizeResidentNameForMatch_(nm);
+    if(!k||map.has(k)) return;
+    const off=officialDisplayNameForPrint_(nm);
+    map.set(k,{ lookup:nm, display:off, inRoster:!!dbResidentByNameForPrint_(nm) });
+  });
+  return Array.from(map.values()).sort((a,b)=>
+    normalizeResidentNameForMatch_(a.display).localeCompare(normalizeResidentNameForMatch_(b.display),'ja')
+  );
+}
+
+function refreshPrintResidentSelectsFromOverlay_(){
+  if(!_printPullOverlay) return;
+  const names=collectRecordResidentNamesInRange_(
+    _printPullOverlay.records,
+    _printPullOverlay.from,
+    _printPullOverlay.to
+  );
+  const list=mergePrintResidentOptionList_(names);
+  const fetchHtml=list.map(o=>{
+    const suffix=o.inRoster?'':'（記録のみ）';
+    return `<option value="${escapeAttr(o.lookup)}">${escapeHtml(o.display)}${suffix}</option>`;
+  }).join('');
+  const sel=document.getElementById('printFetchRes');
+  if(sel) sel.innerHTML=fetchHtml;
+  const vc=`<option value="__all__">全員</option>`+list.map(o=>
+    `<option value="${escapeAttr(o.lookup)}">${escapeHtml(o.display)}</option>`
+  ).join('');
+  const vital=document.getElementById('printVitalRes');
+  const care=document.getElementById('printCareRes');
+  if(vital) vital.innerHTML=vc;
+  if(care) care.innerHTML=vc;
+}
+
+/** 印刷対象：名簿＋取り寄せ記録内の利用者（退所・移動分含む） */
+function getPrintTargetResidents_(resName){
+  const recs=_printPullOverlay?_printPullOverlay.records:(db.records||{});
+  const from=_printPullOverlay?_printPullOverlay.from:null;
+  const to=_printPullOverlay?_printPullOverlay.to:null;
+  const extras=collectRecordResidentNamesInRange_(recs, from, to);
+  const byKey=new Map();
+  (db.residents||[]).forEach(r=>{
+    const k=normalizeResidentNameForMatch_(r.name);
+    if(!k) return;
+    byKey.set(k,{ lookup:r.name, display:officialDisplayNameForPrint_(r.name) });
+  });
+  extras.forEach(nm=>{
+    const k=normalizeResidentNameForMatch_(nm);
+    if(!k||byKey.has(k)) return;
+    byKey.set(k,{ lookup:nm, display:officialDisplayNameForPrint_(nm) });
+  });
+  const all=Array.from(byKey.values()).sort((a,b)=>
+    normalizeResidentNameForMatch_(a.display).localeCompare(normalizeResidentNameForMatch_(b.display),'ja')
+  );
+  if(!resName||resName==='__all__') return all;
+  const want=normalizeResidentNameForMatch_(resName);
+  const hit=all.filter(t=>
+    normalizeResidentNameForMatch_(t.lookup)===want
+    ||normalizeResidentNameForMatch_(t.display)===want
+  );
+  return hit.length?hit:[];
+}
 function compareResidentsStable(a,b){
   const c=normalizeResidentName((a&&a.name)||'').localeCompare(normalizeResidentName((b&&b.name)||''),'ja');
   if(c!==0) return c;
@@ -3324,7 +3467,7 @@ function clearPrintPullOverlay_(){
 
 function printPullResidentFilterKey_(names){
   if(!names||!names.length) return '__all__';
-  return names.map(n=>normalizeResidentName(n)).filter(Boolean).sort().join('|');
+  return names.map(n=>normalizeResidentNameForMatch_(n)).filter(Boolean).sort().join('|');
 }
 
 function printPullOverlayCovers_(from, to, resKey){
@@ -3339,7 +3482,9 @@ function printRecordForRead_(dateKey, resName){
     &&dateKey>=_printPullOverlay.from
     &&dateKey<=_printPullOverlay.to;
   const recs=useOv?_printPullOverlay.records:(db.records||{});
-  return recs[dateKey]&&recs[dateKey][resName];
+  const day=recs[dateKey];
+  if(!day) return null;
+  return getRecordInDayByResidentNamePrint_(day, resName);
 }
 
 function printRangeDaysInclusive_(from, to){
@@ -3436,6 +3581,7 @@ async function fetchPrintPullRange(manual){
     const msg=formatPrintPullRangeStatusMsg_(from, to, n, roundTripMs, pullTiming);
     if(statusEl) statusEl.textContent=msg;
     showBriefToast('取り寄せ完了：RECORD '+n+' 行', 5000);
+    refreshPrintResidentSelectsFromOverlay_();
     const vf=document.getElementById('printVitalFrom');
     const vt=document.getElementById('printVitalTo');
     const cf=document.getElementById('printCareFrom');
@@ -3473,7 +3619,10 @@ async function ensurePrintPullRangeData_(from, to, singleResName){
   if(singleResName&&singleResName!=='__all__'){
     const sel=document.getElementById('printFetchRes');
     if(sel){
-      Array.from(sel.options).forEach(o=>{ o.selected=(o.value===singleResName); });
+      const want=normalizeResidentNameForMatch_(singleResName);
+      Array.from(sel.options).forEach(o=>{
+        o.selected=(normalizeResidentNameForMatch_(o.value)===want);
+      });
     }
   }
   return fetchPrintPullRange(false);
@@ -11048,7 +11197,8 @@ function buildPrintSettings(){
       </div>
       <div class="fg">
         <label>利用者（Ctrl/⌘で複数選択・未選択=全員）</label>
-        <select id="printFetchRes" multiple size="6" style="font-size:16px;padding:6px;width:100%;max-width:420px;">${resOpts}</select>
+        <p style="font-size:12px;color:var(--text3);margin:0 0 6px;">取り寄せ後、記録に含まれる利用者（名簿にない方は「記録のみ」）も選べます。</p>
+        <select id="printFetchRes" multiple size="8" style="font-size:16px;padding:6px;width:100%;max-width:420px;">${resOpts}</select>
       </div>
       <button type="button" class="btn btn-primary btn-sm" style="background:#185FA5;color:#fff;border-color:#185FA5;" onclick="fetchPrintPullRange(true)">取り寄せ</button>
       <p id="printFetchStatus" style="font-size:14px;color:var(--blue);margin:10px 0 0;font-weight:600;min-height:1.2em;white-space:pre-line;line-height:1.5;"></p>
@@ -11173,14 +11323,15 @@ async function printVitalRange(){
   if(!from||!to){ alert('期間を入力してください'); return; }
   if(!(await ensurePrintPullRangeData_(from, to, resName))) return;
   const dates=getDatesInRange(from,to);
-  const targets=resName==='__all__'?[...db.residents].sort(compareResidentsStable):db.residents.filter(r=>r.name===resName);
+  const targets=getPrintTargetResidents_(resName);
   const out=[];
-  targets.forEach(res=>{
+  targets.forEach(t=>{
     dates.forEach(dk=>{
-      const rec=printRecordForRead_(dk, res.name);
+      const rec=printRecordForRead_(dk, t.lookup);
       if(!rec) return;
+      const disp=officialDisplayNameForPrint_(t.lookup);
       (rec.vital||[]).forEach(v=>{
-        out.push({dk,name:res.name,v});
+        out.push({dk,name:disp,v});
       });
     });
   });
@@ -11229,11 +11380,12 @@ async function printCareRange(){
   const dates=getDatesInRange(from,to);
   const titleSuffix=onlyLw?'（LINE WORKS共有済みケアのみ）':'';
   let html=`${lostRecordNoticeHtml_(from, to)}<div class="print-title">${FAC.name} ケア記録サマリー ${from} ～ ${to}${titleSuffix}</div>`;
-  const targets=resName==='__all__'?[...db.residents].sort(compareResidentsStable):db.residents.filter(r=>r.name===resName);
-  targets.forEach((res,ri)=>{
+  const targets=getPrintTargetResidents_(resName);
+  targets.forEach((t,ri)=>{
+    const dispName=officialDisplayNameForPrint_(t.lookup);
     const rawRows=[];
     dates.forEach(dateKey=>{
-      const rec=printRecordForRead_(dateKey, res.name);
+      const rec=printRecordForRead_(dateKey, t.lookup);
       if(!rec) return;
 
       if(onlyLw){
@@ -11315,7 +11467,8 @@ async function printCareRange(){
       // 食事（削除フラグ付き区分は除外。デイ利用者は朝夕のみ明示入力時に出力）
       const ml=rec.meal||{};
       const hasMeal = (k)=>ml[k]!=null && String(ml[k]).trim()!=='';
-      const isDayRes=isDayServiceByName(res.name);
+      const residentRow=dbResidentByNameForPrint_(t.lookup);
+      const isDayRes=isDayServiceByName(t.lookup);
       // 朝食
       if(!Number(ml.bDel||0) && (!isDayRes||mealSectionExplicitlyRecorded(ml,'breakfast')) && (hasMeal('bMain')||hasMeal('bSide')||hasMeal('bWater'))){
         const parts=[];
@@ -11408,7 +11561,7 @@ async function printCareRange(){
     });
 
     // 重複除去（id / 内容キーで）
-    const deduped=dedupePrintRows(rawRows, row=>[res.name,row.dk,row._key,row.cat,row.t,row.body,row.staff].join('|'));
+    const deduped=dedupePrintRows(rawRows, row=>[dispName,row.dk,row._key,row.cat,row.t,row.body,row.staff].join('|'));
 
     // 日付→時刻→項目順にソート
     const catOrder={'バイタル':1,'排泄':2,'入浴':3,'朝食':4,'昼食':5,'夕食':6,'服薬':7,'ケア記録':8};
@@ -11426,7 +11579,8 @@ async function printCareRange(){
 
     if(rows.length>0){
       const pageBreak=ri>0?'style="page-break-before:always;"':'';
-      html+=`<div class="print-subtitle" ${pageBreak}>${escapeHtml(res.name)}（${escapeHtml(res.care||'')}）</div>
+      const careLabel=residentRow&&residentRow.care?residentRow.care:'';
+      html+=`<div class="print-subtitle" ${pageBreak}>${escapeHtml(dispName)}（${escapeHtml(careLabel)}）</div>
       <table class="print-table">
         <thead><tr><th>日付</th><th>時刻</th><th>項目</th><th>内容</th><th>担当</th></tr></thead>
         <tbody>${rows.join('')}</tbody>
