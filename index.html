@@ -1689,7 +1689,7 @@ const REC = {
 const N_RECORD_COLS = 57;
 
 /** デプロイのたびに上げる（設定→データ管理の「アプリ情報」で表示） */
-const APP_VERSION='1.7.18';
+const APP_VERSION='1.7.19';
 /** pull取得・ローカル整理の記録保持日数（同期） */
 const KAIGO_PULL_LIMIT_DAYS=14;
 /** 運営指導用：印刷時に「記録が失われた期間」の注記（後から追加・修正可） */
@@ -11443,6 +11443,8 @@ async function printCareRange(){
   const targets=getPrintTargetResidents_(resName);
   targets.forEach((t,ri)=>{
     const dispName=officialDisplayNameForPrint_(t.lookup);
+    const residentRow=dbResidentByNameForPrint_(t.lookup);
+    const isDayRes=isDayServiceByName(t.lookup);
     const rawRows=[];
     dates.forEach(dateKey=>{
       const rec=printRecordForRead_(dateKey, t.lookup);
@@ -11527,8 +11529,6 @@ async function printCareRange(){
       // 食事（削除フラグ付き区分は除外。デイ利用者は朝夕のみ明示入力時に出力）
       const ml=rec.meal||{};
       const hasMeal = (k)=>ml[k]!=null && String(ml[k]).trim()!=='';
-      const residentRow=dbResidentByNameForPrint_(t.lookup);
-      const isDayRes=isDayServiceByName(t.lookup);
       // 朝食
       if(!Number(ml.bDel||0) && (!isDayRes||mealSectionExplicitlyRecorded(ml,'breakfast')) && (hasMeal('bMain')||hasMeal('bSide')||hasMeal('bWater'))){
         const parts=[];
@@ -11666,8 +11666,9 @@ async function printCareRange(){
 
     if(rows.length>0){
       const pageBreak=ri>0?'style="page-break-before:always;"':'';
-      const careLabel=residentRow&&residentRow.care?residentRow.care:'';
-      html+=`<div class="print-subtitle" ${pageBreak}>${escapeHtml(dispName)}（${escapeHtml(careLabel)}）</div>
+      const careLabel=residentRow&&residentRow.care?String(residentRow.care).trim():'';
+      const careSuffix=careLabel?`（${escapeHtml(careLabel)}）`:'';
+      html+=`<div class="print-subtitle" ${pageBreak}>${escapeHtml(dispName)}${careSuffix}</div>
       <table class="print-table">
         <thead><tr><th>日付</th><th>時刻</th><th>項目</th><th>内容</th><th>担当</th></tr></thead>
         <tbody>${rows.join('')}</tbody>
