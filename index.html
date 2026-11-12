@@ -1689,7 +1689,7 @@ const REC = {
 const N_RECORD_COLS = 57;
 
 /** デプロイのたびに上げる（設定→データ管理の「アプリ情報」で表示） */
-const APP_VERSION='1.7.17';
+const APP_VERSION='1.7.18';
 /** pull取得・ローカル整理の記録保持日数（同期） */
 const KAIGO_PULL_LIMIT_DAYS=14;
 /** 運営指導用：印刷時に「記録が失われた期間」の注記（後から追加・修正可） */
@@ -2626,12 +2626,17 @@ function residentNameVariantCanonMap_(){
   return map;
 }
 
-/** 半角/全角空白統一一＋NFKC＋異体字正規化（印刷照合専用） */
+const _residentNameForMatchCache=new Map();
+/** 半角/全角空白統一＋NFKC＋異体字正規化（印刷照合専用・同一文字列は1回だけ） */
 function normalizeResidentNameForMatch_(name){
-  let s=normalizeResidentName(name);
+  const raw=String(name==null?'':name);
+  if(_residentNameForMatchCache.has(raw)) return _residentNameForMatchCache.get(raw);
+  let s=normalizeResidentName(raw);
   try{ if(s&&s.normalize) s=s.normalize('NFKC'); }catch(_){}
   const map=residentNameVariantCanonMap_();
-  return map[s]||s;
+  const out=map[s]||s;
+  _residentNameForMatchCache.set(raw,out);
+  return out;
 }
 
 function dbResidentByNameForPrint_(name){
@@ -2690,8 +2695,24 @@ function mergePrintResidentOptionList_(recordNames){
   );
 }
 
+function restorePrintResidentSelectValue_(sel, prevValue){
+  if(!sel||!prevValue) return;
+  const opts=Array.from(sel.options||[]);
+  if(opts.some(o=>o.value===prevValue)){
+    sel.value=prevValue;
+    return;
+  }
+  const want=normalizeResidentNameForMatch_(prevValue);
+  const hit=opts.find(o=>normalizeResidentNameForMatch_(o.value)===want);
+  if(hit) sel.value=hit.value;
+}
+
 function refreshPrintResidentSelectsFromOverlay_(){
   if(!_printPullOverlay) return;
+  const vitalSel=document.getElementById('printVitalRes');
+  const careSel=document.getElementById('printCareRes');
+  const prevVital=vitalSel?vitalSel.value:'';
+  const prevCare=careSel?careSel.value:'';
   const names=collectRecordResidentNamesInRange_(
     _printPullOverlay.records,
     _printPullOverlay.from,
@@ -2709,8 +2730,14 @@ function refreshPrintResidentSelectsFromOverlay_(){
   ).join('');
   const vital=document.getElementById('printVitalRes');
   const care=document.getElementById('printCareRes');
-  if(vital) vital.innerHTML=vc;
-  if(care) care.innerHTML=vc;
+  if(vital){
+    vital.innerHTML=vc;
+    restorePrintResidentSelectValue_(vital, prevVital);
+  }
+  if(care){
+    care.innerHTML=vc;
+    restorePrintResidentSelectValue_(care, prevCare);
+  }
 }
 
 /** 印刷対象：名簿＋取り寄せ記録内の利用者（退所・移動分含む） */
@@ -3458,6 +3485,7 @@ function printRangeNeedsExtendedPull_(from){
 }
 /** 印刷専用：pullRange で取得した records（localStorage 非保存） */
 let _printPullOverlay=null;
+let _printPullBusy=false;
 
 function clearPrintPullOverlay_(){
   _printPullOverlay=null;
@@ -3528,24 +3556,29 @@ function getPrintFetchSelectedResidents_(){
 }
 
 async function fetchPrintPullRange(manual){
+  if(_printPullBusy){
+    showBriefToast('取り寄せ処理中です…', 2500);
+    return {ok:false, busy:true};
+  }
   if(!FAC||!gasConfigured()){
     alert('データ管理で GAS URL・トークンを設定してください');
-    return false;
+    return {ok:false};
   }
   const fromEl=document.getElementById('printFetchFrom');
   const toEl=document.getElementById('printFetchTo');
   const from=normalizeDateKey(fromEl&&fromEl.value);
   const to=normalizeDateKey(toEl&&toEl.value);
-  if(!from||!to){ alert('開始日・終了日を入力してください'); return false; }
-  if(from>to){ alert('開始日が終了日より後です'); return false; }
+  if(!from||!to){ alert('開始日・終了日を入力してください'); return {ok:false}; }
+  if(from>to){ alert('開始日が終了日より後です'); return {ok:false}; }
   const days=printRangeDaysInclusive_(from, to);
   if(days>KAIGO_PRINT_PULL_MAX_DAYS){
     alert('期間は最大3か月（'+KAIGO_PRINT_PULL_MAX_DAYS+'日）までです');
-    return false;
+    return {ok:false};
   }
   const names=getPrintFetchSelectedResidents_();
   const resKey=printPullResidentFilterKey_(names);
   const statusEl=document.getElementById('printFetchStatus');
+  _printPullBusy=true;
   if(statusEl) statusEl.textContent='取り寄せ中…（本番＋アーカイブ）';
   showBriefToast('記録を取り寄せ中…', 15000);
   try{
@@ -3564,7 +3597,7 @@ async function fetchPrintPullRange(manual){
     if(sheetLooksLikeCorruptMarker(raw)){
       alert('スプレッドシートの形式エラーのため取得できませんでした');
       if(statusEl) statusEl.textContent='';
-      return false;
+      return {ok:false};
     }
     const remote=sheetToDb(raw);
     _printPullOverlay={
@@ -3580,7 +3613,6 @@ async function fetchPrintPullRange(manual){
     const n=_printPullOverlay.recordRowCount;
     const msg=formatPrintPullRangeStatusMsg_(from, to, n, roundTripMs, pullTiming);
     if(statusEl) statusEl.textContent=msg;
-    showBriefToast('取り寄せ完了：RECORD '+n+' 行', 5000);
     refreshPrintResidentSelectsFromOverlay_();
     const vf=document.getElementById('printVitalFrom');
     const vt=document.getElementById('printVitalTo');
@@ -3590,19 +3622,30 @@ async function fetchPrintPullRange(manual){
     if(vt) vt.value=to;
     if(cf) cf.value=from;
     if(ct) ct.value=to;
-    return true;
+  const pullMsg=manual
+    ?'取り寄せ完了。印刷プレビューを押してください。'
+    :'取り寄せ完了。もう一度「印刷プレビュー」を押してください。';
+  showBriefToast(pullMsg, manual?5000:8000);
+    return {ok:true, pulled:true};
   }catch(e){
     console.error('fetchPrintPullRange', e);
     if(statusEl) statusEl.textContent='取り寄せ失敗';
     alert('取り寄せに失敗しました。\n'+String(e&&e.message||e));
-    return false;
+    return {ok:false};
+  } finally {
+    _printPullBusy=false;
   }
 }
 
-async function ensurePrintPullRangeData_(from, to, singleResName){
+/**
+ * 印刷前の取り寄せ確認。
+ * stopAfterPull: 今回取り寄せした場合は印刷せず2回目の押下を促す
+ */
+async function ensurePrintPullRangeData_(from, to, singleResName, opts){
+  opts=opts||{};
   const names=singleResName&&singleResName!=='__all__'?[singleResName]:[];
   const resKey=printPullResidentFilterKey_(names);
-  if(printPullOverlayCovers_(from, to, resKey)) return true;
+  if(printPullOverlayCovers_(from, to, resKey)) return {ready:true, pulled:false};
   if(_printPullOverlay){
     const ok=confirm(
       '印刷期間が、取り寄せ済みの範囲外か利用者条件が異なります。\n'+
@@ -3610,7 +3653,7 @@ async function ensurePrintPullRangeData_(from, to, singleResName){
       '印刷指定: '+from+'〜'+to+'\n\n'+
       'いまの条件で再取り寄せしますか？'
     );
-    if(!ok) return false;
+    if(!ok) return {ready:false, pulled:false};
   }
   const ff=document.getElementById('printFetchFrom');
   const ft=document.getElementById('printFetchTo');
@@ -3625,7 +3668,12 @@ async function ensurePrintPullRangeData_(from, to, singleResName){
       });
     }
   }
-  return fetchPrintPullRange(false);
+  const r=await fetchPrintPullRange(false);
+  if(!r||!r.ok) return {ready:false, pulled:false};
+  if(opts.stopAfterPull){
+    return {ready:false, pulled:true, needSecondClick:true};
+  }
+  return {ready:true, pulled:true};
 }
 
 /** 複数Googleアカウントの /u/N/ 自動リダイレクト404対策。authuser=0 を付けて主アカウントに固定 */
@@ -11331,7 +11379,8 @@ async function printVitalRange(){
   const to=document.getElementById('printVitalTo').value;
   const resName=document.getElementById('printVitalRes').value;
   if(!from||!to){ alert('期間を入力してください'); return; }
-  if(!(await ensurePrintPullRangeData_(from, to, resName))) return;
+  const pull=await ensurePrintPullRangeData_(from, to, resName, {stopAfterPull:true});
+  if(!pull.ready) return;
   const dates=getDatesInRange(from,to);
   const targets=getPrintTargetResidents_(resName);
   const out=[];
@@ -11386,7 +11435,8 @@ async function printCareRange(){
   const resName=document.getElementById('printCareRes')?.value||'__all__';
   const onlyLw=!!document.getElementById('printCareLwOnly')?.checked;
   if(!from||!to){ alert('期間を入力してください'); return; }
-  if(!(await ensurePrintPullRangeData_(from, to, resName))) return;
+  const pull=await ensurePrintPullRangeData_(from, to, resName, {stopAfterPull:true});
+  if(!pull.ready) return;
   const dates=getDatesInRange(from,to);
   const titleSuffix=onlyLw?'（LINE WORKS共有済みケアのみ）':'';
   let html=`${lostRecordNoticeHtml_(from, to)}<div class="print-title">${FAC.name} ケア記録サマリー ${from} ～ ${to}${titleSuffix}</div>`;
@@ -11575,7 +11625,7 @@ async function printCareRange(){
         const recBody=getRecSummaryText(rc);
         rawRows.push({
           dk:dateKey,
-          t:normalizeTimeText(rc&&rc.time)||'15:00',
+          t:normalizeTimeText(rc&&rc.time)||'',
           cat:'レク',
           body:recBody,
           staff:(rc&&rc.staff)||'',
