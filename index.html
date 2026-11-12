@@ -1689,7 +1689,7 @@ const REC = {
 const N_RECORD_COLS = 57;
 
 /** デプロイのたびに上げる（設定→データ管理の「アプリ情報」で表示） */
-const APP_VERSION='1.7.16';
+const APP_VERSION='1.7.17';
 /** pull取得・ローカル整理の記録保持日数（同期） */
 const KAIGO_PULL_LIMIT_DAYS=14;
 /** 運営指導用：印刷時に「記録が失われた期間」の注記（後から追加・修正可） */
@@ -11316,6 +11316,16 @@ function getRecSummaryText(rc){
   return lines.join('\n').trim();
 }
 
+/** ケア記録サマリー印刷：レク行が出力対象か */
+function printCareRecRowHasContent_(rec){
+  if(!rec||typeof rec!=='object') return false;
+  const rc=rec.rec;
+  if(!rc||typeof rc!=='object') return false;
+  if(getRecSummaryText(rc)) return true;
+  if(String(rc.time||'').trim()) return true;
+  return false;
+}
+
 async function printVitalRange(){
   const from=document.getElementById('printVitalFrom').value;
   const to=document.getElementById('printVitalTo').value;
@@ -11558,13 +11568,40 @@ async function printCareRange(){
           _key:'c:'+(c.id||(c.time+'|'+content))
         });
       });
+
+      // レクリエーション（1日1件・時刻／チップ／部位／内容）
+      if(printCareRecRowHasContent_(rec)){
+        const rc=rec.rec;
+        const recBody=getRecSummaryText(rc);
+        rawRows.push({
+          dk:dateKey,
+          t:normalizeTimeText(rc&&rc.time)||'15:00',
+          cat:'レク',
+          body:recBody,
+          staff:(rc&&rc.staff)||'',
+          _key:'rec:'+dateKey+':'+(rc&&rc._u||'')+':'+recBody
+        });
+      }
+
+      // 1日の様子（日誌）
+      const dayTxt=String(rec.day||'').trim();
+      if(dayTxt){
+        rawRows.push({
+          dk:dateKey,
+          t:'',
+          cat:'1日の様子',
+          body:dayTxt,
+          staff:rec.dayWriter||'',
+          _key:'day:'+dateKey+':'+(rec._dayU||'')+':'+dayTxt.slice(0,120)
+        });
+      }
     });
 
     // 重複除去（id / 内容キーで）
     const deduped=dedupePrintRows(rawRows, row=>[dispName,row.dk,row._key,row.cat,row.t,row.body,row.staff].join('|'));
 
     // 日付→時刻→項目順にソート
-    const catOrder={'バイタル':1,'排泄':2,'入浴':3,'朝食':4,'昼食':5,'夕食':6,'服薬':7,'ケア記録':8};
+    const catOrder={'バイタル':1,'排泄':2,'入浴':3,'朝食':4,'昼食':5,'夕食':6,'服薬':7,'ケア記録':8,'レク':9,'1日の様子':10};
     deduped.sort((a,b)=>{
       if(a.dk!==b.dk) return a.dk<b.dk?-1:1;
       const at=a.t||'99:99', bt=b.t||'99:99';
